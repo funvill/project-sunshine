@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Test stub for rpicam-still. STUB_RPICAM=ok|fail|hang  STUB_LUX=<lux>
+[[ -n "${STUB_CALLS:-}" ]] && echo "$*" >> "$STUB_CALLS"
+case "${STUB_RPICAM:-ok}" in
+  fail) echo "ERROR: *** no cameras available ***" >&2; exit 1 ;;
+  hang) sleep 30; exit 0 ;;
+esac
+out=""; meta=""; raw=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o) out="$2"; shift ;;
+    --metadata) meta="$2"; shift ;;
+    --raw) raw=1 ;;
+  esac
+  shift
+done
+printf 'jpegdata' > "$out"
+[[ $raw == 1 ]] && printf 'dngdata' > "${out%.jpg}.dng"
+[[ -n "$meta" ]] && printf '{\n    "ExposureTime": 1000,\n    "Lux": %s,\n    "AnalogueGain": 1.0\n}\n' "${STUB_LUX:-1000}" > "$meta"
+exit 0

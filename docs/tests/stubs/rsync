@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Test stub: STUB_RSYNC=ok (copy to STUB_NAS_DIR and remove source) | fail
+[[ "${STUB_RSYNC:-ok}" == fail ]] && { echo "ssh: connect to host nas.local port 22: No route to host" >&2; exit 255; }
+list=""
+for a in "$@"; do [[ "$a" == --files-from=* ]] && list="${a#--files-from=}"; done
+while IFS= read -r -d '' f; do
+  mkdir -p "$STUB_NAS_DIR/$(dirname "$f")"; cp "$f" "$STUB_NAS_DIR/$f"; rm -f "$f"
+done < "$list"

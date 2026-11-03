@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# df -P / df -Pm style output with STUB_DF_PCT used and STUB_DF_FREE_MB available.
+free="${STUB_DF_FREE_MB:-5000}"
+echo "Filesystem 1048576-blocks Used Available Capacity Mounted on"
+echo "/dev/x 10000 5000 $free ${STUB_DF_PCT:-10}% /"
