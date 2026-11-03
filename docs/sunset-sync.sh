@@ -3,7 +3,7 @@
 # If the NAS is down, frames pile up locally and catch up on the next run.
 set -euo pipefail
 
-OUT_ROOT="${OUT_ROOT:-/home/pi/sunset/outbox}"
+OUT_ROOT="${OUT_ROOT:-$HOME/sunset/outbox}"
 NAS_TARGET="${NAS_TARGET:-sunset@nas.local:/volume1/project-sunset/}"   # edit in sunset.env
 LOG_FILE="${SYNC_LOG_FILE:-$(dirname "$OUT_ROOT")/sync.log}"
 LOCK_FILE="${SYNC_LOCK_FILE:-$(dirname "$OUT_ROOT")/.sunset-sync.lock}"

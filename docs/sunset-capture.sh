@@ -4,7 +4,7 @@
 set -euo pipefail
 
 CAM_NAME="${CAM_NAME:-wide}"                     # wide | tight
-OUT_ROOT="${OUT_ROOT:-/home/pi/sunset/outbox}"
+OUT_ROOT="${OUT_ROOT:-$HOME/sunset/outbox}"
 LOG_FILE="${LOG_FILE:-$(dirname "$OUT_ROOT")/capture.log}"
 LOCK_FILE="${LOCK_FILE:-$(dirname "$OUT_ROOT")/.sunset-capture.lock}"
 NIGHT_LUX="${NIGHT_LUX:-5}"                       # below this lux, add a long exposure

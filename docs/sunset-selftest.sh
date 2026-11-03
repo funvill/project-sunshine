@@ -10,7 +10,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$HERE/sunset.env" ]] && { set -a; . "$HERE/sunset.env"; set +a; }
 
 CAM_NAME="${CAM_NAME:-wide}"
-OUT_ROOT="${OUT_ROOT:-/home/pi/sunset/outbox}"
+OUT_ROOT="${OUT_ROOT:-$HOME/sunset/outbox}"
 LOG_FILE="${LOG_FILE:-$(dirname "$OUT_ROOT")/capture.log}"
 NAS_TARGET="${NAS_TARGET:-sunset@nas.local:/volume1/project-sunset/}"
 NIGHT_LUX="${NIGHT_LUX:-5}"
