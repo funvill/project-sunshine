@@ -35,10 +35,11 @@ the UC-517 in the CAMERA port (between HDMI and the audio jack) and the Pi end o
 Pi's working v1 camera cable was.
 - Auto-detect does not find the UC-517. `camera_auto_detect=0` + `dtoverlay=imx477` does:
   `imx477 10-001a: Device found is imx477`, listed as 4056x3040 12-bit.
-- Full-resolution JPEG + DNG took 18.2 s on the Pi 3 B+ (`-t 3000`). The DNG was 24.8 MB; the
-  JPEG was 0.9 MB, but from a dark frame, so it is not a typical size.
-- The test frame was black (Lux 1.2). Lens, iris or lens cap not yet checked, so image output
-  is unverified.
+- Full-resolution JPEG + DNG on the Pi 3 B+ (`-t 3000`): 18.2 s for a first, dark frame (Lux 1.2,
+  black image with the lens not yet set up), then 6.7 s for a lit one. DNG 24.8 MB both times.
+  The lit JPEG was 1.4 MB, from a mostly dark, out-of-focus indoor scene, so not a typical size.
+- With the lens uncovered and aimed at a window (Lux 3365) it produced a real image, with no
+  obvious colour cast. Focus not yet set. One frame is not a check of the IR-cut filter.
 - The DISPLAY port looks like the CAMERA port but does not work for cameras.
 - Not yet shown on a Pi Zero W. Earlier Zero failures were not resolved; they were set aside
   when testing restarted.
