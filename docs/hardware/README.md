@@ -30,13 +30,16 @@ The photo is Arducam's / the retailer's, so it is not committed to this (public)
 Pi 3 end: use a 22-to-15-pin cable (Adafruit #3157).
 
 ## Pilot findings (2026-11-03)
-- UC-517 not detected on 2 Pi Zero W + 2 Pi 3B, several cables, both orientations at the
-  camera end, clean power: `imx477 10-001a: failed to read chip id 477, with error -121`.
-- Camera Module v1 (known good elsewhere) also not detected on the Pi 3 with auto-detect:
-  the shared factor (Pi-end cable orientation, Pi 3 camera port, or the SD card config) is
-  still unresolved.
-- Twice a Pi failed to come up with a ribbon fitted blue-up at both ends (once unreachable, once
-  no LED after a reflash, on a 5 V 2.5 A supply). Cause unconfirmed; suspect a reversed cable
-  shorting 3V3, which may also have damaged earlier hardware. The earlier "new power supply fixed
-  it" reading may have been a coincidence.
+Working reference: Pi 3 B+ Rev 1.3, Raspberry Pi OS Bookworm 32-bit (armv7l), kernel 6.12, with
+the UC-517 in the CAMERA port (between HDMI and the audio jack) and the Pi end oriented as that
+Pi's working v1 camera cable was.
+- Auto-detect does not find the UC-517. `camera_auto_detect=0` + `dtoverlay=imx477` does:
+  `imx477 10-001a: Device found is imx477`, listed as 4056x3040 12-bit.
+- Full-resolution JPEG + DNG took 18.2 s on the Pi 3 B+ (`-t 3000`). The DNG was 24.8 MB; the
+  JPEG was 0.9 MB, but from a dark frame, so it is not a typical size.
+- The test frame was black (Lux 1.2). Lens, iris or lens cap not yet checked, so image output
+  is unverified.
+- The DISPLAY port looks like the CAMERA port but does not work for cameras.
+- Not yet shown on a Pi Zero W. Earlier Zero failures were not resolved; they were set aside
+  when testing restarted.
 - The Pi Zero W has no power LED, only the green activity LED.
