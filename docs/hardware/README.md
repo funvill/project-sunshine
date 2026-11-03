@@ -36,7 +36,7 @@ Pi 3 end: use a 22-to-15-pin cable (Adafruit #3157).
   the shared factor (Pi-end cable orientation, Pi 3 camera port, or the SD card config) is
   still unresolved.
 - Twice a Pi failed to come up with a ribbon fitted blue-up at both ends (once unreachable, once
-  no LED after a reflash, 2-3 A class supply). Cause unconfirmed; suspect a reversed cable
+  no LED after a reflash, on a 5 V 2.5 A supply). Cause unconfirmed; suspect a reversed cable
   shorting 3V3, which may also have damaged earlier hardware. The earlier "new power supply fixed
   it" reading may have been a coincidence.
 - The Pi Zero W has no power LED, only the green activity LED.
