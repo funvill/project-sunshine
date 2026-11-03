@@ -1,0 +1,136 @@
+# Project Sunset — handoff for Claude Code
+
+Five-year time-lapse of the western sky from Steven's 23rd-floor window in Burnaby, BC,
+looking toward downtown Vancouver. **Sunset is the subject.** Start date: **winter solstice,
+2026-12-21**. Pilot should run by late November 2026.
+
+This file is the project brief. `README.md` is the Pi Zero setup guide.
+
+## Owner context
+- Steven: maker/hacker, CTO at a building-automation company. Comfortable with Linux,
+  networking, Home Assistant, 3D printing. Prefers direct, technically precise answers and
+  concrete deliverables; iterates and corrects incrementally.
+- Has a NAS (plenty of space), Home Assistant, a UniFi router, and a 3D printer.
+- Plans to stay at this address 5+ years. Budget ~CA$1,000 total.
+
+## Site
+- Window faces **due west** (confirmed). Double-glazed, doesn't open well.
+- Shooting **through the glass from inside**. Deck has power but nothing to mount to; indoor chosen.
+- Blinds stay open (plants nearby — also a humidity source for condensation).
+- Tall tower on the right of the view blocks some summer sunsets. **Accepted**; it doubles as a
+  fixed alignment reference.
+- Sun sets near the downtown skyline in autumn. Downtown is ~10–12 km away; the far
+  horizon mountains are 50 km+ (haze-limited).
+
+### Sun geometry (approximate, from memory — verify before relying on it)
+- Sunset azimuth ~233° (Dec solstice) to ~306° (Jun solstice): ~73° swing, centred on west.
+- Wide camera needs ≥ ~75° horizontal FOV, ideally ~90°+ for margin.
+- Magnetic declination in Vancouver ~16° E (phone compass must use true north).
+
+## Decisions made
+- Capture every **15 min, 24/7**, day and night.
+- **Denser capture around sunset** (~1/min for the hour around sunset, bracketed ×3) —
+  needs a faster Pi than the Zero; deferred to the real build.
+- **Two cameras eventually**: one wide (all sunsets), one tight (downtown or another subject).
+- Hidden, compact setup. DSLR/mirrorless considered and set aside for size/visibility,
+  though a used Sony a6300/a6400 tethered via gphoto2 remains the image-quality upgrade path.
+- Save **RAW (DNG) + JPEG + per-frame metadata**. Filenames in **UTC**.
+- **Local-first storage**, rsync to NAS, delete local only after confirmed copy.
+  (Writing straight to the NAS was rejected: a prior year-long Pi project lost frames when the
+  NAS share didn't return after a power cut.)
+- Monitoring: **Home Assistant alerts on the age of the newest file on the NAS** (> ~1 h).
+- Freeze software once stable: pinned OS, no auto-updates, full SD image saved on the NAS.
+- Mount: 3D printed in **PETG or ASA** (not PLA — sun heat), stuck to glass with **3M VHB**
+  (no suction cups), **keyed two-part design** so a replacement camera returns to the same framing,
+  **black foam hood sealed against the glass** to kill reflections, camera square to the glass.
+
+## Current phase: pilot on a Pi Zero W
+- **Pi Zero W v1.1**, one camera, 15-min captures only. Code in this repo.
+- **SD card for pilot: SanDisk Ultra 16 GB A1.** ~3–4 days of NAS-outage buffer at ~25 MB/frame.
+  Run an f3 / H2testw check first. Replace with a 64 GB High Endurance card for the real run.
+- Camera: an IMX477 (see inventory). Lens/framing TBD during pilot.
+
+### Pilot goals
+1. Window reflections with the foam hood, day and night (double-glazing ghosts).
+2. Night exposure: tune `NIGHT_LUX`, `NIGHT_SHUTTER_US`, `NIGHT_GAIN`.
+3. Condensation on cold winter glass.
+4. Zero performance: capture time, memory (may need `cma-128`), Wi-Fi reliability.
+5. NAS sync + Home Assistant alert end to end.
+6. Confirm framing/FOV of the chosen lens against the sunset swing.
+
+## Hardware inventory (on hand)
+- **Raspberry Pi Zero W v1.1** ×3 (one pilot, two spares). 512 MB, 2.4 GHz Wi-Fi only, ARMv6.
+- **Raspberry Pi 3 Model B v1.2** ×1 (HDMI + one USB port marked "X" — may be dead; fine headless).
+  Planned for the sunset camera later (Ethernet, enough CPU for bursts).
+- **Raspberry Pi 2 Model B** (on DIN bracket) — not recommended.
+- **Arducam UC-517 Rev.D3** — IMX477 (same sensor as Pi HQ) with a switchable **IR-cut filter**.
+  Keep IR-cut in day mode always; verify its state after power loss. Needs
+  `camera_auto_detect=0` + `dtoverlay=imx477`. Known detection issues reported on Pi 3 + Bookworm 64-bit.
+  Has an **unlabelled CS/C-mount lens** with iris ring; identify by measuring:
+  focal length (mm) ≈ 6.29 × distance ÷ visible width.
+- **Pi HQ Camera lenses (Adafruit):** 6 mm wide (#4563, ~55° H) and 16 mm telephoto (#4562, ~22° H).
+  Neither alone covers the 73° sunset swing. A ~3–4 mm CS lens (~90°) is the cheap fix.
+  Unclear whether an official Pi HQ camera body is owned or only the UC-517.
+- Cables: Pi Zero camera cable (Adafruit #3157, 22-pin — also fits Pi 5), standard 15-pin ribbon.
+- SD cards: SanDisk Ultra 16 GB A1 (pilot), ADATA 32 GB (backup choice), Kingston SDCS 16 GB
+  (spare/images), Kingston SDC10G2 16 GB (retire).
+- **Wyze Cam v2** ×several — not for this project (no RAW/manual control). Possible Home Assistant
+  cameras via Thingino firmware.
+- Sony NEX-5 and Samsung NX200: rejected (no USB remote control, mechanical shutter only).
+
+## Hardware plan for the real run (not yet bought)
+Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi 3/Zero:
+- **Sunset (wide) camera:** IMX477 + ~3–4 mm lens on the **Pi 3**, or Camera Module 3 Wide (~102°).
+  Upgrade path: used **Sony a6300** (has true silent/electronic shutter; must verify silent works
+  over USB PC Remote with gphoto2) + wide lens (e.g. Sony 10–18 mm).
+- **Tight (downtown) camera:** IMX477 + 16 mm lens on a **Pi Zero W** (~180 px/degree — best
+  distant detail of any option considered).
+- Sensors: SHT4x temp/humidity at the glass, TSL2591 lux sensor, MOSFET + dew-heater strip on GPIO.
+- 64 GB High Endurance SD cards, small UPS, spare camera of each type, ND filter for the 16 mm lens.
+- IP cameras considered: UniFi G6 Bullet (US$199, 1/1.8") and G6 Pro Bullet (US$479 / ~CA$685,
+  1/1.2", 2.36× zoom, ~114°–45.5° H). Good as an always-on backup record, but no RAW and heavy
+  processing. If used: disable IR and white LEDs (they reflect off the glass).
+
+## Risks and mitigations
+| Risk | Mitigation |
+|---|---|
+| Silent failure | HA alert on newest NAS file age; `capture.log` on the Pi |
+| NAS/Wi-Fi outage | Local-first capture, rsync catch-up |
+| Condensation | Humidity sensor, low-contrast "fog" frame detection, dew heater |
+| Software rot | Frozen OS image on NAS |
+| SD wear | High Endurance card for the real run |
+| Bumps when watering plants | Keyed mount, post-alignment against the tower |
+| Sun damage on telephoto | Skip/short-expose frames when the sun is in the 16 mm FOV; ND filter |
+| Heat | PETG/ASA mount, temperature logging |
+| Privacy (tight camera into neighbours' windows) | Frame to avoid, or blur before publishing |
+
+## Backlog for Claude Code
+1. Add a **disk-space guard** to `sunset-capture.sh`: drop DNG above ~85% full, skip non-essential
+   captures above ~95%.
+2. Add a **sun-position module** (e.g. `astral` or a NOAA formula): sunset time for burst
+   scheduling, and sun azimuth/elevation written into each frame's metadata.
+3. **Sunset burst mode** (1/min, 3-shot bracket) — for the Pi 3, not the Zero.
+4. **Sensor protection** for the telephoto camera based on sun azimuth vs. its FOV.
+5. **Fog detection**: flag low-contrast frames.
+6. Port capture to **Picamera2** if finer control is needed than `rpicam-still` gives.
+7. SHT4x + TSL2591 logging.
+8. Home Assistant config for the stale-file alert.
+9. Mount design: start from Printables model 250692 or design a keyed plate + foam hood.
+10. Post-processing pipeline: deflicker, stabilisation, "sunset along the horizon" sequence
+    (frame nearest each sunset), time slices, sky calendar.
+
+## Creative outputs (later)
+- Long time-lapse video (deflicker + stabilise).
+- **Key piece:** the sun swinging along the horizon between solstices, frame nearest each sunset.
+- Time slices (straight, curved, radial). Sky calendar (row = day, column = time of day).
+- Data overlays from temp/humidity/lux logs plus historical weather pulled later.
+- Prior art: Eirik Solheim (year in one image), Dan Marker-Moore, Richard Silver, Fong Qi Wei,
+  Miska Knapek (slit-scan), Wendy Liu (Python/ImageMagick time slices),
+  github.com/pconwell/rpi-long-timelapse (year-long Pi run lessons).
+
+## Unverified numbers
+Sunset azimuths, magnetic declination, lens FOVs and per-frame sizes above were estimated, not
+measured. Confirm during the pilot before printing the mount or buying lenses.
+
+## Related
+- A project doc also exists as a Claude Docs artifact titled "Project Sunset" (overview + shopping list).

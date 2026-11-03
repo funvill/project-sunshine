@@ -1,0 +1,11 @@
+[Unit]
+Description=Project Sunset sync to NAS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+EnvironmentFile=-/home/pi/sunset/sunset.env
+ExecStart=/home/pi/sunset/sunset-sync.sh
+TimeoutStartSec=1800

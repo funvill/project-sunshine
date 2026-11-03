@@ -1,0 +1,9 @@
+[Unit]
+Description=Project Sunset capture every 15 minutes
+
+[Timer]
+OnCalendar=*:00/15
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
