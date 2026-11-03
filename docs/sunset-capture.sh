@@ -14,6 +14,9 @@ SAVE_RAW="${SAVE_RAW:-1}"                         # 1 = also save DNG
 CAPTURE_TIMEOUT_S="${CAPTURE_TIMEOUT_S:-60}"      # per rpicam-still call
 REQUIRE_TIME_SYNC="${REQUIRE_TIME_SYNC:-1}"       # 1 = refuse to capture until the clock has synced this boot
 CLOCK_OK_FILE="${CLOCK_OK_FILE:-/dev/shm/sunset-clock-ok}"   # tmpfs: cleared on every boot
+DISK_DROP_RAW_PCT="${DISK_DROP_RAW_PCT:-85}"      # at/above this % full, stop saving DNG
+DISK_SKIP_NIGHT_PCT="${DISK_SKIP_NIGHT_PCT:-95}"  # at/above this % full, skip the night frame
+DISK_MIN_FREE_MB="${DISK_MIN_FREE_MB:-100}"       # below this, skip everything (keep the OS and log writable)
 
 log() { echo "$(date -u +%FT%TZ) cam=$CAM_NAME $*" >> "$LOG_FILE" 2>/dev/null || true; }
 
@@ -58,8 +61,28 @@ find "$STAGE" -type f -mmin +60 -delete 2>/dev/null || true   # leftovers from a
 BASE="$STAGE/$NAME"
 ERR_FILE="$STAGE/.last-error"
 
+# Disk guard. Percent is df's own "Use%" for the outbox filesystem, i.e. what the
+# non-root pi user can actually still write. Space is shed in order: DNG first
+# (biggest, JPEG+JSON still tell the story), then the night frame, then everything.
+disk_used_pct() { df -P "$OUT_ROOT" | awk 'NR==2{gsub("%","",$5); print $5+0}'; }
+disk_free_mb()  { df -Pm "$OUT_ROOT" | awk 'NR==2{print $4+0}'; }
+
+DISK_PCT="$(disk_used_pct)"
+FREE_MB="$(disk_free_mb)"
+if (( FREE_MB < DISK_MIN_FREE_MB )); then
+  log "SKIPPED: disk full (${DISK_PCT}% used, ${FREE_MB} MB free < ${DISK_MIN_FREE_MB} MB) - nothing captured"
+  exit 1
+fi
+
 RAW_ARGS=()
-[[ "$SAVE_RAW" == "1" ]] && RAW_ARGS=(--raw)
+RAW=0
+if [[ "$SAVE_RAW" == "1" ]]; then
+  if (( DISK_PCT >= DISK_DROP_RAW_PCT )); then
+    log "DISK ${DISK_PCT}% >= ${DISK_DROP_RAW_PCT}%: dropping DNG for this frame"
+  else
+    RAW_ARGS=(--raw); RAW=1
+  fi
+fi
 
 # run_cam <rpicam-still args...>: bounded, stderr kept for the log.
 run_cam() {
@@ -88,6 +111,7 @@ run_cam -n -t 3000 ${RAW_ARGS[@]+"${RAW_ARGS[@]}"} \
 [[ "$RC" == 0 ]] || fail "capture" "$RC"
 [[ -s "$BASE.jpg" ]] || fail "capture(empty jpg)" 0
 publish "$BASE"
+RAW_DAY="$RAW"
 
 # 2) Read the scene lux the camera reported (9999 = unknown, so no night shot).
 LUX="$(sed -n 's/.*"Lux"[[:space:]]*:[[:space:]]*\([0-9.eE+-]*\).*/\1/p' "$DAY_DIR/$NAME.json" 2>/dev/null | head -n 1)"
@@ -95,7 +119,18 @@ LUX="${LUX:-9999}"
 
 # 3) Too dark? Add a fixed long exposure (Pi auto-exposure underexposes at night).
 NIGHT=0
-if awk -v l="$LUX" -v n="$NIGHT_LUX" 'BEGIN{exit !(l+0 < n+0)}'; then
+DARK=0
+awk -v l="$LUX" -v n="$NIGHT_LUX" 'BEGIN{exit !(l+0 < n+0)}' && DARK=1
+if (( DARK )); then
+  DISK_PCT="$(disk_used_pct)"            # the day frame just used some space
+fi
+if (( DARK )) && (( DISK_PCT >= DISK_SKIP_NIGHT_PCT )); then
+  log "DISK ${DISK_PCT}% >= ${DISK_SKIP_NIGHT_PCT}%: skipping night frame"
+elif (( DARK )); then
+  if [[ "$RAW" == 1 ]] && (( DISK_PCT >= DISK_DROP_RAW_PCT )); then
+    RAW_ARGS=(); RAW=0
+    log "DISK ${DISK_PCT}% >= ${DISK_DROP_RAW_PCT}%: dropping DNG for night frame"
+  fi
   RC=0
   run_cam -n -t 1000 ${RAW_ARGS[@]+"${RAW_ARGS[@]}"} \
     --shutter "$NIGHT_SHUTTER_US" --gain "$NIGHT_GAIN" --awbgains 1.6,1.8 \
@@ -113,4 +148,4 @@ fi
 
 # 4) Log SoC temperature and capture status for the long-term data layer.
 TEMP="$( (vcgencmd measure_temp 2>/dev/null || true) | cut -d= -f2)"
-log "lux=$LUX soc=${TEMP:-na} night=$NIGHT ok"
+log "lux=$LUX soc=${TEMP:-na} disk=${DISK_PCT}% raw=$RAW_DAY night=$NIGHT ok"

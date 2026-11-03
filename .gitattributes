@@ -5,3 +5,4 @@
 *.timer   text eol=lf
 *.example text eol=lf
 *.md      text eol=lf
+docs/tests/stubs/* text eol=lf
