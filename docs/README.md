@@ -86,6 +86,13 @@ python3 sunset-sun.py sunset --json     # plus sunset azimuth
 python3 sunset-sun.py position          # sun now
 ```
 
+### Setting focus
+With a monitor on the Pi, in a terminal on the Pi itself, for a live view zoomed 5x into the centre:
+`rpicam-hello -t 0 --roi 0.4,0.4,0.2,0.2`
+Over SSH with no monitor: `python3 sunset-focus.py` prints a sharpness score per reading; aim at
+something distant with fine detail and stop at the highest score. Either way, stop the capture
+timer first, since only one program can use the camera at a time.
+
 ### Tests (no Pi needed)
 `bash tests/run.sh` runs the scripts against stub `rpicam-still`/`rsync`/`df`/`ssh`.
 

@@ -25,3 +25,6 @@ check "sun=nosite logged" grep -q 'sun=nosite' "$LOG_FILE"
 
 section "sun module unit tests"
 check "tests/test_sun.py" python3 -I "$HERE/test_sun.py"
+
+section "focus tool unit tests"
+check "tests/test_focus.py" python3 -I "$HERE/test_focus.py"
