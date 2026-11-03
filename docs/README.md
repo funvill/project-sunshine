@@ -31,13 +31,17 @@ The NAS user only needs write access to the project share (rsync over SSH enable
 ## 4. Install
 ```
 mkdir -p /home/pi/sunset && cd /home/pi/sunset
-# copy sunset-capture.sh, sunset-sync.sh, sunset.env.example, systemd/ here
+# copy sunset-capture.sh, sunset-sync.sh, sunset-sun.py, sunset-selftest.sh,
+# sunset.env.example and systemd/ here
 chmod +x *.sh
-cp sunset.env.example sunset.env      # edit NAS_TARGET, CAM_NAME
+cp sunset.env.example sunset.env      # edit NAS_TARGET, CAM_NAME, SITE_LAT, SITE_LON
 sudo cp systemd/* /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now sunset-capture.timer sunset-sync.timer
 ```
+Run the self-test first (camera, clock, disk, memory, capture time, IR-cut, NAS):
+`./sunset-selftest.sh` (`--quick` skips the timed captures, `--no-nas` skips the NAS).
+
 Test immediately: `sudo systemctl start sunset-capture.service && ls -R outbox`
 Check schedule: `systemctl list-timers 'sunset*'`
 
@@ -45,14 +49,44 @@ Check schedule: `systemctl list-timers 'sunset*'`
 After a week of clean running: disable unattended upgrades and save a full
 SD card image to the NAS. That image is the recovery plan.
 
-## Output
+## Output (layout unchanged)
 ```
 outbox/<cam>/YYYY/MM/DD/<cam>_YYYYMMDDTHHMMSSZ.jpg   # auto exposure
                                               .dng   # RAW (SAVE_RAW=1)
                                               .json  # exposure, gain, lux, colour gains
                                          _night.*    # extra long exposure when dark
-capture.log                                          # one line per capture with lux + SoC temp
+capture.log                                          # one line per capture (see below)
+sync.log                                             # one line per sync run
 ```
+`.json` also carries a `Sun` block: true-north azimuth, elevation, nearest sunset and
+minutes from it, computed offline by `sunset-sun.py` from `SITE_LAT`/`SITE_LON`.
+The site coordinates themselves are not written into the frame files.
+
+Frames are written to `outbox/.partial/` and moved into place when complete; the
+sync ignores dot-directories, so it can never ship a half-written frame.
+
+`capture.log` line: `<utc> cam=wide lux=... soc=... disk=NN% raw=1 night=0 sun=az=...,el=... ok`,
+or `FAILED ...` / `SKIPPED ...` / `DISK ...` lines explaining what was dropped and why.
+
+### Safeguards
+- **Clock:** the Zero has no RTC, so after a power cut it boots with a stale clock.
+  Capture refuses to run (`SKIPPED: clock not synced`) until NTP has synced once this
+  boot; later NTP outages do not stop it. `REQUIRE_TIME_SYNC=0` disables this.
+- **Disk:** at 85% full or more the DNG is dropped, at 95% or more the night frame is
+  skipped, and with under 100 MB free nothing is captured. Tune with `DISK_DROP_RAW_PCT`,
+  `DISK_SKIP_NIGHT_PCT`, `DISK_MIN_FREE_MB`.
+- **Camera hang:** each `rpicam-still` call is limited to `CAPTURE_TIMEOUT_S` (60 s).
+
+### Next sunset, for scheduling
+```
+python3 sunset-sun.py sunset            # next sunset after now, UTC ISO
+python3 sunset-sun.py sunset --epoch    # Unix seconds
+python3 sunset-sun.py sunset --json     # plus sunset azimuth
+python3 sunset-sun.py position          # sun now
+```
+
+### Tests (no Pi needed)
+`bash tests/run.sh` runs the scripts against stub `rpicam-still`/`rsync`/`df`/`ssh`.
 
 ## Zero-specific limits
 - 12 MP JPEG + DNG takes several seconds: fine at 15 min, too slow for bracketed

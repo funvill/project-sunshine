@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Test stub: STUB_SSH=ok | fail | notwritable
+case "${STUB_SSH:-ok}" in
+  fail) echo "ssh: connect to host nas.local port 22: No route to host" >&2; exit 255 ;;
+  notwritable) exit 1 ;;
+esac
+echo writable

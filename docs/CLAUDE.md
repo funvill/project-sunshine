@@ -24,6 +24,9 @@ This file is the project brief. `README.md` is the Pi Zero setup guide.
 
 ### Sun geometry (approximate, from memory — verify before relying on it)
 - Sunset azimuth ~233° (Dec solstice) to ~306° (Jun solstice): ~73° swing, centred on west.
+  `sunset-sun.py` (NOAA equations, upper limb incl. refraction, ~49.25 N) gives **233.6°** and
+  **308.8°**: a ~75° swing, so the wide camera needs ≥ ~80° H FOV with margin. Still a
+  calculation, not a measurement: check it against the real sunset in the pilot.
 - Wide camera needs ≥ ~75° horizontal FOV, ideally ~90°+ for margin.
 - Magnetic declination in Vancouver ~16° E (phone compass must use true north).
 
@@ -34,7 +37,20 @@ This file is the project brief. `README.md` is the Pi Zero setup guide.
 - **Two cameras eventually**: one wide (all sunsets), one tight (downtown or another subject).
 - Hidden, compact setup. DSLR/mirrorless considered and set aside for size/visibility,
   though a used Sony a6300/a6400 tethered via gphoto2 remains the image-quality upgrade path.
-- Save **RAW (DNG) + JPEG + per-frame metadata**. Filenames in **UTC**.
+- Save **RAW (DNG) + JPEG + per-frame metadata**. Filenames in **UTC**. Layout unchanged:
+  `outbox/<cam>/YYYY/MM/DD/<cam>_<UTC>.{jpg,dng,json}` (+ `_night.*`). Frames are staged in
+  `outbox/.partial/` and moved into place when complete; the sync ignores dot-directories.
+- **Clock policy (decided in review, change if you disagree):** the Zero has no RTC. Capture
+  refuses to run until NTP has synced once since boot (`SKIPPED` in `capture.log`, exit 1), then
+  keeps going through later NTP outages. A gap is preferred to frames with a wrong UTC name.
+  `REQUIRE_TIME_SYNC=0` turns it off. A DS3231 RTC would remove the gap after power cuts
+  (not bought; your call).
+- **Disk guard:** ≥85% full drops the DNG, ≥95% skips the night frame, <100 MB free skips the
+  capture. All logged. Does not change the 15-min schedule.
+- **Per-frame sun data:** each `.json` gets a `Sun` block (true-north azimuth, elevation, nearest
+  sunset, minutes from sunset). Site coordinates live in `sunset.env` (`SITE_LAT`/`SITE_LON`,
+  currently approximate Burnaby, **set the real ones**) and are deliberately NOT written into
+  frame files, in case frames are ever published.
 - **Local-first storage**, rsync to NAS, delete local only after confirmed copy.
   (Writing straight to the NAS was rejected: a prior year-long Pi project lost frames when the
   NAS share didn't return after a power cut.)
@@ -64,7 +80,10 @@ This file is the project brief. `README.md` is the Pi Zero setup guide.
   Planned for the sunset camera later (Ethernet, enough CPU for bursts).
 - **Raspberry Pi 2 Model B** (on DIN bracket) — not recommended.
 - **Arducam UC-517 Rev.D3** — IMX477 (same sensor as Pi HQ) with a switchable **IR-cut filter**.
-  Keep IR-cut in day mode always; verify its state after power loss. Needs
+  Keep IR-cut in day mode always; verify its state after power loss. Per Arducam's product
+  page the filter is switched automatically by a photoresistor on the camera PCB, so there is no
+  software state to read (a forum user wired GPIO after removing the photoresistor; unverified
+  for this board). `sunset-selftest.sh` therefore judges it from image colour (heuristic). Needs
   `camera_auto_detect=0` + `dtoverlay=imx477`. Known detection issues reported on Pi 3 + Bookworm 64-bit.
   Has an **unlabelled CS/C-mount lens** with iris ring; identify by measuring:
   focal length (mm) ≈ 6.29 × distance ÷ visible width.
@@ -105,10 +124,10 @@ Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi
 | Privacy (tight camera into neighbours' windows) | Frame to avoid, or blur before publishing |
 
 ## Backlog for Claude Code
-1. Add a **disk-space guard** to `sunset-capture.sh`: drop DNG above ~85% full, skip non-essential
-   captures above ~95%.
-2. Add a **sun-position module** (e.g. `astral` or a NOAA formula): sunset time for burst
-   scheduling, and sun azimuth/elevation written into each frame's metadata.
+1. ~~Disk-space guard~~ **Done** (`sunset-capture.sh`, tested in `tests/`).
+2. ~~Sun-position module~~ **Done**: `sunset-sun.py` (stdlib NOAA formula, no network). Writes the
+   `Sun` block per frame; `sunset-sun.py sunset [--epoch|--json]` gives the next sunset for burst
+   scheduling (backlog #3).
 3. **Sunset burst mode** (1/min, 3-shot bracket) — for the Pi 3, not the Zero.
 4. **Sensor protection** for the telephoto camera based on sun azimuth vs. its FOV.
 5. **Fog detection**: flag low-contrast frames.
@@ -127,6 +146,12 @@ Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi
 - Prior art: Eirik Solheim (year in one image), Dan Marker-Moore, Richard Silver, Fong Qi Wei,
   Miska Knapek (slit-scan), Wendy Liu (Python/ImageMagick time slices),
   github.com/pconwell/rpi-long-timelapse (year-long Pi run lessons).
+
+## Testing
+`bash tests/run.sh` (offline, stubbed camera/NAS) and `python3 tests/test_sun.py`. On the Pi,
+`./sunset-selftest.sh` checks camera, clock, disk, memory, capture time, IR-cut and NAS.
+Its thresholds (30 s slow capture, 60 MB low memory, R/G 1.25 for IR-cut) are estimates to tune
+from pilot data.
 
 ## Unverified numbers
 Sunset azimuths, magnetic declination, lens FOVs and per-frame sizes above were estimated, not
