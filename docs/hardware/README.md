@@ -40,6 +40,11 @@ Pi's working v1 camera cable was.
   The lit JPEG was 1.4 MB, from a mostly dark, out-of-focus indoor scene, so not a typical size.
 - With the lens uncovered and aimed at a window (Lux 3365) it produced a real image, with no
   obvious colour cast. Focus not yet set. One frame is not a check of the IR-cut filter.
+- Focused by hand on the distant view through the window: tower balconies resolve at full size.
+  Full-resolution JPEG + DNG took 7.1 s; JPEG 1.4 MB, DNG 24.8 MB. Colour looks natural (orange
+  horizon, grey cloud, no magenta cast), which fits the IR-cut filter being in, but is not proof.
+- That frame has a small bright dash in the sky, possibly a reflection in the glass. The lens was
+  unhooded. Compare with the foam hood during the pilot.
 - The DISPLAY port looks like the CAMERA port but does not work for cameras.
 - Not yet shown on a Pi Zero W. Earlier Zero failures were not resolved; they were set aside
   when testing restarted.
