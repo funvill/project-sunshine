@@ -10,7 +10,8 @@ Local-first, so a NAS or Wi-Fi outage never loses frames.
 - Lens focus locked at infinity, iris taped. UC-517: keep the IR-cut filter in day mode.
 
 ## 2. OS
-- Flash Raspberry Pi OS Lite (32-bit). In Imager set hostname, Wi-Fi, SSH and user `pi`.
+- Flash Raspberry Pi OS Lite (32-bit). In Imager set hostname `sunshine`, Wi-Fi (2.4 GHz), SSH (key) and user `pi`.
+  Then `ssh pi@sunshine.local`.
 - `sudo apt update && sudo apt install -y rpicam-apps-lite rsync python3`
 - `/boot/firmware/config.txt`:
   - Official Pi HQ: leave `camera_auto_detect=1`.

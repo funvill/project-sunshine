@@ -61,7 +61,8 @@ This file is the project brief. `README.md` is the Pi Zero setup guide.
   **black foam hood sealed against the glass** to kill reflections, camera square to the glass.
 
 ## Current phase: pilot on a Pi Zero W
-- **Pi Zero W v1.1**, one camera, 15-min captures only. Code in this repo.
+- **Pi Zero W v1.1**, one camera, 15-min captures only. Code in this repo. Hostname: `sunshine`
+  (`ssh pi@sunshine.local`).
 - **SD card for pilot: SanDisk Ultra 16 GB A1.** ~3–4 days of NAS-outage buffer at ~25 MB/frame.
   Run an f3 / H2testw check first. Replace with a 64 GB High Endurance card for the real run.
 - Camera: an IMX477 (see inventory). Lens/framing TBD during pilot.
