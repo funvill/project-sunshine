@@ -97,6 +97,23 @@ fail() { # fail <what> <rc>
   exit 1
 }
 
+# Add sun azimuth/elevation (true north) and minutes from sunset to a frame's JSON.
+# Pure arithmetic, no network. A failure here must never cost the frame.
+SUN_PY="${SUN_PY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sunset-sun.py}"
+SUN="na"
+add_sun() { # add_sun <json>
+  local out
+  if [[ -z "${SITE_LAT:-}" || -z "${SITE_LON:-}" ]]; then
+    SUN="nosite"; return 0
+  fi
+  if out="$(python3 "$SUN_PY" annotate "$1" --time "$TS" 2>"$ERR_FILE")"; then
+    SUN="${out// /,}"
+  else
+    SUN="err"
+    log "WARN sun annotate failed: $(tail -n 1 "$ERR_FILE" 2>/dev/null)"
+  fi
+}
+
 # Move one finished set of files from .partial to the day directory.
 publish() { # publish <prefix-glob-base>
   mkdir -p "$DAY_DIR"
@@ -110,6 +127,7 @@ run_cam -n -t 3000 ${RAW_ARGS[@]+"${RAW_ARGS[@]}"} \
   -o "$BASE.jpg" || RC=$?
 [[ "$RC" == 0 ]] || fail "capture" "$RC"
 [[ -s "$BASE.jpg" ]] || fail "capture(empty jpg)" 0
+add_sun "$BASE.json"
 publish "$BASE"
 RAW_DAY="$RAW"
 
@@ -137,6 +155,7 @@ elif (( DARK )); then
     --metadata "${BASE}_night.json" --metadata-format json \
     -o "${BASE}_night.jpg" || RC=$?
   if [[ "$RC" == 0 && -s "${BASE}_night.jpg" ]]; then
+    add_sun "${BASE}_night.json"
     publish "${BASE}_night"
     NIGHT=1
   else
@@ -148,4 +167,4 @@ fi
 
 # 4) Log SoC temperature and capture status for the long-term data layer.
 TEMP="$( (vcgencmd measure_temp 2>/dev/null || true) | cut -d= -f2)"
-log "lux=$LUX soc=${TEMP:-na} disk=${DISK_PCT}% raw=$RAW_DAY night=$NIGHT ok"
+log "lux=$LUX soc=${TEMP:-na} disk=${DISK_PCT}% raw=$RAW_DAY night=$NIGHT sun=$SUN ok"
