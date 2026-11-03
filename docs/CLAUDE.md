@@ -60,23 +60,36 @@ This file is the project brief. `README.md` is the Pi Zero setup guide.
   (no suction cups), **keyed two-part design** so a replacement camera returns to the same framing,
   **black foam hood sealed against the glass** to kill reflections, camera square to the glass.
 
-## Current phase: pilot on a Pi Zero W
-- **Pi Zero W v1.1**, one camera, 15-min captures only. Code in this repo. Hostname: `sunshine`
-  (`ssh pi@sunshine.local`).
-- **SD card for pilot: SanDisk Ultra 16 GB A1.** ~3–4 days of NAS-outage buffer at ~25 MB/frame.
-  Run an f3 / H2testw check first. Replace with a 64 GB High Endurance card for the real run.
-- Camera: an IMX477 (see inventory). Lens/framing TBD during pilot.
+## Current phase: pilot on a Pi 3 B+ (decision changed 2026-11-03)
+- **Pilot moved from the Pi Zero W to a Pi 3 B+ Rev 1.3**, hostname `timelaps`, user `funvill`,
+  because that is the setup where the UC-517 is known to work. Raspberry Pi OS Bookworm 32-bit
+  (armv7l), not reflashed. On Ethernet and Wi-Fi. Clock zone is America/Adak; filenames are UTC.
+- **Camera: Arducam UC-517** in the CAMERA port, `camera_auto_detect=0` + `dtoverlay=imx477`
+  (auto-detect does not find it). Manually focused on the distant view.
+- 15-min captures only for now: burst mode (backlog #3) still needs a schedule decision.
+- The Zero W path is no longer the target. The scripts have no Zero-specific code, but this camera
+  has not been shown working on a Zero. See `hardware/README.md`.
+- **SD card:** a 32 GB card with ~21 GB free, about 8 days of day frames at ~26 MB/frame (fewer
+  with night frames). Model not yet recorded. Run a write test and replace with a High Endurance
+  card for the real run (a buying decision).
+- This Pi previously ran `~/capture_and_sync.sh` from cron (30-min frames to `~/Pictures`, NAS sync
+  commented out; its newest frame before today was from 2025-05-27). That job is disabled in cron,
+  not deleted, and its frames are still in `~/Pictures`.
+- **Not done yet:** NAS target, sync test, enabling the timers.
 
 ### Pilot goals
 1. Window reflections with the foam hood, day and night (double-glazing ghosts).
 2. Night exposure: tune `NIGHT_LUX`, `NIGHT_SHUTTER_US`, `NIGHT_GAIN`.
 3. Condensation on cold winter glass.
-4. Zero performance: capture time, memory (may need `cma-128`), Wi-Fi reliability.
+4. Pi performance: capture time, memory, Wi-Fi or Ethernet reliability. First results on the
+   Pi 3 B+: ~7 s day shot and ~12 s night shot, each with DNG; DNG 24.8 MB.
 5. NAS sync + Home Assistant alert end to end.
 6. Confirm framing/FOV of the chosen lens against the sunset swing.
 
 ## Hardware inventory (on hand)
-- **Raspberry Pi Zero W v1.1** ×3 (one pilot, two spares). 512 MB, 2.4 GHz Wi-Fi only, ARMv6.
+- **Raspberry Pi 3 Model B+ Rev 1.3** (`timelaps`), the pilot Pi. 1 GB. Has Ethernet.
+- **Raspberry Pi Zero W v1.1** ×3 (spares; one was the original pilot). 512 MB, 2.4 GHz Wi-Fi only,
+  ARMv6. No power LED, only the green activity LED.
 - **Raspberry Pi 3 Model B v1.2** ×1 (HDMI + one USB port marked "X" — may be dead; fine headless).
   Planned for the sunset camera later (Ethernet, enough CPU for bursts).
 - **Raspberry Pi 2 Model B** (on DIN bracket) — not recommended.
@@ -84,7 +97,8 @@ This file is the project brief. `README.md` is the Pi Zero setup guide.
   Keep IR-cut in day mode always; verify its state after power loss. Per Arducam's product
   page the filter is switched automatically by a photoresistor on the camera PCB, so there is no
   software state to read (a forum user wired GPIO after removing the photoresistor; unverified
-  for this board). `sunset-selftest.sh` therefore judges it from image colour (heuristic). Needs
+  for this board). `sunset-selftest.sh` therefore judges it from image colour (heuristic). Has a
+  22-pin connector, not the 15-pin one on the official HQ camera. Needs
   `camera_auto_detect=0` + `dtoverlay=imx477`. Known detection issues reported on Pi 3 + Bookworm 64-bit.
   Has an **unlabelled CS/C-mount lens** with iris ring; identify by measuring:
   focal length (mm) ≈ 6.29 × distance ÷ visible width.

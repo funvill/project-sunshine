@@ -1,6 +1,9 @@
-# Project Sunset — Pi Zero W starter
+# Project Sunset — Pi setup
 
-One IMX477 camera (Pi HQ or Arducam UC-517) on a Pi Zero W v1.1.
+> **The pilot now runs on a Pi 3 B+ (`timelaps`), not a Zero.** See `CLAUDE.md`. Where this guide
+> says `pi`, use your own user; `install.sh` handles that for the systemd units.
+
+One IMX477 camera (Pi HQ or Arducam UC-517) on a Raspberry Pi.
 Captures every 15 minutes to the SD card, then syncs to the NAS every 5 minutes.
 Local-first, so a NAS or Wi-Fi outage never loses frames.
 
@@ -31,13 +34,13 @@ The NAS user only needs write access to the project share (rsync over SSH enable
 
 ## 4. Install
 ```
-mkdir -p /home/pi/sunset && cd /home/pi/sunset
+mkdir -p ~/sunset && cd ~/sunset
 # copy sunset-capture.sh, sunset-sync.sh, sunset-sun.py, sunset-selftest.sh,
 # sunset.env.example and systemd/ here
 chmod +x *.sh
 cp sunset.env.example sunset.env      # edit NAS_TARGET, CAM_NAME, SITE_LAT, SITE_LON
-sudo cp systemd/* /etc/systemd/system/
-sudo systemctl daemon-reload
+sudo ./install.sh --uc517    # installs units for your user; --uc517 sets the camera overlay
+sudo reboot                  # only needed if the camera config changed
 sudo systemctl enable --now sunset-capture.timer sunset-sync.timer
 ```
 Run the self-test first (camera, clock, disk, memory, capture time, IR-cut, NAS):

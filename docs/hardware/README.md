@@ -49,3 +49,8 @@ Pi's working v1 camera cable was.
 - Not yet shown on a Pi Zero W. Earlier Zero failures were not resolved; they were set aside
   when testing restarted.
 - The Pi Zero W has no power LED, only the green activity LED.
+
+## Pi 3 B+ end-to-end check (2026-11-03)
+Scripts and units installed on `timelaps`. Self-test: 15 pass, 0 warn, 0 fail (NAS skipped). Day
+shot 6.7 s, night shot 12.1 s, both with DNG. One capture through `sunset-capture.service` wrote
+JPEG, DNG and JSON with the `Sun` block. That test frame was deleted. Timers are not enabled.
