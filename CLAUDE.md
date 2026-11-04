@@ -91,7 +91,8 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   in 3 of 3 captures.
 - This Pi previously ran `~/capture_and_sync.sh` from cron (30-min frames to `~/Pictures`, NAS sync
   commented out; its newest frame before today was from 2025-05-27). That job is disabled in cron,
-  not deleted, and its frames are still in `~/Pictures`.
+  not deleted. Its frames and the empty desktop folders in the home folder are gone. `~/readme.md`
+  on the Pi explains what is there.
 - **NAS:** SMB share `//chipkin_nas.local/camera`, folder `project_sunshine`, user `camera`, not
   rsync over SSH (decision changed 2026-11-03). Automounted at `/mnt/nas-camera` via `/etc/fstab`;
   login in the root-only `/etc/sunset-nas.cred` on the Pi (never in this repo). Guest login was
