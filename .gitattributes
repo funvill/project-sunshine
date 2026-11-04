@@ -6,3 +6,4 @@
 *.example text eol=lf
 *.md      text eol=lf
 docs/tests/stubs/* text eol=lf
+docs/keep-packages.txt text eol=lf
