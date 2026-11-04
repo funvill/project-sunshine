@@ -54,3 +54,10 @@ Pi's working v1 camera cable was.
 Scripts and units installed on `timelaps`. Self-test: 15 pass, 0 warn, 0 fail (NAS skipped). Day
 shot 6.7 s, night shot 12.1 s, both with DNG. One capture through `sunset-capture.service` wrote
 JPEG, DNG and JSON with the `Sun` block. That test frame was deleted. Timers are not enabled.
+
+## NAS sync check (2026-11-03)
+SMB share over the Pi's network, user `camera`. One frame through the installed services: with the
+share stopped, the sync failed, kept all 3 files and wrote nothing under the mount point. With the
+share back, the sync caught up and removed the local copies; SHA-256 matched on all 3 files. After
+a reboot the share mounted on first access. That frame is on the NAS as
+`wide/2026/11/04/wide_20261104T001339Z.*`.

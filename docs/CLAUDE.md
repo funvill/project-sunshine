@@ -75,7 +75,11 @@ This file is the project brief. `README.md` is the Pi Zero setup guide.
 - This Pi previously ran `~/capture_and_sync.sh` from cron (30-min frames to `~/Pictures`, NAS sync
   commented out; its newest frame before today was from 2025-05-27). That job is disabled in cron,
   not deleted, and its frames are still in `~/Pictures`.
-- **Not done yet:** NAS target, sync test, enabling the timers.
+- **NAS:** SMB share `//chipkin_nas.local/camera`, folder `project_sunshine`, user `camera`, not
+  rsync over SSH (decision changed 2026-11-03). Automounted at `/mnt/nas-camera` via `/etc/fstab`;
+  login in the root-only `/etc/sunset-nas.cred` on the Pi (never in this repo). Guest login was
+  refused by the NAS. `sunset-sync.sh` refuses to run if the share is missing or on the SD card.
+- **Not done yet:** enabling the timers, final mounting and framing, foam hood, Home Assistant alert.
 
 ### Pilot goals
 1. Window reflections with the foam hood, day and night (double-glazing ghosts).

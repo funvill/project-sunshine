@@ -25,6 +25,19 @@ Local-first, so a NAS or Wi-Fi outage never loses frames.
 - Check NTP is on: `timedatectl status`. Files are named in UTC.
 
 ## 3. NAS access
+**SMB share (what the pilot uses).** Put the login in a root-only file, then automount the share and
+set `NAS_TARGET=/mnt/nas-camera/project_sunshine/`:
+```
+sudo install -m 600 -o root -g root /dev/null /etc/sunset-nas.cred
+sudo nano /etc/sunset-nas.cred      # username=...  and  password=...
+sudo mkdir -p /mnt/nas-camera
+# add to /etc/fstab (uid/gid are your user's), then: sudo systemctl daemon-reload
+//chipkin_nas.local/camera /mnt/nas-camera cifs credentials=/etc/sunset-nas.cred,vers=3.0,uid=1000,gid=1000,file_mode=0664,dir_mode=0775,nofail,_netdev,x-systemd.automount,x-systemd.idle-timeout=300,x-systemd.mount-timeout=30 0 0
+```
+The target folder must already exist on the share. The sync refuses to run if it is missing or on
+the SD card, so an absent mount keeps frames local instead of filling the card.
+
+**Or rsync over SSH:**
 ```
 ssh-keygen -t ed25519        # no passphrase
 ssh-copy-id sunset@nas.local
