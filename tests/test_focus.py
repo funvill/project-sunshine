@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-spec = importlib.util.spec_from_file_location("sunset_focus", os.path.join(os.path.dirname(HERE), "sunset-focus.py"))
+spec = importlib.util.spec_from_file_location("sunset_focus", os.path.join(os.path.dirname(HERE), "pi", "sunset-focus.py"))
 focus = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(focus)
 

@@ -4,7 +4,14 @@ Five-year time-lapse of the western sky from Steven's 23rd-floor window in Burna
 looking toward downtown Vancouver. **Sunset is the subject.** Start date: **winter solstice,
 2026-12-21**. Pilot should run by late November 2026.
 
-This file is the project brief. `README.md` is the Pi Zero setup guide.
+This file is the project brief. `docs/setup.md` is the Pi setup guide.
+
+## Repo layout
+- `pi/`: everything that runs on the Pi. Copied flat into `~/sunset`; the systemd units expect that path.
+- `tests/`: offline tests with a stubbed camera and NAS. They run on any machine, not on the Pi.
+- `docs/`: setup guide and hardware notes.
+
+Frames never go in this repo, and neither does `sunset.env`, which holds the real site coordinates.
 
 ## Owner context
 - Steven: maker/hacker, CTO at a building-automation company. Comfortable with Linux,
@@ -68,9 +75,9 @@ This file is the project brief. `README.md` is the Pi Zero setup guide.
   (auto-detect does not find it). Manually focused on the distant view.
 - 15-min captures only for now: burst mode (backlog #3) still needs a schedule decision.
 - The Zero W path is no longer the target. The scripts have no Zero-specific code, but this camera
-  has not been shown working on a Zero. See `hardware/README.md`.
+  has not been shown working on a Zero. See `docs/hardware/README.md`.
 - **OS (2026-11-03):** upgraded to kernel 6.12.109, rpicam-apps 1.9.0, libcamera 0.5. Desktop and
-  everything else not on `keep-packages.txt` removed: 1,624 to 362 packages, 6.5 GB to 1.4 GB used.
+  everything else not on `pi/keep-packages.txt` removed: 1,624 to 362 packages, 6.5 GB to 1.4 GB used.
   `sunset-lowwear.sh` applied. `cmdline.txt` had been empty for many boots (firmware defaults, no
   `fsck.repair`); it is now set. Kernels kept: v7 (this Pi) and v6 (Zero).
 - **SD card:** a 32 GB card (ID `SH32G`, make unknown) with ~26 GB free, about 10 days of frames

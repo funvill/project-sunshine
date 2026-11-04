@@ -10,7 +10,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.path.join(os.path.dirname(HERE), "sunset-sun.py")
+SCRIPT = os.path.join(os.path.dirname(HERE), "pi", "sunset-sun.py")
 spec = importlib.util.spec_from_file_location("sunset_sun", SCRIPT)
 sun = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sun)

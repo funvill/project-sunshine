@@ -3,7 +3,7 @@
 # Runs anywhere with bash + coreutils + python3 (no Pi needed):  bash tests/run.sh
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC="${SRC:-$(dirname "$HERE")}"
+SRC="${SRC:-$(dirname "$HERE")/pi}"
 PASS=0; FAIL=0
 
 ok()   { PASS=$((PASS+1)); }
