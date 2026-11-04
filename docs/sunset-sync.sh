@@ -32,6 +32,20 @@ if [[ ! -s "$LIST" ]]; then
 fi
 PENDING="$(tr -cd '\0' < "$LIST" | wc -c)"
 
+# A mounted share (NAS_TARGET=/mnt/...): if the mount is missing, that path is just a
+# directory on the SD card, and rsync would "succeed" and delete the local copies. Only
+# sync when the target exists already and is on a different filesystem from the outbox.
+if [[ "$NAS_TARGET" == /* ]]; then
+  if [[ ! -d "$NAS_TARGET" ]]; then
+    log "sync FAILED: $NAS_TARGET not available (share not mounted?) pending=$PENDING"
+    exit 1
+  fi
+  if [[ "$(stat -c %d "$NAS_TARGET")" == "$(stat -c %d "$OUT_ROOT")" ]]; then
+    log "sync FAILED: $NAS_TARGET is on the same disk as the outbox (share not mounted?) pending=$PENDING"
+    exit 1
+  fi
+fi
+
 # -rt, not -a: the NAS user usually cannot set owner/group/perms, and a failed
 # chown makes rsync exit 23 even though the data arrived.
 # --remove-source-files only removes a file after rsync has transferred it and

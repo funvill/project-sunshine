@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Test stub for stat -c %d: STUB_SAME_FS=1 reports every path on one device.
+[[ "${STUB_SAME_FS:-0}" == 1 ]] && { echo 1; exit 0; }
+printf '%s' "${@: -1}" | cksum | cut -d' ' -f1

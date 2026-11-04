@@ -214,6 +214,16 @@ fi
 head_ "NAS"
 if (( NO_NAS )); then
   info "skipped (--no-nas)"
+elif [[ "$NAS_TARGET" == /* ]]; then
+  if [[ ! -d "$NAS_TARGET" ]]; then
+    fail "NAS path $NAS_TARGET not available (share not mounted?): $(ls "$NAS_TARGET" 2>&1 | tail -n 1)"
+  elif [[ "$(stat -c %d "$NAS_TARGET")" == "$(stat -c %d "$OUT_ROOT")" ]]; then
+    fail "NAS path $NAS_TARGET is on the same disk as the outbox: the share is not mounted"
+  elif [[ ! -w "$NAS_TARGET" ]]; then
+    fail "NAS path $NAS_TARGET is mounted but not writable"
+  else
+    pass "NAS path $NAS_TARGET mounted and writable"
+  fi
 elif [[ "$NAS_TARGET" != *:* ]]; then
   fail "NAS_TARGET '$NAS_TARGET' is not user@host:/path"
 else
