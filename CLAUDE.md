@@ -96,7 +96,14 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   rsync over SSH (decision changed 2026-11-03). Automounted at `/mnt/nas-camera` via `/etc/fstab`;
   login in the root-only `/etc/sunset-nas.cred` on the Pi (never in this repo). Guest login was
   refused by the NAS. `sunset-sync.sh` refuses to run if the share is missing or on the SD card.
-- **Not done yet:** enabling the timers, final mounting and framing, foam hood, Home Assistant alert.
+- **Power (2026-11-03): undervoltage on `timelaps`, not fixed.** The Pi restart-looped until its USB
+  cable was changed. With the replacement cable and the camera connected, the kernel still reported
+  undervoltage three times in the first two minutes, with almost nothing running
+  (`throttled=0x50005`). In the same period the shell lost `ls` and `sudo` and SSH failed, probably
+  the SD card dropping out (unproven; those logs were in RAM). **Do not enable the timers until a
+  5.1 V 2.5 A supply is in place** and the flags stay clear through real captures.
+- **Not done yet:** a suitable power supply, enabling the timers, final mounting and framing, foam
+  hood, Home Assistant alert.
 
 ### Pilot goals
 1. Window reflections with the foam hood, day and night (double-glazing ghosts).
