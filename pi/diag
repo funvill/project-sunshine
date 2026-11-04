@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Temporary diagnostics page: live camera view and Pi health.
+#   diag          turn it on, or restart its 30-minute clock (the link changes)
+#   diag stop     turn it off
+#   diag status   say whether it is on, and give the link
+set -u
+UNIT=sunset-diag.service
+URL_FILE="${DIAG_URL_FILE:-/run/sunset-diag/url}"
+TRIES="${DIAG_WAIT_TRIES:-20}"
+
+case "${1:-start}" in
+  start)
+    sudo systemctl restart "$UNIT" || exit 1
+    for ((i = 0; i < TRIES; i++)); do
+      if [[ -s "$URL_FILE" ]]; then
+        echo "Diagnostics on for 30 minutes: $(cat "$URL_FILE")"
+        echo "Stop early with: diag stop"
+        exit 0
+      fi
+      sleep 0.5
+    done
+    echo "Diagnostics did not start. See: journalctl -u $UNIT" >&2
+    exit 1
+    ;;
+  stop)
+    sudo systemctl stop "$UNIT" || exit 1
+    echo "Diagnostics off."
+    ;;
+  status)
+    if [[ "$(systemctl is-active "$UNIT")" == active ]]; then
+      echo "Diagnostics on: $(cat "$URL_FILE" 2>/dev/null)"
+    else
+      echo "Diagnostics off."
+      exit 3
+    fi
+    ;;
+  *)
+    echo "usage: diag [start|stop|status]" >&2
+    exit 2
+    ;;
+esac

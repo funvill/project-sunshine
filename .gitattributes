@@ -5,5 +5,6 @@
 *.timer   text eol=lf
 *.example text eol=lf
 *.md      text eol=lf
+pi/diag text eol=lf
 tests/stubs/* text eol=lf
 pi/keep-packages.txt text eol=lf

@@ -1,0 +1,16 @@
+[Unit]
+Description=Project Sunset temporary diagnostics page
+
+# No [Install] section on purpose: this only ever runs when someone types `diag`.
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/sunset
+EnvironmentFile=-/home/pi/sunset/sunset.env
+ExecStart=/usr/bin/python3 /home/pi/sunset/sunset-diag.py
+# The link file holds the access key: in RAM, readable only by this user.
+RuntimeDirectory=sunset-diag
+RuntimeDirectoryMode=0700
+NoNewPrivileges=yes
+# The script exits cleanly after 30 minutes. This is only the backstop.
+RuntimeMaxSec=1860

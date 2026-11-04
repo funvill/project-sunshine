@@ -21,9 +21,10 @@ if (( UC517 )); then
   echo "camera: set camera_auto_detect=0 and dtoverlay=imx477 (backup: $CFG.sunset-backup). Reboot to apply."
 fi
 
-for u in sunset-capture.service sunset-capture.timer sunset-sync.service sunset-sync.timer; do
+for u in sunset-capture.service sunset-capture.timer sunset-sync.service sunset-sync.timer sunset-diag.service; do
   sed -e "s|^User=.*|User=$RUN_USER|" -e "s|/home/pi/|$HOME_DIR/|g" "$HERE/systemd/$u" > "/etc/systemd/system/$u"
 done
+install -m 755 "$HERE/diag" /usr/local/bin/diag
 systemctl daemon-reload
 if (( ENABLE )); then
   systemctl enable --now sunset-capture.timer sunset-sync.timer
