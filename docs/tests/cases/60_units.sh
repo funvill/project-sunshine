@@ -4,3 +4,6 @@ section "systemd units"
 check "no comment after a setting" \
   sh -c "! grep -nE '^[A-Za-z]+=.*[[:space:]]#' '$SRC'/systemd/*"
 check "capture service timeout is set" grep -qx 'TimeoutStartSec=300' "$SRC/systemd/sunset-capture.service"
+
+section "sunset-lowwear.sh"
+check "parses" bash -n "$SRC/sunset-lowwear.sh"

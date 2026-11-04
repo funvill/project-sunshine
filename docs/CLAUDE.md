@@ -69,9 +69,18 @@ This file is the project brief. `README.md` is the Pi Zero setup guide.
 - 15-min captures only for now: burst mode (backlog #3) still needs a schedule decision.
 - The Zero W path is no longer the target. The scripts have no Zero-specific code, but this camera
   has not been shown working on a Zero. See `hardware/README.md`.
-- **SD card:** a 32 GB card with ~21 GB free, about 8 days of day frames at ~26 MB/frame (fewer
-  with night frames). Model not yet recorded. Run a write test and replace with a High Endurance
+- **OS (2026-11-03):** upgraded to kernel 6.12.109, rpicam-apps 1.9.0, libcamera 0.5. Desktop and
+  everything else not on `keep-packages.txt` removed: 1,624 to 362 packages, 6.5 GB to 1.4 GB used.
+  `sunset-lowwear.sh` applied. `cmdline.txt` had been empty for many boots (firmware defaults, no
+  `fsck.repair`); it is now set. Kernels kept: v7 (this Pi) and v6 (Zero).
+- **SD card:** a 32 GB card (ID `SH32G`, make unknown) with ~26 GB free, about 10 days of frames
+  if the NAS is down, fewer with night frames. Run a write test and replace with a High Endurance
   card for the real run (a buying decision).
+- **SD writes, measured:** idle OS 584 KB per 10 min before `sunset-lowwear.sh`, 108 KB after
+  (~16 MB/day). Each capture writes ~27 MB, ~52 MB with a night frame, so frames are an estimated
+  ~2.5-5 GB/day and over 99% of all writes. Only staging frames in RAM would change that; it
+  conflicts with local-first and is **undecided**. Holding writes in RAM until the sync was tried
+  and failed: the frame reached the SD in 3 of 3 captures.
 - This Pi previously ran `~/capture_and_sync.sh` from cron (30-min frames to `~/Pictures`, NAS sync
   commented out; its newest frame before today was from 2025-05-27). That job is disabled in cron,
   not deleted, and its frames are still in `~/Pictures`.
@@ -136,7 +145,7 @@ Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi
 | NAS/Wi-Fi outage | Local-first capture, rsync catch-up |
 | Condensation | Humidity sensor, low-contrast "fog" frame detection, dew heater |
 | Software rot | Frozen OS image on NAS |
-| SD wear | High Endurance card for the real run |
+| SD wear | `sunset-lowwear.sh` for OS writes; High Endurance card for the real run; frames are the main wear |
 | Bumps when watering plants | Keyed mount, post-alignment against the tower |
 | Sun damage on telephoto | Skip/short-expose frames when the sun is in the 16 mm FOV; ND filter |
 | Heat | PETG/ASA mount, temperature logging |

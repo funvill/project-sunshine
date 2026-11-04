@@ -62,7 +62,24 @@ Run the self-test first (camera, clock, disk, memory, capture time, IR-cut, NAS)
 Test immediately: `sudo systemctl start sunset-capture.service && ls -R outbox`
 Check schedule: `systemctl list-timers 'sunset*'`
 
-## 5. Freeze it
+## 5. Reduce SD card writes
+Lite images already skip most of the desktop. A full desktop image can be cut down to
+`keep-packages.txt` (the pilot Pi went from 1,624 packages to 362). Dry-run it and read the list
+first: apt will take anything the keep list does not hold, so check nothing you need is on it.
+```
+sudo apt-mark auto $(apt-mark showmanual)
+sudo apt-mark manual $(cat keep-packages.txt)
+OPTS="-o APT::AutoRemove::RecommendsImportant=false -o APT::AutoRemove::SuggestsImportant=false"
+sudo apt-get -s $OPTS autoremove --purge    # read this, then drop -s to run it
+```
+Do not remove `raspi-utils-eeprom`: on the pilot, that took `raspi-config` and `vcgencmd` with it.
+This leaves `rpicam-apps-core` only, so there is no on-screen camera preview.
+
+Then, once, and reboot: `sudo ./sunset-lowwear.sh`. System logs move to RAM (lost on reboot;
+`capture.log` and `sync.log` stay on the SD), swap goes, and background jobs that write to the
+card stop. Frames still go through the SD, and that is nearly all of the card's writes.
+
+## 6. Freeze it
 After a week of clean running: disable unattended upgrades and save a full
 SD card image to the NAS. That image is the recovery plan.
 
