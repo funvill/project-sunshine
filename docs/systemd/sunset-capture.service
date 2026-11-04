@@ -7,4 +7,6 @@ User=pi
 WorkingDirectory=/home/pi/sunset
 EnvironmentFile=-/home/pi/sunset/sunset.env
 ExecStart=/home/pi/sunset/sunset-capture.sh
-TimeoutStartSec=300   # day shot + night shot, each bounded by CAPTURE_TIMEOUT_S (60 s)
+# Day shot + night shot, each bounded by CAPTURE_TIMEOUT_S (60 s).
+# Comments must stay on their own line: systemd ignores a setting with one after it.
+TimeoutStartSec=300
