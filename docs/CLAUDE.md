@@ -78,9 +78,10 @@ This file is the project brief. `README.md` is the Pi Zero setup guide.
   card for the real run (a buying decision).
 - **SD writes, measured:** idle OS 584 KB per 10 min before `sunset-lowwear.sh`, 108 KB after
   (~16 MB/day). Each capture writes ~27 MB, ~52 MB with a night frame, so frames are an estimated
-  ~2.5-5 GB/day and over 99% of all writes. Only staging frames in RAM would change that; it
-  conflicts with local-first and is **undecided**. Holding writes in RAM until the sync was tried
-  and failed: the frame reached the SD in 3 of 3 captures.
+  ~2.5-5 GB/day and over 99% of all writes. **Decided 2026-11-03: frames stay SD-first** and are
+  removed from the SD as soon as they are confirmed on the NAS, accepting that wear. Staging in RAM
+  was rejected. Holding writes in RAM until the sync was tried and failed: the frame reached the SD
+  in 3 of 3 captures.
 - This Pi previously ran `~/capture_and_sync.sh` from cron (30-min frames to `~/Pictures`, NAS sync
   commented out; its newest frame before today was from 2025-05-27). That job is disabled in cron,
   not deleted, and its frames are still in `~/Pictures`.
