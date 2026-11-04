@@ -8,7 +8,7 @@ This file is the project brief. `docs/setup.md` is the Pi setup guide.
 
 ## Repo layout
 - `pi/`: everything that runs on the Pi. Copied flat into `~/sunset`; the systemd units expect that path.
-- `tests/`: offline tests with a stubbed camera and NAS. They run on any machine, not on the Pi.
+- `tests/`: offline tests with a stubbed camera and NAS. No Pi needed.
 - `docs/`: setup guide and hardware notes.
 
 Frames never go in this repo, and neither does `sunset.env`, which holds the real site coordinates.
