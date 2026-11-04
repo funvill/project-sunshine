@@ -119,12 +119,27 @@ python3 sunset-sun.py sunset --json     # plus sunset azimuth
 python3 sunset-sun.py position          # sun now
 ```
 
-### Setting focus
-With a monitor on the Pi, in a terminal on the Pi itself, for a live view zoomed 5x into the centre:
-`rpicam-hello -t 0 --roi 0.4,0.4,0.2,0.2`
-Over SSH with no monitor: `python3 sunset-focus.py` prints a sharpness score per reading; aim at
-something distant with fine detail and stop at the highest score. Either way, stop the capture
-timer first, since only one program can use the camera at a time.
+### Diagnostics page and focus
+Over SSH, type `diag`. It prints a link to a temporary page with a live camera view and the Pi's
+health: capture and sync status, clock, disk, memory, temperature and power. **Focus** switches to
+the centre of the sensor at full resolution; turn the lens slowly and stop at the highest sharpness
+score. Aim at something distant with fine detail.
+```
+diag          # on for 30 minutes; running it again restarts the clock and changes the link
+diag status   # is it on, and what is the link
+diag stop     # off
+```
+It stops by itself and does not come back after a reboot. The camera only runs while the page is
+open, and the view pauses around each scheduled capture so that the capture can use the camera. You
+don't need to stop the capture timer. Don't run `sunset-selftest.sh`, `sunset-focus.py` or a manual
+capture while the page is open, because only one program can use the camera at a time.
+
+The link has a key that changes on each start, but the page is plain HTTP. Keep it on the LAN, and
+don't forward its port through the router.
+
+Without the page: `python3 sunset-focus.py` prints a sharpness score per reading, or with a monitor
+on the Pi, `rpicam-hello -t 0 --roi 0.4,0.4,0.2,0.2` gives a live view zoomed 5x into the centre.
+Stop the capture timer first for either of these.
 
 ### Tests (no Pi needed)
 `bash tests/run.sh` runs the scripts against stub `rpicam-still`/`rsync`/`df`/`ssh`.
