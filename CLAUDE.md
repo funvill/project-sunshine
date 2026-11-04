@@ -8,6 +8,7 @@ This file is the project brief. `docs/setup.md` is the Pi setup guide.
 
 ## Repo layout
 - `pi/`: everything that runs on the Pi. Copied flat into `~/sunset`; the systemd units expect that path.
+- `nas/`: the daily sunset video job, which runs on the NAS in Docker. See `nas/README.md`.
 - `tests/`: offline tests with a stubbed camera and NAS. No Pi needed.
 - `docs/`: setup guide and hardware notes.
 
@@ -184,7 +185,9 @@ Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi
   github.com/pconwell/rpi-long-timelapse (year-long Pi run lessons).
 
 ## Testing
-`bash tests/run.sh` (offline, stubbed camera/NAS) and `python3 tests/test_sun.py`. On the Pi,
+`bash tests/run.sh` (offline, stubbed camera/NAS) and `python3 tests/test_sun.py`.
+`tests/test_daily.py` covers the NAS job; its encoding tests use the real ffmpeg and are skipped
+without it. On the Pi,
 `./sunset-selftest.sh` checks camera, clock, disk, memory, capture time, IR-cut and NAS.
 Its thresholds (30 s slow capture, 60 MB low memory, R/G 1.25 for IR-cut) are estimates to tune
 from pilot data.
