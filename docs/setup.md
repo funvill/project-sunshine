@@ -125,7 +125,7 @@ health: capture and sync status, clock, disk, memory, temperature and power. **F
 the centre of the sensor at full resolution; turn the lens slowly and stop at the highest sharpness
 score. Aim at something distant with fine detail.
 ```
-diag          # on for 30 minutes; running it again restarts the clock and changes the link
+diag          # on for 30 minutes; running it again restarts the clock
 diag status   # is it on, and what is the link
 diag stop     # off
 ```
@@ -134,8 +134,8 @@ open, and the view pauses around each scheduled capture so that the capture can 
 don't need to stop the capture timer. Don't run `sunset-selftest.sh`, `sunset-focus.py` or a manual
 capture while the page is open, because only one program can use the camera at a time.
 
-The link has a key that changes on each start, but the page is plain HTTP. Keep it on the LAN, and
-don't forward its port through the router.
+The page has no password: while it's on, anyone on your LAN can see the camera, the logs and the
+Pi's status, and switch the view. Don't forward its port through the router.
 
 Without the page: `python3 sunset-focus.py` prints a sharpness score per reading, or with a monitor
 on the Pi, `rpicam-hello -t 0 --roi 0.4,0.4,0.2,0.2` gives a live view zoomed 5x into the centre.

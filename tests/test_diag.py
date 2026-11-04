@@ -474,7 +474,7 @@ class Service(unittest.TestCase):
     def service(self, deadline=NOW + 1800):
         cam = diag.Camera(lambda view: [sys.executable, "-c", FAKE_CAMERA])
         self.addCleanup(cam.stop)
-        return diag.Service(diag_config(), cam, key="k3y", deadline=deadline, run=lambda cmd: None)
+        return diag.Service(diag_config(), cam, deadline=deadline, run=lambda cmd: None)
 
     def test_stops_at_the_deadline(self):
         svc = self.service(deadline=NOW + 10)
@@ -510,7 +510,7 @@ class Http(unittest.TestCase):
     def setUp(self):
         self.cam = diag.Camera(lambda view: [sys.executable, "-c", FAKE_CAMERA])
         # The clock here is real: a far-off timer keeps the test from landing in a capture window.
-        self.svc = diag.Service(diag_config(), self.cam, key="k3y", deadline=time.time() + 1800,
+        self.svc = diag.Service(diag_config(), self.cam, deadline=time.time() + 1800,
                                 run=lambda cmd: "@9999999999")
         self.server = diag.make_server(self.svc, "127.0.0.1", 0)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -529,19 +529,23 @@ class Http(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code
 
-    def test_every_path_needs_the_key(self):
-        for path in ("/", "/status.json", "/stream.mjpg", "/?key=wrong", "/status.json?key=wrong"):
-            self.assertEqual(self.status_of(path), 403, path)
-        self.assertEqual(self.status_of("/view?mode=focus", "POST"), 403)
+    def test_page_needs_no_key(self):
+        self.assertEqual(self.status_of("/"), 200)
+        self.assertEqual(self.status_of("/status.json"), 200)
+        self.assertEqual(self.status_of("/camera.json"), 200)
+        self.assertEqual(self.status_of("/view?mode=focus", "POST"), 204)
+
+    def test_page_does_not_ask_for_a_key(self):
+        self.assertNotIn("key", self.get("/").read().decode().replace("keep", ""))
 
     def test_page_loads(self):
-        r = self.get("/?key=k3y")
+        r = self.get("/")
         body = r.read().decode()
         self.assertIn("stream.mjpg", body)
         self.assertIn("no-store", r.headers["Cache-Control"])
 
     def test_status_json(self):
-        data = json.load(self.get("/status.json?key=k3y"))
+        data = json.load(self.get("/status.json"))
         self.assertIn("warnings", data)
         self.assertIn("diag", data)
 
@@ -549,21 +553,21 @@ class Http(unittest.TestCase):
         # The page checks this often, so it must cost the Pi nothing.
         calls = []
         self.svc.run = lambda cmd: calls.append(cmd)
-        data = json.load(self.get("/camera.json?key=k3y"))
+        data = json.load(self.get("/camera.json"))
         self.assertEqual(data["camera"], "idle")
         self.assertEqual(calls, [])
 
     def test_view_is_a_post_and_validates_the_mode(self):
-        self.assertEqual(self.status_of("/view?key=k3y&mode=focus", "POST"), 204)
+        self.assertEqual(self.status_of("/view?mode=focus", "POST"), 204)
         self.assertEqual(self.cam.view(), "focus")
-        self.assertEqual(self.status_of("/view?key=k3y&mode=focus"), 405)
-        self.assertEqual(self.status_of("/view?key=k3y&mode=nope", "POST"), 400)
+        self.assertEqual(self.status_of("/view?mode=focus"), 405)
+        self.assertEqual(self.status_of("/view?mode=nope", "POST"), 400)
 
     def test_unknown_path(self):
-        self.assertEqual(self.status_of("/nope?key=k3y"), 404)
+        self.assertEqual(self.status_of("/nope"), 404)
 
     def test_stream_sends_jpeg_frames(self):
-        r = self.get("/stream.mjpg?key=k3y")
+        r = self.get("/stream.mjpg")
         self.assertIn("multipart/x-mixed-replace", r.headers["Content-Type"])
         self.assertTrue(wait_until(lambda: self.svc.viewers() == 1))
         self.svc.step(time.time())
@@ -576,9 +580,9 @@ class UrlFile(unittest.TestCase):
     def test_written_private(self):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "url")
-            diag.write_url_file(p, "http://x/?key=k")
+            diag.write_url_file(p, "http://x/")
             with open(p) as f:
-                self.assertEqual(f.read().strip(), "http://x/?key=k")
+                self.assertEqual(f.read().strip(), "http://x/")
             if os.name == "posix":
                 self.assertEqual(os.stat(p).st_mode & 0o777, 0o600)
 

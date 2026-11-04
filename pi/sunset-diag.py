@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Temporary diagnostics page for the Pi. Stdlib only. Started by the `diag` command."""
 import calendar
-import hmac
 import json
 import os
-import secrets
 import shutil
 import signal
 import socket
@@ -452,10 +450,9 @@ SECONDS_BETWEEN_STEPS = 2      # well inside the 20-second margin
 
 
 class Service:
-    def __init__(self, cfg, camera, key, deadline, run=run_command, policy=None):
+    def __init__(self, cfg, camera, deadline, run=run_command, policy=None):
         self.cfg = cfg
         self.camera = camera
-        self.key = key
         self.deadline = deadline
         self.run = run
         self.policy = policy or HandoverPolicy()
@@ -499,17 +496,12 @@ class Service:
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
-        pass                          # request lines contain the key
+        pass                          # the journal does not need a line per request
 
     def _route(self):
-        """The path, or None after refusing a request without the right key."""
         url = urlsplit(self.path)
         self.query = parse_qs(url.query)
-        given = self.query.get("key", [""])[0]
-        if hmac.compare_digest(given.encode(), self.server.service.key.encode()):
-            return url.path
-        self.send_error(403)
-        return None
+        return url.path
 
     def _send(self, body, content_type):
         self.send_response(200)
@@ -521,8 +513,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self._route()
-        if path is None:
-            return
         if path == "/":
             self._send(PAGE.encode("utf-8"), "text/html; charset=utf-8")
         elif path == "/status.json":
@@ -538,8 +528,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self._route()
-        if path is None:
-            return
         if path != "/view":
             self.send_error(404)
         elif self.query.get("mode", [""])[0] not in ("full", "focus"):
@@ -606,16 +594,15 @@ def main():
     width = int(os.environ.get("DIAG_WIDTH", "1280"))
     height = int(os.environ.get("DIAG_HEIGHT", "960"))
     url_file = os.environ.get("DIAG_URL_FILE", "/run/sunset-diag/url")
-    key = secrets.token_urlsafe(16)
 
     camera = Camera(lambda view: stream_command(view, width, height))
-    service = Service(config_from_env(), camera, key, time.time() + max_s)
+    service = Service(config_from_env(), camera, time.time() + max_s)
     server = make_server(service, "0.0.0.0", port)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
 
     ips = (run_command(["hostname", "-I"]) or "").split()
-    write_url_file(url_file, "http://%s:%d/?key=%s" % (ips[0] if ips else socket.gethostname(), server.server_address[1], key))
+    write_url_file(url_file, "http://%s:%d/" % (ips[0] if ips else socket.gethostname(), server.server_address[1]))
     try:
         while service.step(time.time()):
             time.sleep(SECONDS_BETWEEN_STEPS)
@@ -677,10 +664,8 @@ pre { margin: 8px 0 0; font-size: 12px; line-height: 1.4; white-space: pre-wrap;
 </div>
 </main>
 <script>
-var key = new URLSearchParams(location.search).get("key") || "";
-var q = "key=" + encodeURIComponent(key);
 var cam = document.getElementById("cam");
-cam.src = "stream.mjpg?" + q;
+cam.src = "stream.mjpg";
 
 function $(id) { return document.getElementById(id); }
 
@@ -756,7 +741,7 @@ function show(s) {
 }
 
 function poll(path, then) {
-  fetch(path + "?" + q).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); }).then(then)
+  fetch(path).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); }).then(then)
     .catch(function () { $("state").textContent = "diagnostics stopped or unreachable"; });
 }
 function pollCamera() { poll("camera.json", showCamera); }
@@ -767,7 +752,7 @@ setInterval(pollStatus, 15000);
 
 function setView(mode) {
   best = 0;
-  fetch("view?" + q + "&mode=" + mode, { method: "POST" }).then(pollCamera);
+  fetch("view?mode=" + mode, { method: "POST" }).then(pollCamera);
 }
 $("full").onclick = function () { setView("full"); };
 $("focus").onclick = function () { setView("focus"); };

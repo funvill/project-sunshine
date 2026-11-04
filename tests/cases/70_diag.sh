@@ -13,7 +13,7 @@ cat > "$DIAG_W/bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$DIAG_CALLS"
 case "$1" in
-  restart) [[ -n "${STUB_NO_URL:-}" ]] || echo "http://192.0.2.5:8080/?key=abc" > "$DIAG_URL_FILE" ;;
+  restart) [[ -n "${STUB_NO_URL:-}" ]] || echo "http://192.0.2.5:8080/" > "$DIAG_URL_FILE" ;;
   stop) rm -f "$DIAG_URL_FILE" ;;
   is-active) [[ -e "$DIAG_URL_FILE" ]] && { echo active; exit 0; } || { echo inactive; exit 3; } ;;
 esac
@@ -29,12 +29,12 @@ check "status when off" grep -q 'off' <<<"$out"
 check "status when off exits 3" test "$rc" = 3
 
 out="$(diag_cmd 2>&1)"; rc=$?
-check "start prints the link" grep -q 'http://192.0.2.5:8080/?key=abc' <<<"$out"
+check "start prints the link" grep -q 'http://192.0.2.5:8080/' <<<"$out"
 check "start exits 0" test "$rc" = 0
 check "start restarts, so the clock starts again" grep -qx 'restart sunset-diag.service' "$DIAG_W/calls"
 
 out="$(diag_cmd status 2>&1)"; rc=$?
-check "status when on prints the link" grep -q 'key=abc' <<<"$out"
+check "status when on prints the link" grep -q "192.0.2.5:8080" <<<"$out"
 check "status when on exits 0" test "$rc" = 0
 
 out="$(diag_cmd stop 2>&1)"; rc=$?
