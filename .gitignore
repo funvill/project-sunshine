@@ -1,3 +1,10 @@
 
 # Vendor product photo (third-party; this repo is public)
 docs/hardware/*.webp
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Site config on the Pi: holds the real coordinates and NAS target
+sunset.env
