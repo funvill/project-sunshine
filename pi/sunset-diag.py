@@ -297,16 +297,14 @@ def stream_command(view, width, height):
 
 
 def parse_next_capture(text, now):
-    """Next capture from `systemctl show --timestamp=unix`. If the timer has none, assume the
+    """Next capture from `systemctl list-timers --output=json`. If the timer has none, assume the
     15-minute schedule, so the camera is still released for a capture started some other way."""
-    text = (text or "").strip()
-    if text.startswith("@"):
-        try:
-            value = int(text[1:])
-            if value > now:
-                return value
-        except ValueError:
-            pass
+    try:
+        value = json.loads(text)[0]["next"] / 1000000
+        if value > now:
+            return value
+    except (TypeError, ValueError, LookupError):
+        pass
     return (int(now) // 900 + 1) * 900
 
 
@@ -476,8 +474,8 @@ class Service:
         """One pass of the control loop. Returns False when it is time to shut down."""
         if now >= self.deadline:
             return False
-        next_capture = parse_next_capture(self.run(["systemctl", "show", "sunset-capture.timer", "-p",
-                                                    "NextElapseUSecRealtime", "--timestamp=unix", "--value"]), now)
+        next_capture = parse_next_capture(self.run(["systemctl", "list-timers", "sunset-capture.timer", "--all",
+                                                    "--no-legend", "--output=json"]), now)
         busy = (self.run(["systemctl", "is-active", "sunset-capture.service"]) or "").strip() in CAPTURE_BUSY
         recent = self._last_left is not None and now - self._last_left < VIEWER_GRACE_S
         self.camera.tick(now, wanted=self._viewers > 0 or recent, paused=self.policy.should_pause(now, next_capture, busy))

@@ -25,6 +25,7 @@ def epoch(text):
 NOW = epoch("2026-11-04T12:00:00Z")
 JPEG_A = b"\xff\xd8AAAA\xff\xd9"
 JPEG_B = b"\xff\xd8BB\xff\xd9"
+FAR_TIMER = '[{"next":9999999999000000}]'
 
 
 def write(path, text):
@@ -295,8 +296,23 @@ class StreamCommand(unittest.TestCase):
 
 
 class NextCapture(unittest.TestCase):
+    # Format from `systemctl list-timers --output=json` on the pilot Pi (systemd 252), with a time
+    # off the quarter hour so that the fallback cannot pass these by accident.
+    RUNNING = ('[{"next":1793774760000000,"left":1793774760000000,"last":0,"passed":0,'
+               '"unit":"sunset-capture.timer","activates":"sunset-capture.service"}]\n')
+
     def test_reads_the_timer(self):
-        self.assertEqual(diag.parse_next_capture("@1793000000\n", 1792999000), 1793000000)
+        self.assertEqual(diag.parse_next_capture(self.RUNNING, 1793774285), 1793774760)
+
+    def test_a_time_already_passed_is_not_used(self):
+        self.assertEqual(diag.parse_next_capture(self.RUNNING, 1793774761), (1793774761 // 900 + 1) * 900)
+
+    def test_timer_stopped_falls_back_to_the_quarter_hour(self):
+        self.assertEqual(diag.parse_next_capture("[]\n", epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:15:00Z"))
+
+    def test_unexpected_json_falls_back(self):
+        self.assertEqual(diag.parse_next_capture('[{"next":null}]', epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:15:00Z"))
+        self.assertEqual(diag.parse_next_capture('{"a":1}', epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:15:00Z"))
 
     def test_timer_disabled_falls_back_to_the_quarter_hour(self):
         # A timer change must never remove the protection.
@@ -511,7 +527,7 @@ class Http(unittest.TestCase):
         self.cam = diag.Camera(lambda view: [sys.executable, "-c", FAKE_CAMERA])
         # The clock here is real: a far-off timer keeps the test from landing in a capture window.
         self.svc = diag.Service(diag_config(), self.cam, deadline=time.time() + 1800,
-                                run=lambda cmd: "@9999999999")
+                                run=lambda cmd: FAR_TIMER)
         self.server = diag.make_server(self.svc, "127.0.0.1", 0)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.base = "http://127.0.0.1:%d" % self.server.server_address[1]
