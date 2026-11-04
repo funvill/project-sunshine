@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Turn the 24 hours of frames around each sunset into a vertical video. Runs on the NAS.
+"""Turn each day's frames into a vertical video, from dark to dark. Runs on the NAS.
 
 Python standard library plus ffmpeg. It only reads frames and writes to DAILY_DIR, so
 the Pi and the frame layout don't change. It posts nothing: publishing is a later step.
 
+Each video ends on the first dark frame after sunset, and the next starts on the frame
+after that, so together they show every frame once. Night is a larger share of a winter
+video and day of a summer one.
+
 Run it on a schedule through the afternoon and evening. Each run does nothing until a
-frame shows a sunset passed at least 30 minutes ago, and a day is never done twice,
-because `DAILY_DIR/<local date>.json` is written last and marks that day as finished.
+frame shows the sky has gone dark after sunset, and a day is never done twice, because
+`DAILY_DIR/<local date>.json` is written last and marks that day as finished.
 
 Settings come from the environment; see nas/README.md.
 """
@@ -26,8 +30,8 @@ UTC = timezone.utc
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 FRAME_NAME = re.compile(r"^[A-Za-z0-9-]+_(\d{8}T\d{6}Z)\.jpg$")
 
-MINUTES_AFTER_SUNSET = 30      # the video ends here, and the day is due from here
-WINDOW = timedelta(hours=24)
+DARK_ELEVATION_DEG = -9.0      # measured: on 2026-11-04 the camera's Lux stopped falling near here
+WINDOW = timedelta(hours=24)   # a first video, with none before it to continue from
 AZIMUTH_RATE_DEG_PER_MIN = 0.19   # sun's azimuth rate at sunset here; varies 0.188-0.191 over a year
 AZIMUTH_MAX_MINUTES = 60          # frames further from sunset than this say little about it
 AZIMUTH_STEP_LIMIT_DEG = 1.0      # the true seasonal change is at most about 0.61 deg/day
@@ -110,21 +114,31 @@ def frame_sunset(frame):
     return parse_utc(frame.sun.get("nearest_sunset_utc")) if frame.sun else None
 
 
+def dark_after_sunset(frame):
+    if not frame.sun:
+        return False
+    minutes, elevation = frame.sun.get("minutes_from_sunset"), frame.sun.get("elevation_deg")
+    return (minutes is not None and elevation is not None
+            and minutes > 0 and elevation <= DARK_ELEVATION_DEG)
+
+
 def due_sunsets(frames):
-    """Sunsets, oldest first, that some frame shows passed by at least 30 minutes."""
-    due = set()
+    """Sunsets, oldest first, that some frame shows the sky has gone dark after."""
+    due = {frame_sunset(f) for f in frames if dark_after_sunset(f)}
+    return sorted(due - {None})
+
+
+def day_end(frames, sunset):
+    """The time of the first dark frame after this sunset, which is the video's last."""
     for frame in frames:
-        sunset = frame_sunset(frame)
-        minutes = frame.sun.get("minutes_from_sunset") if frame.sun else None
-        if sunset is not None and minutes is not None and minutes >= MINUTES_AFTER_SUNSET:
-            due.add(sunset)
-    return sorted(due)
+        if frame_sunset(frame) == sunset and dark_after_sunset(frame):
+            return frame.time
+    return None
 
 
-def select_window(frames, sunset):
-    """The frames in the 24 hours ending 30 minutes after sunset."""
-    end = sunset + timedelta(minutes=MINUTES_AFTER_SUNSET)
-    return [f for f in frames if end - WINDOW < f.time <= end]
+def select_window(frames, start, end):
+    """Frames after start, up to and including end. Start is the last video's final frame."""
+    return [f for f in frames if start < f.time <= end]
 
 
 def nearest_frame(frames, sunset):
@@ -309,19 +323,22 @@ def load_crop_config(path):
 
 def process_sunset(cfg, sunset, frames, crop_config, encode, get_size, check_image):
     day = local_date(sunset, cfg.tz)
-    window = select_window(frames, sunset)
+    previous = read_record(cfg, day - timedelta(days=1)) or {}
+    end = day_end(frames, sunset)
+    start = parse_utc(previous.get("end_utc")) or end - WINDOW
+    window = select_window(frames, start, end)
+    expected = round((end - start) / (WINDOW / cfg.expected_frames))   # dusk drifts, so 96 give or take
     record = {"local_date": day.isoformat(), "sunset_utc": sunset.strftime(TIME_FORMAT),
-              "frames": len(window), "expected_frames": cfg.expected_frames, "posted": False}
+              "start_utc": start.strftime(TIME_FORMAT), "end_utc": end.strftime(TIME_FORMAT),
+              "frames": len(window), "expected_frames": expected, "posted": False}
     json_path = os.path.join(cfg.daily_dir, day.isoformat() + ".json")
 
-    if len(window) < cfg.expected_frames * cfg.min_fraction:
-        record.update(status="skipped", reason="only %d of %d expected frames"
-                      % (len(window), cfg.expected_frames))
+    if len(window) < expected * cfg.min_fraction:
+        record.update(status="skipped", reason="only %d of %d expected frames" % (len(window), expected))
         write_atomic(json_path, json.dumps(record, indent=2) + "\n")
         log("%s skipped: %s" % (day, record["reason"]))
         return
 
-    previous = read_record(cfg, day - timedelta(days=1)) or {}
     previous_crop = previous.get("crop") or {}
     azimuth, method = sunset_azimuth(frames, sunset)
     sunset_frame = nearest_frame(window, sunset)

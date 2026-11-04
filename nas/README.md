@@ -1,7 +1,15 @@
 # Daily sunset video
 
-`sunset-daily.py` runs on the NAS and turns the 24 hours of frames ending 30 minutes after each
-sunset into a 9.5-second vertical video. It only reads frames and writes to its own folder.
+`sunset-daily.py` runs on the NAS and turns each day's frames into a vertical video of about 9.5
+seconds. It only reads frames and writes to its own folder.
+
+Each video runs from dark to dark. It ends on the first frame after sunset where the sun is at least
+9° below the horizon, and the next video starts on the frame after that, so every frame appears once.
+Night is a larger share of a winter video and day of a summer one. The 9° comes from one morning's
+Lux readings (2026-11-04) and is the `DARK_ELEVATION_DEG` constant, so check it against real dusks.
+
+The record's `start_utc` and `end_utc` give the range. With no record for the day before, the video
+covers the 24 hours before its end.
 
 **It posts nothing.** Publishing to Instagram is a later step. See
 [issue #2](https://github.com/funvill/project-sunshine/issues/2) for the plan and decisions.
@@ -14,8 +22,8 @@ Build the image once and keep using that tag:
 docker build -t sunset-daily:1 nas/
 ```
 
-Schedule this every 30 minutes through the afternoon and evening. Sunset moves through the year,
-and each run does nothing until a sunset is due:
+Schedule this every 30 minutes through the afternoon and evening. Dusk moves through the year, and
+each run does nothing until a frame shows the sky has gone dark after sunset:
 
 ```bash
 docker run --rm -v /path/to/project_sunshine:/data -e FRAMES_DIR=/data/wide -e DAILY_DIR=/data/daily sunset-daily:1
@@ -35,8 +43,8 @@ be retried by the next run, and 2 when a required setting is missing.
 | `SITE_TZ` | `America/Vancouver` | Names the day and the time in the caption |
 | `START_DATE` | `2026-12-21` | Day 1. Earlier videos are dry runs with no day number |
 | `CAPTION_TAGS` | `#sunset #timelapse #raspberrypi` | The last line of the caption |
-| `EXPECTED_FRAMES` | `96` | Frames in a full day |
-| `MIN_FRAME_FRACTION` | `0.7` | Below this share of expected frames, the day is skipped. An estimate to tune |
+| `EXPECTED_FRAMES` | `96` | Frames in a full 24 hours, which sets the capture interval |
+| `MIN_FRAME_FRACTION` | `0.7` | Below this share of the frames expected between the video's start and end, the day is skipped. An estimate to tune |
 | `LOOKBACK_DAYS` | `2` | How far back a missed day is still caught up |
 
 ## What it writes

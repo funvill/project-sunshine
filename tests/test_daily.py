@@ -38,10 +38,16 @@ def stamp(dt):
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def frame_at(minutes, az=None, sunset=SUNSET):
+def fake_elevation(minutes):
+    """Fake days go dark exactly 30 minutes after sunset."""
+    return daily.DARK_ELEVATION_DEG if minutes >= 30 else -1.0
+
+
+def frame_at(minutes, az=None, sunset=SUNSET, elevation=None):
     """A Frame the way list_frames builds it, `minutes` after `sunset`."""
     t = sunset + timedelta(minutes=minutes)
-    sun = {"azimuth_deg": 250.0 if az is None else az, "elevation_deg": -1.0,
+    sun = {"azimuth_deg": 250.0 if az is None else az,
+           "elevation_deg": fake_elevation(minutes) if elevation is None else elevation,
            "azimuth_ref": "true_north", "computed_for_utc": stamp(t),
            "nearest_sunset_utc": stamp(sunset), "minutes_from_sunset": float(minutes)}
     return daily.Frame(t, "unused.jpg", sun)
@@ -70,7 +76,7 @@ class Tree:
             minutes = (t - sunset).total_seconds() / 60.0
             with open(base + ".json", "w") as f:
                 json.dump({"ExposureTime": 1000, "Lux": 400.0,
-                           "Sun": {"azimuth_deg": az, "elevation_deg": -1.0,
+                           "Sun": {"azimuth_deg": az, "elevation_deg": fake_elevation(minutes),
                                    "azimuth_ref": "true_north",
                                    "computed_for_utc": stamp(t),
                                    "nearest_sunset_utc": stamp(sunset),
@@ -172,31 +178,49 @@ class ListFrames(unittest.TestCase):
 
 
 class DueSunsets(unittest.TestCase):
-    def test_frame_30_minutes_after_sunset_makes_it_due(self):
-        self.assertEqual(daily.due_sunsets([frame_at(30)]), [SUNSET])
+    def test_dark_frame_after_sunset_makes_it_due(self):
+        self.assertEqual(daily.due_sunsets([frame_at(60, elevation=-9.0)]), [SUNSET])
 
-    def test_frame_just_under_30_minutes_does_not(self):
-        self.assertEqual(daily.due_sunsets([frame_at(29.9)]), [])
+    def test_frame_not_yet_dark_does_not(self):
+        self.assertEqual(daily.due_sunsets([frame_at(60, elevation=-8.99)]), [])
 
-    def test_frame_before_sunset_does_not(self):
-        self.assertEqual(daily.due_sunsets([frame_at(-200)]), [])
+    def test_dark_frame_before_that_sunset_does_not(self):
+        # The small hours are dark too, but they lead up to this sunset.
+        self.assertEqual(daily.due_sunsets([frame_at(-200, elevation=-40.0)]), [])
 
     def test_frame_with_no_sun_block_does_not(self):
         self.assertEqual(daily.due_sunsets([daily.Frame(SUNSET, "x.jpg", None)]), [])
+
+    def test_frame_with_no_elevation_does_not(self):
+        frame = frame_at(60)
+        del frame.sun["elevation_deg"]
+        self.assertEqual(daily.due_sunsets([frame]), [])
 
     def test_two_sunsets_come_back_oldest_first(self):
         later = SUNSET + timedelta(days=1)
         self.assertEqual(daily.due_sunsets([frame_at(40, sunset=later), frame_at(40)]), [SUNSET, later])
 
 
+class DayEnd(unittest.TestCase):
+    def test_is_the_first_dark_frame_after_sunset(self):
+        frames = [frame_at(-200, elevation=-40.0), frame_at(30, elevation=-6.0),
+                  frame_at(45, elevation=-9.0), frame_at(60, elevation=-12.0)]
+        self.assertEqual(daily.day_end(frames, SUNSET), SUNSET + timedelta(minutes=45))
+
+    def test_ignores_the_dark_frames_of_another_sunset(self):
+        later = SUNSET + timedelta(days=1)
+        frames = [frame_at(45, elevation=-9.0, sunset=later)]
+        self.assertIsNone(daily.day_end(frames, SUNSET))
+
+
 class Window(unittest.TestCase):
-    def test_is_the_24_hours_ending_30_minutes_after_sunset(self):
-        # Ends 2026-12-22 00:44; starts 2026-12-21 00:44, not inclusive.
-        frames = [daily.Frame(datetime(2026, 12, 21, 0, 44, tzinfo=UTC), "start", None),
-                  daily.Frame(datetime(2026, 12, 21, 0, 45, tzinfo=UTC), "inside-first", None),
-                  daily.Frame(datetime(2026, 12, 22, 0, 44, tzinfo=UTC), "inside-last", None),
-                  daily.Frame(datetime(2026, 12, 22, 0, 45, tzinfo=UTC), "after", None)]
-        self.assertEqual([f.jpg for f in daily.select_window(frames, SUNSET)],
+    def test_runs_from_just_after_start_up_to_and_including_end(self):
+        start, end = SUNSET - timedelta(hours=24), SUNSET
+        frames = [daily.Frame(start, "start", None),
+                  daily.Frame(start + timedelta(minutes=15), "inside-first", None),
+                  daily.Frame(end, "inside-last", None),
+                  daily.Frame(end + timedelta(minutes=15), "after", None)]
+        self.assertEqual([f.jpg for f in daily.select_window(frames, start, end)],
                          ["inside-first", "inside-last"])
 
 
@@ -432,7 +456,7 @@ class RunWithoutEncoding(unittest.TestCase):
 
     def run_job(self, now=NOW, **over):
         def fake_encode(cfg, frames, sunset_frame, crop, mask, out):
-            self.encoded.append((out, len(frames)))
+            self.encoded.append((out, len(frames), [f.time for f in frames]))
             with open(out, "wb") as f:
                 f.write(b"video")
         return daily.run(self.tree.config(**over), now, encode=fake_encode,
@@ -455,6 +479,47 @@ class RunWithoutEncoding(unittest.TestCase):
         self.assertTrue(rec["caption"].startswith("Sunset, 21 December 2026"))
         self.assertTrue(os.path.exists(os.path.join(self.tree.daily, rec["video"])))
         self.assertFalse(rec["posted"])
+
+    def test_first_day_with_no_video_before_it_covers_24_hours(self):
+        self.tree.add_day()
+        self.run_job()
+        rec = self.tree.record("2026-12-21")
+        self.assertEqual(rec["start_utc"], "2026-12-21T00:44:00Z")
+        self.assertEqual(rec["end_utc"], "2026-12-22T00:44:00Z")
+
+    def test_starts_right_after_the_previous_video_ended(self):
+        # The day before ended at 01:14 on the 21st, so this one starts at the 01:29 frame.
+        os.makedirs(self.tree.daily)
+        with open(os.path.join(self.tree.daily, "2026-12-20.json"), "w") as f:
+            json.dump({"status": "encoded", "end_utc": "2026-12-21T01:14:00Z"}, f)
+        self.tree.add_day()
+        self.run_job()
+        rec = self.tree.record("2026-12-21")
+        self.assertEqual(self.encoded[0][2][0], datetime(2026, 12, 21, 1, 29, tzinfo=UTC))
+        self.assertEqual(rec["start_utc"], "2026-12-21T01:14:00Z")
+        self.assertEqual(rec["frames"], 94)
+        self.assertEqual(rec["expected_frames"], 94)
+
+    def test_a_skipped_day_still_says_where_it_ended(self):
+        self.tree.add_day(10)
+        self.run_job()
+        rec = self.tree.record("2026-12-21")
+        self.assertEqual(rec["status"], "skipped")
+        self.assertEqual(rec["end_utc"], "2026-12-22T00:44:00Z")
+
+    def test_consecutive_videos_neither_overlap_nor_leave_a_gap(self):
+        # Dark comes 2 minutes later on day two, which moves its end to the next frame.
+        second = SUNSET + timedelta(hours=24, minutes=2)
+        t = SUNSET + timedelta(minutes=30) - timedelta(hours=24) + timedelta(minutes=15)
+        while t <= second + timedelta(minutes=75):
+            self.tree.add(t, SUNSET if t < SUNSET + timedelta(hours=12) else second)
+            t += timedelta(minutes=15)
+        self.run_job(second + timedelta(hours=2))
+        first_times, second_times = self.encoded[0][2], self.encoded[1][2]
+        self.assertEqual(len(first_times), 96)
+        self.assertEqual(len(second_times), 97)
+        self.assertEqual(second_times[0], first_times[-1] + timedelta(minutes=15))
+        self.assertEqual(self.tree.record("2026-12-22")["expected_frames"], 97)
 
     def test_second_run_leaves_the_day_alone(self):
         self.tree.add_day()
