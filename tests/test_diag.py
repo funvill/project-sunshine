@@ -3,9 +3,14 @@ import calendar
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 import tempfile
+import threading
 import time
 import unittest
+import urllib.error
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("sunset_diag", os.path.join(os.path.dirname(HERE), "pi", "sunset-diag.py"))
@@ -18,6 +23,8 @@ def epoch(text):
 
 
 NOW = epoch("2026-11-04T12:00:00Z")
+JPEG_A = b"\xff\xd8AAAA\xff\xd9"
+JPEG_B = b"\xff\xd8BB\xff\xd9"
 
 
 def write(path, text):
@@ -57,6 +64,9 @@ class CaptureLog(unittest.TestCase):
         s = diag.summarize_capture_log(self.LINES, NOW)
         self.assertEqual(s["last_ok_age_s"], NOW - epoch("2026-11-04T11:45:09Z"))
         self.assertEqual(s["last_lux"], "13.4")
+
+    def test_age_is_whole_seconds_with_a_fractional_clock(self):
+        self.assertIsInstance(diag.summarize_capture_log(self.LINES, NOW + 0.5)["last_ok_age_s"], int)
 
     def test_only_recent_problems_count(self):
         self.assertEqual(diag.summarize_capture_log(self.LINES, NOW)["problems_24h"], 2)
@@ -161,6 +171,10 @@ class Warnings(unittest.TestCase):
         s = healthy(); s["capture"]["problems_24h"] = 3
         self.assertWarns_(s, "3 capture problems")
 
+    def test_one_capture_problem_reads_properly(self):
+        s = healthy(); s["capture"]["problems_24h"] = 1
+        self.assertWarns_(s, "1 capture problem in")
+
     def test_frames_stuck(self):
         s = healthy(); s["outbox"]["oldest_age_s"] = 7200
         self.assertWarns_(s, "waiting")
@@ -227,6 +241,349 @@ class CollectStatus(unittest.TestCase):
                     os.environ.pop(k, None)
                 else:
                     os.environ[k] = v
+
+
+class RunCommand(unittest.TestCase):
+    def test_keeps_output_of_a_nonzero_exit(self):
+        # `systemctl is-enabled` prints "disabled" and exits 1.
+        cmd = [sys.executable, "-c", "import sys; print('disabled'); sys.exit(1)"]
+        self.assertEqual(diag.run_command(cmd).strip(), "disabled")
+
+    def test_missing_command(self):
+        self.assertIsNone(diag.run_command(["no-such-command-here"]))
+
+
+class FrameSplitter(unittest.TestCase):
+    def test_whole_frames(self):
+        s = diag.FrameSplitter()
+        self.assertEqual(s.feed(JPEG_A + JPEG_B), [JPEG_A, JPEG_B])
+
+    def test_frame_across_chunks(self):
+        s = diag.FrameSplitter()
+        self.assertEqual(s.feed(JPEG_A[:3]), [])
+        self.assertEqual(s.feed(JPEG_A[3:]), [JPEG_A])
+
+    def test_marker_split_between_chunks(self):
+        s = diag.FrameSplitter()
+        self.assertEqual(s.feed(JPEG_A[:-1]), [])
+        self.assertEqual(s.feed(JPEG_A[-1:]), [JPEG_A])
+
+    def test_garbage_before_a_frame_is_dropped(self):
+        self.assertEqual(diag.FrameSplitter().feed(b"junk" + JPEG_A), [JPEG_A])
+
+    def test_endless_garbage_does_not_grow_without_limit(self):
+        s = diag.FrameSplitter(max_bytes=1000)
+        for _ in range(10):
+            s.feed(b"\xff\xd8" + b"x" * 900)
+        self.assertLessEqual(s.buffered(), 2000)
+
+
+class StreamCommand(unittest.TestCase):
+    def test_full_view(self):
+        c = diag.stream_command("full", 1280, 960)
+        self.assertEqual(c[0], "rpicam-vid")
+        for flag in ("--codec", "mjpeg", "-n", "1280", "960"):
+            self.assertIn(flag, c)
+        self.assertEqual(c[c.index("-o") + 1], "-")
+        self.assertEqual(c[c.index("-t") + 1], "0")
+        self.assertNotIn("--roi", c)
+
+    def test_focus_view_crops_the_centre_at_full_sensor_resolution(self):
+        c = diag.stream_command("focus", 1280, 960)
+        self.assertEqual(c[c.index("--roi") + 1], "0.4,0.4,0.2,0.2")
+        self.assertEqual(c[c.index("--mode") + 1], "4056:3040")
+
+
+class NextCapture(unittest.TestCase):
+    def test_reads_the_timer(self):
+        self.assertEqual(diag.parse_next_capture("@1793000000\n", 1792999000), 1793000000)
+
+    def test_timer_disabled_falls_back_to_the_quarter_hour(self):
+        # A timer change must never remove the protection.
+        self.assertEqual(diag.parse_next_capture("\n", epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:15:00Z"))
+        self.assertEqual(diag.parse_next_capture(None, epoch("2026-11-04T12:15:00Z")), epoch("2026-11-04T12:30:00Z"))
+        self.assertEqual(diag.parse_next_capture("n/a", epoch("2026-11-04T12:59:59Z")), epoch("2026-11-04T13:00:00Z"))
+
+
+SLOT = epoch("2026-11-04T12:15:00Z")
+NEXT = SLOT + 900
+
+
+class Handover(unittest.TestCase):
+    def setUp(self):
+        self.p = diag.HandoverPolicy(margin_s=20, settle_s=5)
+
+    def test_streams_when_far_from_a_capture(self):
+        self.assertFalse(self.p.should_pause(SLOT - 60, SLOT, False))
+
+    def test_pauses_before_the_slot(self):
+        self.assertTrue(self.p.should_pause(SLOT - 20, SLOT, False))
+
+    def test_stays_paused_after_the_timer_moves_on_before_the_service_starts(self):
+        self.p.should_pause(SLOT - 20, SLOT, False)
+        self.assertTrue(self.p.should_pause(SLOT + 1, NEXT, False))
+
+    def test_stays_paused_while_the_capture_runs(self):
+        self.p.should_pause(SLOT - 20, SLOT, False)
+        self.assertTrue(self.p.should_pause(SLOT + 60, NEXT, True))
+
+    def test_resumes_once_the_capture_has_finished(self):
+        self.p.should_pause(SLOT - 20, SLOT, False)
+        self.p.should_pause(SLOT + 1, NEXT, True)
+        self.assertFalse(self.p.should_pause(SLOT + 12, NEXT, False))
+
+    def test_a_capture_started_by_hand_pauses_too(self):
+        self.assertTrue(self.p.should_pause(SLOT - 300, SLOT, True))
+
+
+FAKE_CAMERA = """
+import sys, time
+frame = b"\\xff\\xd8" + b"frame" + b"\\xff\\xd9"
+while True:
+    sys.stdout.buffer.write(frame)
+    sys.stdout.buffer.flush()
+    time.sleep(0.02)
+"""
+CRASHING_CAMERA = "import sys; sys.stderr.write('ERROR: *** no cameras available ***\\n'); sys.exit(1)"
+
+
+def wait_until(condition, seconds=5.0):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if condition():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+class CameraTests(unittest.TestCase):
+    def camera(self, source=FAKE_CAMERA, **kw):
+        cam = diag.Camera(lambda view: [sys.executable, "-c", source], **kw)
+        self.addCleanup(cam.stop)
+        return cam
+
+    def test_does_not_touch_the_camera_without_a_viewer(self):
+        cam = self.camera()
+        cam.tick(NOW, wanted=False, paused=False)
+        self.assertFalse(cam.running())
+        self.assertEqual(cam.state(), "idle")
+
+    def test_streams_frames_when_wanted(self):
+        cam = self.camera()
+        cam.tick(NOW, wanted=True, paused=False)
+        self.assertTrue(wait_until(lambda: cam.latest()[1] is not None))
+        self.assertEqual(cam.latest()[1], b"\xff\xd8frame\xff\xd9")
+        self.assertEqual(cam.state(), "streaming")
+
+    def test_releases_the_camera_when_paused(self):
+        cam = self.camera()
+        cam.tick(NOW, wanted=True, paused=False)
+        cam.tick(NOW + 1, wanted=True, paused=True)
+        self.assertFalse(cam.running())
+        self.assertEqual(cam.state(), "paused for capture")
+
+    def test_resumes_after_a_pause(self):
+        cam = self.camera()
+        cam.tick(NOW, wanted=True, paused=True)
+        self.assertFalse(cam.running())
+        cam.tick(NOW + 1, wanted=True, paused=False)
+        self.assertTrue(cam.running())
+
+    def test_stops_when_the_last_viewer_leaves(self):
+        cam = self.camera()
+        cam.tick(NOW, wanted=True, paused=False)
+        cam.tick(NOW + 1, wanted=False, paused=False)
+        self.assertFalse(cam.running())
+
+    def test_changing_view_restarts_with_the_new_command(self):
+        views = []
+
+        def build(view):
+            views.append(view)
+            return [sys.executable, "-c", FAKE_CAMERA]
+
+        cam = diag.Camera(build)
+        self.addCleanup(cam.stop)
+        cam.tick(NOW, wanted=True, paused=False)
+        cam.set_view("focus")
+        cam.tick(NOW + 1, wanted=True, paused=False)
+        self.assertEqual(views, ["full", "focus"])
+
+    def test_crash_is_reported_and_retried_with_a_delay(self):
+        starts = []
+
+        def build(view):
+            starts.append(view)
+            return [sys.executable, "-c", CRASHING_CAMERA]
+
+        cam = diag.Camera(build, retry_s=5)
+        self.addCleanup(cam.stop)
+        cam.tick(NOW, wanted=True, paused=False)
+        self.assertTrue(wait_until(lambda: not cam.running() and "no cameras" in (cam.error() or "")))
+        cam.tick(NOW + 1, wanted=True, paused=False)
+        self.assertEqual(len(starts), 1)
+        self.assertEqual(cam.state(), "camera error")
+        cam.tick(NOW + 6, wanted=True, paused=False)
+        self.assertEqual(len(starts), 2)
+
+    def test_a_process_ignoring_terminate_is_killed(self):
+        class Stuck:
+            killed = False
+
+            def poll(self):
+                return 0 if self.killed else None
+
+            def terminate(self):
+                pass
+
+            def kill(self):
+                self.killed = True
+
+            def wait(self, timeout=None):
+                if not self.killed:
+                    raise subprocess.TimeoutExpired("x", timeout)
+
+        stuck = Stuck()
+        cam = self.camera(kill_after_s=0.01)
+        cam._proc = stuck
+        cam.stop()
+        self.assertTrue(stuck.killed)
+
+
+class CaptureSlotEndToEnd(unittest.TestCase):
+    def test_camera_is_free_for_every_capture(self):
+        cam = diag.Camera(lambda view: [sys.executable, "-c", FAKE_CAMERA])
+        self.addCleanup(cam.stop)
+        policy = diag.HandoverPolicy(margin_s=20, settle_s=5)
+        for t in range(SLOT - 30, SLOT + 40, 2):
+            capture_active = SLOT <= t < SLOT + 12
+            next_capture = SLOT if t < SLOT else NEXT
+            cam.tick(t, wanted=True, paused=policy.should_pause(t, next_capture, capture_active))
+            if capture_active:
+                self.assertFalse(cam.running(), "camera busy during capture at +%ds" % (t - SLOT))
+        self.assertTrue(cam.running(), "stream did not come back")
+
+
+def diag_config():
+    d = tempfile.mkdtemp()
+    return diag.Config(out_root=os.path.join(d, "outbox"), capture_log=os.path.join(d, "c.log"),
+                       sync_log=os.path.join(d, "s.log"), nas_target="", sun_script="x", mountinfo="/nonexistent")
+
+
+class Service(unittest.TestCase):
+    def service(self, deadline=NOW + 1800):
+        cam = diag.Camera(lambda view: [sys.executable, "-c", FAKE_CAMERA])
+        self.addCleanup(cam.stop)
+        return diag.Service(diag_config(), cam, key="k3y", deadline=deadline, run=lambda cmd: None)
+
+    def test_stops_at_the_deadline(self):
+        svc = self.service(deadline=NOW + 10)
+        self.assertTrue(svc.step(NOW))
+        self.assertFalse(svc.step(NOW + 10))
+
+    def test_camera_only_runs_with_a_viewer(self):
+        svc = self.service()
+        svc.step(NOW + 60)
+        self.assertFalse(svc.camera.running())
+        svc.viewer_joined()
+        svc.step(NOW + 61)
+        self.assertTrue(svc.camera.running())
+
+    def test_status_shows_camera_state_and_time_left(self):
+        svc = self.service(deadline=NOW + 600)
+        s = svc.status(NOW)
+        self.assertEqual(s["diag"]["seconds_left"], 600)
+        self.assertEqual(s["diag"]["camera"], "idle")
+
+    def test_viewer_grace_period(self):
+        svc = self.service()
+        svc.viewer_joined()
+        svc.step(NOW + 60)
+        svc.viewer_left(NOW + 60)
+        svc.step(NOW + 62)
+        self.assertTrue(svc.camera.running(), "a page reload should not restart the camera")
+        svc.step(NOW + 70)
+        self.assertFalse(svc.camera.running())
+
+
+class Http(unittest.TestCase):
+    def setUp(self):
+        self.cam = diag.Camera(lambda view: [sys.executable, "-c", FAKE_CAMERA])
+        # The clock here is real: a far-off timer keeps the test from landing in a capture window.
+        self.svc = diag.Service(diag_config(), self.cam, key="k3y", deadline=time.time() + 1800,
+                                run=lambda cmd: "@9999999999")
+        self.server = diag.make_server(self.svc, "127.0.0.1", 0)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.base = "http://127.0.0.1:%d" % self.server.server_address[1]
+        self.addCleanup(self.cam.stop)
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+
+    def get(self, path, method="GET"):
+        req = urllib.request.Request(self.base + path, method=method)
+        return urllib.request.urlopen(req, timeout=5)
+
+    def status_of(self, path, method="GET"):
+        try:
+            return self.get(path, method).status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    def test_every_path_needs_the_key(self):
+        for path in ("/", "/status.json", "/stream.mjpg", "/?key=wrong", "/status.json?key=wrong"):
+            self.assertEqual(self.status_of(path), 403, path)
+        self.assertEqual(self.status_of("/view?mode=focus", "POST"), 403)
+
+    def test_page_loads(self):
+        r = self.get("/?key=k3y")
+        body = r.read().decode()
+        self.assertIn("stream.mjpg", body)
+        self.assertIn("no-store", r.headers["Cache-Control"])
+
+    def test_status_json(self):
+        data = json.load(self.get("/status.json?key=k3y"))
+        self.assertIn("warnings", data)
+        self.assertIn("diag", data)
+
+    def test_camera_state_runs_no_commands(self):
+        # The page checks this often, so it must cost the Pi nothing.
+        calls = []
+        self.svc.run = lambda cmd: calls.append(cmd)
+        data = json.load(self.get("/camera.json?key=k3y"))
+        self.assertEqual(data["camera"], "idle")
+        self.assertEqual(calls, [])
+
+    def test_view_is_a_post_and_validates_the_mode(self):
+        self.assertEqual(self.status_of("/view?key=k3y&mode=focus", "POST"), 204)
+        self.assertEqual(self.cam.view(), "focus")
+        self.assertEqual(self.status_of("/view?key=k3y&mode=focus"), 405)
+        self.assertEqual(self.status_of("/view?key=k3y&mode=nope", "POST"), 400)
+
+    def test_unknown_path(self):
+        self.assertEqual(self.status_of("/nope?key=k3y"), 404)
+
+    def test_stream_sends_jpeg_frames(self):
+        r = self.get("/stream.mjpg?key=k3y")
+        self.assertIn("multipart/x-mixed-replace", r.headers["Content-Type"])
+        self.assertTrue(wait_until(lambda: self.svc.viewers() == 1))
+        self.svc.step(time.time())
+        self.assertIn(b"\xff\xd8frame\xff\xd9", r.read(300))
+        r.close()
+        self.assertTrue(wait_until(lambda: self.svc.viewers() == 0, 10))
+
+
+class UrlFile(unittest.TestCase):
+    def test_written_private(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "url")
+            diag.write_url_file(p, "http://x/?key=k")
+            with open(p) as f:
+                self.assertEqual(f.read().strip(), "http://x/?key=k")
+            if os.name == "posix":
+                self.assertEqual(os.stat(p).st_mode & 0o777, 0o600)
+
+    def test_no_directory_is_not_fatal(self):
+        diag.write_url_file("/nonexistent/dir/url", "http://x/")
 
 
 if __name__ == "__main__":
