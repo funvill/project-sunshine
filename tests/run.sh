@@ -4,6 +4,7 @@
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="${SRC:-$(dirname "$HERE")/pi}"
+export PATH="$HERE/stubs:$PATH"
 PASS=0; FAIL=0
 
 ok()   { PASS=$((PASS+1)); }
@@ -21,7 +22,6 @@ fresh_env() {
   export SYNC_LOG_FILE="$W/sync.log" SYNC_LOCK_FILE="$W/.sync.lock"
   export CLOCK_OK_FILE="$W/clock-ok" STUB_NAS_DIR="$W/nas" CAM_NAME=wide
   export STUB_CALLS="$W/calls.txt"
-  export PATH="$HERE/stubs:$PATH"
   unset STUB_SAME_FS STUB_RPICAM STUB_LUX STUB_NTP STUB_DF_PCT STUB_DF_FREE_MB STUB_RSYNC
   unset SAVE_RAW SITE_LAT SITE_LON NAS_TARGET NIGHT_LUX CAPTURE_TIMEOUT_S REQUIRE_TIME_SYNC
   mkdir -p "$W/nas"
