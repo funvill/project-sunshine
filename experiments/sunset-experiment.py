@@ -34,6 +34,10 @@ AFTER_SLOT_S = 45  # the real capture took 17 s with a night frame; leave it ple
 BEFORE_SLOT_S = 5
 SUNSET_WINDOW_S = 45 * 60
 SUN_LADDER_BEFORE_S = 5 * 3600
+DUSK_FROM_S = 600
+DUSK_EVERY_S = 300
+DUSK_POINTS = 9  # +10 to +50 minutes after sunset
+DUSK_MS = (250, 500, 1000, 2000)
 MIN_SD_FREE_GB = 5
 MIN_NAS_FREE_GB = 50
 UPLOAD_EVERY_S = 1800
@@ -117,6 +121,18 @@ def settle_shots():
     return shots
 
 
+def dusk_shots(minute, sunset):
+    """Experiment 13: fixed exposures through the gap between auto's limit and the night frame."""
+    for point in range(DUSK_POINTS):
+        moment = sunset + DUSK_FROM_S + point * DUSK_EVERY_S
+        due = moment + (-moment % 60)
+        if due % SLOT_S < 60:
+            due += 60  # the real capture has this minute
+        if due == minute:
+            return [Shot(f"dusk-{ms}ms", shutter_us=ms * 1000, gain=1) for ms in DUSK_MS]
+    return []
+
+
 def day_shots(minute, sunset):
     """What to take in one minute of the day program."""
     if minute % SLOT_S < 60:
@@ -127,14 +143,14 @@ def day_shots(minute, sunset):
         if five:
             shots += [Shot("meter-average", metering="average"),
                       Shot("meter-spot", metering="spot")]
-        return shots
+        return shots + dusk_shots(minute, sunset)
     shots = [Shot("rate")]
     if sunset - SUN_LADDER_BEFORE_S <= minute < sunset - SUNSET_WINDOW_S and minute % 600 < 60:
         half = minute % 1800 < 60
         shots += [Shot("sun-100us", shutter_us=100, gain=1),
                   Shot("sun-500us", shutter_us=500, gain=1),
                   Shot("sun-2ms", shutter_us=2000, gain=1, raw=half)]
-    return shots
+    return shots + dusk_shots(minute, sunset)
 
 
 def night_rate_shots(minute):

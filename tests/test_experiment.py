@@ -90,6 +90,51 @@ class DayPlan(unittest.TestCase):
             self.assertLess(total, 180, f"minute {t} plans {total} s of shooting")
 
 
+class DuskLadder(unittest.TestCase):
+    """Experiment 13: fixed exposures through the gap before the night frame takes over."""
+
+    DUSK = ["dusk-250ms", "dusk-500ms", "dusk-1000ms", "dusk-2000ms"]
+
+    def minute(self, after_sunset_s):
+        t = SUNSET + after_sunset_s
+        return t - t % 60 + 60  # the first whole minute at or after that moment
+
+    def dusk_labels(self, t, sunset=SUNSET):
+        return [s.label for s in exp.day_shots(t, sunset) if s.label.startswith("dusk-")]
+
+    def test_takes_the_ladder_ten_minutes_after_sunset(self):
+        self.assertEqual(self.dusk_labels(self.minute(600)), self.DUSK)
+
+    def test_keeps_the_auto_frame_alongside_it(self):
+        labels = [s.label for s in exp.day_shots(self.minute(600), SUNSET)]
+        self.assertIn("ev+0", labels)
+
+    def test_repeats_every_five_minutes_only(self):
+        self.assertEqual(self.dusk_labels(self.minute(900)), self.DUSK)
+        self.assertEqual(self.dusk_labels(self.minute(660)), [])
+
+    def test_stops_after_fifty_minutes(self):
+        self.assertEqual(self.dusk_labels(self.minute(3000)), self.DUSK)
+        self.assertEqual(self.dusk_labels(self.minute(3300)), [])
+
+    def test_not_before_ten_minutes(self):
+        self.assertEqual(self.dusk_labels(self.minute(300)), [])
+
+    def test_a_ladder_that_lands_on_a_real_capture_moves_to_the_next_minute(self):
+        sunset = SLOT - 600  # so sunset + 10 min is exactly a capture slot
+        self.assertEqual(self.dusk_labels(SLOT, sunset), [])
+        self.assertEqual(self.dusk_labels(SLOT + 60, sunset), self.DUSK)
+
+    def test_gain_one_auto_white_balance_no_raw(self):
+        shots = [s for s in exp.day_shots(self.minute(600), SUNSET) if s.label.startswith("dusk-")]
+        self.assertEqual([s.shutter_us for s in shots], [250_000, 500_000, 1_000_000, 2_000_000])
+        self.assertTrue(all(s.gain == 1 and s.awbgains is None and not s.raw for s in shots))
+
+    def test_fits_the_gap_budget_with_the_bracket(self):
+        total = sum(exp.estimate_s(s.shutter_us) for s in exp.day_shots(self.minute(600), SUNSET))
+        self.assertLess(total, 180)
+
+
 class NightPlan(unittest.TestCase):
     def setUp(self):
         self.shots = exp.night_shots()
