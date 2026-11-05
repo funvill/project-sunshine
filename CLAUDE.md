@@ -79,7 +79,8 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
 ## Current phase: pilot on a Pi 3 B+ (decision changed 2026-11-03)
 - **Pilot moved from the Pi Zero W to a Pi 3 B+ Rev 1.3**, hostname `timelaps`, user `funvill`,
   because that is the setup where the UC-517 is known to work. Raspberry Pi OS Bookworm 32-bit
-  (armv7l), not reflashed. On Ethernet and Wi-Fi. Clock zone is America/Adak; filenames are UTC.
+  (armv7l), not reflashed. On Ethernet and Wi-Fi. Clock zone is America/Vancouver (changed from America/Adak 2026-11-04;
+  `tzdata` 2026c gives UTC-7 all year, shown as `MST`); filenames are UTC and nothing depends on the zone.
 - **Camera: Arducam UC-517** in the CAMERA port, `camera_auto_detect=0` + `dtoverlay=imx477`
   (auto-detect does not find it). Manually focused on the distant view.
 - 15-min captures only for now: burst mode (backlog #3) still needs a schedule decision.
@@ -89,7 +90,8 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   everything else not on `pi/keep-packages.txt` removed: 1,624 to 362 packages, 6.5 GB to 1.4 GB used.
   `sunset-lowwear.sh` applied. `cmdline.txt` had been empty for many boots (firmware defaults, no
   `fsck.repair`); it is now set. Kernels kept: v7 (this Pi) and v6 (Zero).
-- **SD card:** a 32 GB card (ID `SH32G`, make unknown) with ~26 GB free, about 10 days of frames
+- **SD card:** a 32 GB card (ID `SH32G`, manufacturer ID 0x03, which is normally SanDisk, dated
+  07/2021) with ~26 GB free, about 10 days of frames
   if the NAS is down, fewer with night frames. Run a write test and replace with a High Endurance
   card for the real run (a buying decision).
 - **SD writes, measured:** idle OS 584 KB per 10 min before `sunset-lowwear.sh`, 108 KB after
@@ -110,10 +112,17 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   cable was changed. With the replacement cable and the camera connected, the kernel still reported
   undervoltage three times in the first two minutes, with almost nothing running
   (`throttled=0x50005`). In the same period the shell lost `ls` and `sudo` and SSH failed, probably
-  the SD card dropping out (unproven; those logs were in RAM). **Do not enable the timers until a
-  5.1 V 2.5 A supply is in place** and the flags stay clear through real captures.
-- **Not done yet:** a suitable power supply, enabling the timers, final mounting and framing, foam
-  hood, Home Assistant alert.
+  the SD card dropping out (unproven; those logs were in RAM). Still needs a 5.1 V 2.5 A supply.
+- **Timers on (2026-11-04), before the new supply:** Steven's other tools read the frames on the NAS,
+  so sync and capture are enabled despite the undervoltage. Expect possible gaps until it's fixed.
+- **NAS space (2026-11-04):** the share reports 311 GB free of 11 TB (98% full). Steven can clear
+  10 TB when needed and is handling it, so space doesn't limit the capture plan.
+- **Experiments (#3):** `experiments/sunset-experiment.py`, copied to `~/sunset/experiments/`, shoots
+  between the real captures. Results go to `project_sunshine_experiments/` on the NAS, never the outbox
+  or the production folder. Scheduled by transient systemd timers (`exp-*`), which a reboot clears.
+- **Camera will move slightly** when the bracket and supply arrive: redo anything tied to framing.
+- **Not done yet:** a suitable power supply, final mounting and framing, foam hood, Home Assistant
+  alert.
 
 ### Pilot goals
 1. Window reflections with the foam hood, day and night (double-glazing ghosts).
