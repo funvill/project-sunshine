@@ -47,10 +47,11 @@ old="$(frames | head -n1)"; touch -d '10 minutes ago' $(frames)
 mkdir -p "$OUT_ROOT/.partial"; echo x > "$OUT_ROOT/.partial/half.jpg"; touch -d '10 minutes ago' "$OUT_ROOT/.partial/half.jpg"
 sync_; rc=$?
 check "exits 0" test "$rc" = 0
-check "frames arrived on NAS" test "$(find "$W/nas" -type f | wc -l | tr -d ' ')" = 3
+check "frames arrived on NAS" test "$(find "$W/nas" -type f | wc -l | tr -d ' ')" = 4
+check "daily system.json arrived too" test -n "$(find "$W/nas" -name system.json)"
 check "local copies removed" test -z "$(frames)"
 check ".partial untouched" test -e "$OUT_ROOT/.partial/half.jpg"
-check "sync ok logged" grep -q 'sync ok files=3' "$SYNC_LOG_FILE"
+check "sync ok logged" grep -q 'sync ok files=4' "$SYNC_LOG_FILE"
 fresh_env; capture; sync_
 check "files under 2 min old are not synced" test "$(count '*.jpg')" = 1
 
@@ -58,10 +59,10 @@ section "sync: NAS down keeps everything"
 fresh_env; capture; touch -d '10 minutes ago' $(frames)
 export STUB_RSYNC=fail; sync_; rc=$?
 check "exits non-zero" test "$rc" != 0
-check "frames still local" test "$(count '*')" = 3
+check "frames still local" test "$(count '*')" = 4
 check "failure logged" grep -q 'sync FAILED' "$SYNC_LOG_FILE"
 export STUB_RSYNC=ok; sync_
-check "catches up when NAS returns" test "$(find "$W/nas" -type f | wc -l | tr -d ' ')" = 3
+check "catches up when NAS returns" test "$(find "$W/nas" -type f | wc -l | tr -d ' ')" = 4
 
 section "sync: first boot, no outbox yet"
 fresh_env

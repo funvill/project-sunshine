@@ -58,6 +58,14 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   sunset, minutes from sunset). Site coordinates live in `sunset.env` (`SITE_LAT`/`SITE_LON`,
   currently approximate Burnaby, **set the real ones**) and are deliberately NOT written into
   frame files, in case frames are ever published.
+- **Per-frame `Capture` and `System` blocks, daily `system.json` (2026-11-04):** `sunset-meta.py`
+  adds how the frame was taken and the machine's state at that moment, including image checksums,
+  CPU temperature and disk space. What rarely changes (model, OS, kernel, versions, SD card, setup
+  note) goes in one `system.json` in each UTC day folder, and `Capture.system_id` links the two.
+  Frames before 20:15 UTC that day have no blocks; those from 20:15 to 21:30 UTC carry everything
+  on the frame (`schema_version` 1). It never touches the NAS path, and it leaves out anything
+  identifying (see `docs/setup.md`). **Change `SETUP_ID` in `sunset.env` whenever the camera, lens,
+  focus, iris, mount or hood changes**, including at the bracket move.
 - **Local-first storage**, rsync to NAS, delete local only after confirmed copy.
   (Writing straight to the NAS was rejected: a prior year-long Pi project lost frames when the
   NAS share didn't return after a power cut.)

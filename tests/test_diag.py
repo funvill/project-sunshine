@@ -107,6 +107,14 @@ class Outbox(unittest.TestCase):
             self.assertEqual(s["newest_frame"]["AnalogueGain"], 2.0)
             self.assertEqual(s["newest_frame"]["Lux"], 7.5)
 
+    def test_the_daily_system_file_is_not_the_newest_frame(self):
+        with tempfile.TemporaryDirectory() as d:
+            write(os.path.join(d, "wide/2026/11/04/a.json"), json.dumps({"Lux": 7.5}))
+            write(os.path.join(d, "wide/2026/11/04/system.json"), json.dumps({"records": []}))
+            os.utime(os.path.join(d, "wide/2026/11/04/a.json"), (NOW - 600, NOW - 600))
+            os.utime(os.path.join(d, "wide/2026/11/04/system.json"), (NOW - 5, NOW - 5))
+            self.assertEqual(diag.summarize_outbox(d, NOW)["newest_frame"]["Lux"], 7.5)
+
     def test_missing_outbox(self):
         s = diag.summarize_outbox("/nonexistent/outbox", NOW)
         self.assertEqual(s["files"], 0)

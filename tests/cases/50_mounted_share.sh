@@ -9,7 +9,7 @@ section "mounted share: normal sync"
 share_env; mkdir -p "$NAS_TARGET"
 sync_; rc=$?
 check "exits 0" test "$rc" = 0
-check "frames copied" test "$(nas_count)" = 3
+check "frames copied" test "$(nas_count)" = 4
 check "local copies removed" test -z "$(frames)"
 
 section "mounted share: target missing keeps every frame"
@@ -17,7 +17,7 @@ share_env
 sync_; rc=$?
 check "exits non-zero" test "$rc" != 0
 check "nothing copied" test "$(nas_count)" = 0
-check "frames still local" test "$(count '*')" = 3
+check "frames still local" test "$(count '*')" = 4
 check "logged" grep -q 'not available' "$SYNC_LOG_FILE"
 check "does not create the target" test ! -e "$NAS_TARGET"
 
@@ -26,7 +26,7 @@ share_env; mkdir -p "$NAS_TARGET"; export STUB_SAME_FS=1
 sync_; rc=$?
 check "exits non-zero" test "$rc" != 0
 check "nothing copied" test "$(nas_count)" = 0
-check "frames still local" test "$(count '*')" = 3
+check "frames still local" test "$(count '*')" = 4
 check "logged" grep -q 'same disk' "$SYNC_LOG_FILE"
 unset STUB_SAME_FS
 

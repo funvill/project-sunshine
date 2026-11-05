@@ -114,6 +114,26 @@ add_sun() { # add_sun <json>
   fi
 }
 
+# Add how the frame was taken and the state of the machine to its JSON, including
+# checksums of the image files. Bounded, and a failure here must never cost the frame.
+META_PY="${META_PY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sunset-meta.py}"
+META="ok"
+add_meta() { # add_meta <json> <auto|night> <started> <finished> <decision lux or ""> <key=value>...
+  local json="$1" kind="$2" started="$3" finished="$4" lux="$5" setting
+  shift 5
+  local args=(annotate "$json" --kind "$kind" --camera "$CAM_NAME" --slot "$TS"
+    --started "$started" --finished "$finished" --outbox "$OUT_ROOT"
+    --script "${BASH_SOURCE[0]}" --decision-lux "$lux"
+    --setup-id "${SETUP_ID:-}" --setup-note "${SETUP_NOTE:-}"
+    --nas-target "${NAS_TARGET:-}" --sync-log "${SYNC_LOG_FILE:-$(dirname "$OUT_ROOT")/sync.log}")
+  for setting in "$@"; do args+=(--set "$setting"); done
+  [[ "${FRAME_CHECKSUMS:-1}" == "1" ]] || args+=(--no-checksums)
+  if ! timeout 30 python3 "$META_PY" "${args[@]}" 2>"$ERR_FILE"; then
+    META="err"
+    log "WARN meta annotate failed: $(tail -n 1 "$ERR_FILE" 2>/dev/null)"
+  fi
+}
+
 # Move one finished set of files from .partial to the day directory.
 publish() { # publish <prefix-glob-base>
   mkdir -p "$DAY_DIR"
@@ -122,12 +142,15 @@ publish() { # publish <prefix-glob-base>
 
 # 1) Auto-exposure shot; -t gives AE/AWB time to settle on the slow Zero.
 RC=0
+SHOT_START="$(date +%s.%N)"
 run_cam -n -t 3000 ${RAW_ARGS[@]+"${RAW_ARGS[@]}"} \
   --metadata "$BASE.json" --metadata-format json \
   -o "$BASE.jpg" || RC=$?
+SHOT_END="$(date +%s.%N)"
 [[ "$RC" == 0 ]] || fail "capture" "$RC"
 [[ -s "$BASE.jpg" ]] || fail "capture(empty jpg)" 0
 add_sun "$BASE.json"
+add_meta "$BASE.json" auto "$SHOT_START" "$SHOT_END" "" settle_ms=3000 "raw=$RAW" "night_lux=$NIGHT_LUX"
 publish "$BASE"
 RAW_DAY="$RAW"
 
@@ -150,12 +173,16 @@ elif (( DARK )); then
     log "DISK ${DISK_PCT}% >= ${DISK_DROP_RAW_PCT}%: dropping DNG for night frame"
   fi
   RC=0
+  SHOT_START="$(date +%s.%N)"
   run_cam -n -t 1000 ${RAW_ARGS[@]+"${RAW_ARGS[@]}"} \
     --shutter "$NIGHT_SHUTTER_US" --gain "$NIGHT_GAIN" --awbgains 1.6,1.8 \
     --metadata "${BASE}_night.json" --metadata-format json \
     -o "${BASE}_night.jpg" || RC=$?
+  SHOT_END="$(date +%s.%N)"
   if [[ "$RC" == 0 && -s "${BASE}_night.jpg" ]]; then
     add_sun "${BASE}_night.json"
+    add_meta "${BASE}_night.json" night "$SHOT_START" "$SHOT_END" "$LUX" settle_ms=1000 "raw=$RAW" \
+      "shutter_us=$NIGHT_SHUTTER_US" "gain=$NIGHT_GAIN" awbgains=1.6,1.8 "night_lux=$NIGHT_LUX"
     publish "${BASE}_night"
     NIGHT=1
   else
@@ -167,4 +194,4 @@ fi
 
 # 4) Log SoC temperature and capture status for the long-term data layer.
 TEMP="$( (vcgencmd measure_temp 2>/dev/null || true) | cut -d= -f2)"
-log "lux=$LUX soc=${TEMP:-na} disk=${DISK_PCT}% raw=$RAW_DAY night=$NIGHT sun=$SUN ok"
+log "lux=$LUX soc=${TEMP:-na} disk=${DISK_PCT}% raw=$RAW_DAY night=$NIGHT meta=$META sun=$SUN ok"

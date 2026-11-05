@@ -85,7 +85,7 @@ def summarize_outbox(out_root, now):
                 continue              # the sync removed it while we were looking
             files += 1
             oldest = mtime if oldest is None else min(oldest, mtime)
-            if name.endswith(".json") and mtime > newest_json_time:
+            if name.endswith(".json") and name != "system.json" and mtime > newest_json_time:
                 newest_json, newest_json_time = path, mtime
     return {"files": files, "oldest_age_s": None if oldest is None else int(now - oldest),
             "newest_frame": _frame_settings(newest_json)}

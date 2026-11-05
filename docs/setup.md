@@ -89,17 +89,34 @@ outbox/<cam>/YYYY/MM/DD/<cam>_YYYYMMDDTHHMMSSZ.jpg   # auto exposure
                                               .dng   # RAW (SAVE_RAW=1)
                                               .json  # exposure, gain, lux, colour gains
                                          _night.*    # extra long exposure when dark
+outbox/<cam>/YYYY/MM/DD/system.json                  # what rarely changes, one per UTC day
 capture.log                                          # one line per capture (see below)
 sync.log                                             # one line per sync run
+.system-state-<cam>.json                             # the day's records, so the sync can't lose them
 ```
-`.json` also carries a `Sun` block: true-north azimuth, elevation, nearest sunset and
-minutes from it, computed offline by `sunset-sun.py` from `SITE_LAT`/`SITE_LON`.
-The site coordinates themselves are not written into the frame files.
+Each frame's `.json` holds rpicam-still's own camera fields at the top level, unchanged, plus these blocks:
+
+| Block | Written by | Contents |
+|---|---|---|
+| `Sun` | `sunset-sun.py` | True-north azimuth, elevation, nearest sunset and minutes from it, from `SITE_LAT`/`SITE_LON` |
+| `Capture` | `sunset-meta.py` | `schema_version`, camera, `kind` (`auto` or `night`), `setup_id`, `system_id`, slot and shot times, shot duration, settings asked for, the lux that triggered a night frame, size and SHA-256 of the JPEG and DNG |
+| `System` | `sunset-meta.py` | The machine at that moment: uptime, load, free memory, CPU temperature, core voltage, ARM clock, `throttled`, free disk space, frames waiting to sync, SD sectors read and written, network state and Wi-Fi signal, NTP state, NAS mount and last sync |
+
+`system.json` holds what rarely changes: hostname, Pi model, board revision, OS, kernel, firmware, Python, rpicam-apps and libcamera versions, camera overlay, time zone, total memory and disk, SD card identity, `setup_id`, `setup_note` and a hash identifying the capture script. It has a `records` list, normally with one entry. If something changes during the day, such as the setup at the bracket move, the file gains a record starting at that frame. A frame's `Capture.system_id` names the record that applied to it.
+
+`System.throttled` is the raw value from `vcgencmd get_throttled`. Bits 0-3 are the state now: undervoltage, frequency capped, throttled, soft temperature limit. Bits 16-19 are the same four since boot.
+
+- **Failures:** a source that can't be read becomes `null` and is named in `System.unavailable`. If `system.json` can't be written, `Capture.system_id` is `null` and the next frame tries again. If the whole step fails, the frame is kept and the log says `meta=err`.
+- **NAS:** the capture never touches the NAS path, because a dead share could hang it. Its state comes from `/proc/mounts` and `sync.log`, so `System.nas` can lag by up to one sync.
+- **Left out on purpose:** site coordinates, IP and MAC addresses, the Wi-Fi name, the NTP server, file paths, and the board and SD card serial numbers, in case frames are ever published.
+- **Changing the setup:** change `SETUP_ID` in `sunset.env` whenever the camera, lens, focus, iris, mount or hood changes.
+- **Verifying files:** `Capture.files` holds each image's SHA-256, so an archive can be checked for damage years later. `FRAME_CHECKSUMS=0` turns this off.
+- **Tools reading the folders:** anything that globs `*.json` must skip `system.json`. Frames taken before 21:45 UTC on 2026-11-04 use the older format, `schema_version` 1 or no `Capture` block at all.
 
 Frames are written to `outbox/.partial/` and moved into place when complete; the
 sync ignores dot-directories, so it can never ship a half-written frame.
 
-`capture.log` line: `<utc> cam=wide lux=... soc=... disk=NN% raw=1 night=0 sun=az=...,el=... ok`,
+`capture.log` line: `<utc> cam=wide lux=... soc=... disk=NN% raw=1 night=0 meta=ok sun=az=...,el=... ok`,
 or `FAILED ...` / `SKIPPED ...` / `DISK ...` lines explaining what was dropped and why.
 
 ### Safeguards
