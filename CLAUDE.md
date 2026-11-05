@@ -4,7 +4,8 @@ Five-year time-lapse of the western sky from Steven's 23rd-floor window in Burna
 looking toward downtown Vancouver. **Sunset is the subject.** Start date: **winter solstice,
 2026-12-21**. Pilot should run by late November 2026.
 
-This file is the project brief. `docs/setup.md` is the Pi setup guide.
+This file is the project brief. `docs/setup.md` is the Pi setup guide. `changelog.md` lists changes
+by date: add an entry with every change, including changes made only on the Pi.
 
 ## Repo layout
 - `pi/`: everything that runs on the Pi. Copied flat into `~/sunset`; the systemd units expect that path.
