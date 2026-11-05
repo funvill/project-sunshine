@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Stub: prints $STUB_JOURNAL, if set, and records how it was called.
+echo "journalctl $*" >> "${STUB_CALLS:-/dev/null}"
+[[ -n "${STUB_JOURNAL:-}" ]] && cat "$STUB_JOURNAL"
+exit 0

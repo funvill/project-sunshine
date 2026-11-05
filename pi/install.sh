@@ -21,11 +21,14 @@ if (( UC517 )); then
   echo "camera: set camera_auto_detect=0 and dtoverlay=imx477 (backup: $CFG.sunset-backup). Reboot to apply."
 fi
 
-for u in sunset-capture.service sunset-capture.timer sunset-sync.service sunset-sync.timer sunset-diag.service; do
+for u in sunset-capture.service sunset-capture.timer sunset-sync.service sunset-sync.timer sunset-diag.service sunset-kernlog.service; do
   sed -e "s|^User=.*|User=$RUN_USER|" -e "s|/home/pi/|$HOME_DIR/|g" "$HERE/systemd/$u" > "/etc/systemd/system/$u"
 done
 install -m 755 "$HERE/diag" /usr/local/bin/diag
+# Keeps a frozen Pi from staying frozen. Applies from the next reboot or systemctl daemon-reexec.
+install -D -m 644 "$HERE/systemd/sunset-watchdog.conf" /etc/systemd/system.conf.d/sunset-watchdog.conf
 systemctl daemon-reload
+systemctl enable --now sunset-kernlog.service
 if (( ENABLE )); then
   systemctl enable --now sunset-capture.timer sunset-sync.timer
   systemctl list-timers 'sunset*' --no-pager

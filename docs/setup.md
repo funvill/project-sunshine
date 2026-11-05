@@ -79,6 +79,11 @@ Then, once, and reboot: `sudo ./sunset-lowwear.sh`. System logs move to RAM (los
 `capture.log` and `sync.log` stay on the SD), swap goes, and background jobs that write to the
 card stop. Frames still go through the SD, and that is nearly all of the card's writes.
 
+`install.sh` also adds two things for a Pi nobody is watching. A 15 s hardware watchdog should
+reboot it after a hard freeze. Kernel messages are kept in `~/sunset/kernel.log`, the one system
+log that survives a reboot, so look there first after a crash. The log may still be empty for a
+hard freeze, since it only holds what the kernel managed to write.
+
 ## 6. Freeze it
 After a week of clean running: disable unattended upgrades and save a full
 SD card image to the NAS. That image is the recovery plan.

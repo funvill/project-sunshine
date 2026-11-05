@@ -1,0 +1,12 @@
+[Unit]
+Description=Project Sunset kernel log on the SD card
+
+[Service]
+User=pi
+SupplementaryGroups=systemd-journal
+ExecStart=/home/pi/sunset/sunset-kernlog.sh
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

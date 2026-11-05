@@ -71,6 +71,12 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   (Writing straight to the NAS was rejected: a prior year-long Pi project lost frames when the
   NAS share didn't return after a power cut.)
 - Monitoring: **Home Assistant alerts on the age of the newest file on the NAS** (> ~1 h).
+- **Freeze recovery (2026-11-05):** `install.sh` sets systemd's hardware watchdog to 15 s, so a hard
+  freeze should reboot the Pi, and the capture and sync timers come back by themselves. Tested with
+  a deliberate kernel panic: back on the network in 44 s. A partial freeze that leaves systemd
+  running won't trigger it, and a reboot clears any transient `exp-*` timers. `sunset-kernlog.service` keeps kernel
+  messages in `~/sunset/kernel.log` (up to two 1 MB files), flushed per line, because system logs
+  are in RAM and are lost on reboot.
 - Freeze software once stable: pinned OS, no auto-updates, full SD image saved on the NAS.
 - Mount: 3D printed in **PETG or ASA** (not PLA — sun heat), stuck to glass with **3M VHB**
   (no suction cups), **keyed two-part design** so a replacement camera returns to the same framing,
@@ -113,6 +119,10 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   undervoltage three times in the first two minutes, with almost nothing running
   (`throttled=0x50005`). In the same period the shell lost `ls` and `sudo` and SSH failed, probably
   the SD card dropping out (unproven; those logs were in RAM). Still needs a 5.1 V 2.5 A supply.
+- **Freeze (2026-11-05):** `timelaps` froze at about 01:26 UTC during an experiment run: red light
+  on, no green, no network, until a power-cycle at about 06:04 UTC. 19 production frames lost. Cause
+  unproven because the logs were in RAM; undervoltage is the leading suspect, with 7 warnings in the
+  first 7 minutes after the reboot. Not ruled out: a kernel or camera-stack bug.
 - **Timers on (2026-11-04), before the new supply:** Steven's other tools read the frames on the NAS,
   so sync and capture are enabled despite the undervoltage. Expect possible gaps until it's fixed.
 - **NAS space (2026-11-04):** the share reports 311 GB free of 11 TB (98% full). Steven can clear

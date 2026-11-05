@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Stub: records what would have been flushed to the card.
+echo "sync $*" >> "${STUB_CALLS:-/dev/null}"
+exit 0
