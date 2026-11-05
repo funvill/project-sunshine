@@ -288,6 +288,8 @@ class StreamCommand(unittest.TestCase):
         self.assertEqual(c[c.index("-o") + 1], "-")
         self.assertEqual(c[c.index("-t") + 1], "0")
         self.assertNotIn("--roi", c)
+        # Left to choose, the camera takes 1332x990 for this size: only the centre 65% of the sensor.
+        self.assertEqual(c[c.index("--mode") + 1], "2028:1520")
 
     def test_focus_view_crops_the_centre_at_full_sensor_resolution(self):
         c = diag.stream_command("focus", 1280, 960)

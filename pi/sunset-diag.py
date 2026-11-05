@@ -293,7 +293,8 @@ def stream_command(view, width, height):
     if view == "focus":
         # 20% of the sensor at its full resolution, so one screen pixel is one sensor pixel.
         return cmd + ["--mode", "4056:3040", "--roi", "0.4,0.4,0.2,0.2", "--width", "810", "--height", "608"]
-    return cmd + ["--width", str(width), "--height", str(height)]
+    # A mode must be named: on its own the camera picks 1332x990, which crops to the centre 65%.
+    return cmd + ["--mode", "2028:1520", "--width", str(width), "--height", str(height)]
 
 
 def parse_next_capture(text, now):
