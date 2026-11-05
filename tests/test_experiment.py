@@ -93,7 +93,7 @@ class DayPlan(unittest.TestCase):
 class DuskLadder(unittest.TestCase):
     """Experiment 13: fixed exposures through the gap before the night frame takes over."""
 
-    DUSK = ["dusk-250ms", "dusk-500ms", "dusk-1000ms", "dusk-2000ms"]
+    DUSK = ["dusk-250ms", "dusk-500ms", "dusk-1000ms", "dusk-2000ms", "dusk-4000ms"]
 
     def minute(self, after_sunset_s):
         t = SUNSET + after_sunset_s
@@ -127,7 +127,7 @@ class DuskLadder(unittest.TestCase):
 
     def test_gain_one_auto_white_balance_no_raw(self):
         shots = [s for s in exp.day_shots(self.minute(600), SUNSET) if s.label.startswith("dusk-")]
-        self.assertEqual([s.shutter_us for s in shots], [250_000, 500_000, 1_000_000, 2_000_000])
+        self.assertEqual([s.shutter_us for s in shots], [250_000, 500_000, 1_000_000, 2_000_000, 4_000_000])
         self.assertTrue(all(s.gain == 1 and s.awbgains is None and not s.raw for s in shots))
 
     def test_fits_the_gap_budget_with_the_bracket(self):
@@ -158,10 +158,184 @@ class NightRatePlan(unittest.TestCase):
     def test_ordinary_minute_is_one_fixed_exposure(self):
         shots = exp.night_rate_shots(SLOT + 3600 + 60)
         self.assertEqual([s.label for s in shots], ["rate-night"])
-        self.assertEqual((shots[0].shutter_us, shots[0].gain), (8_000_000, 1))
+        self.assertEqual((shots[0].shutter_us, shots[0].gain), (4_000_000, 1))
 
     def test_skips_the_real_capture_minute(self):
         self.assertEqual(exp.night_rate_shots(SLOT + 900), [])
+
+
+class NightSweep(unittest.TestCase):
+    """Experiment 14: every exposure and setting worth trying at night."""
+
+    def setUp(self):
+        self.shots = exp.night_sweep_shots()
+        self.labels = [s.label for s in self.shots]
+
+    def test_covers_every_shutter_and_gain(self):
+        ladder = [s for s in self.shots if s.label.startswith("ladder-")]
+        self.assertEqual(len(ladder), 12 * 7)
+        for label in ("ladder-100ms-g1", "ladder-30000ms-g8", "ladder-6000ms-g1.5", "ladder-20000ms-g3"):
+            self.assertIn(label, self.labels)
+
+    def test_labels_are_unique_so_results_can_be_told_apart(self):
+        self.assertEqual(len(self.labels), len(set(self.labels)))
+
+    def test_colour_gains_are_a_grid_not_a_guess(self):
+        grid = [s for s in self.shots if s.label.startswith("gains-")]
+        self.assertGreaterEqual(len(grid), 30)
+        for label in ("gains-1.6-1.6", "gains-2.6-2.8", "gains-2.2-2.2", "gains-2.07-2.28"):
+            self.assertIn(label, self.labels)
+
+    def test_every_white_balance_mode(self):
+        for mode in ("auto", "incandescent", "tungsten", "fluorescent", "indoor", "daylight", "cloudy"):
+            self.assertIn("awb-" + mode, self.labels)
+
+    def test_denoise_modes_at_several_exposures(self):
+        for mode in ("auto", "off", "cdn_off", "cdn_fast", "cdn_hq"):
+            for seconds in (2, 4, 8):
+                self.assertIn(f"denoise-{mode}-{seconds}s", self.labels)
+
+    def test_processing_swept_across_a_range(self):
+        for option, values in (("contrast", ("0.6", "0.8", "1.0", "1.2", "1.4")),
+                               ("saturation", ("0.6", "0.8", "1.0", "1.2", "1.4")),
+                               ("sharpness", ("0", "0.5", "1.0", "1.5", "2.0"))):
+            for value in values:
+                self.assertIn(f"{option}-{value}", self.labels)
+
+    def test_a_tuned_shot_passes_its_setting_to_the_camera(self):
+        shot = next(s for s in self.shots if s.label == "awb-tungsten")
+        cmd = shot.command("/tmp/x")
+        self.assertEqual(cmd[cmd.index("--awb") + 1], "tungsten")
+        self.assertIn("--shutter", cmd)
+
+    def test_fits_inside_one_sweep_interval(self):
+        total = sum(exp.estimate_s(s.shutter_us) for s in self.shots)
+        self.assertLess(total, exp.NIGHT_SWEEP_EVERY_S)
+
+
+class SweepDue(unittest.TestCase):
+    def test_first_sweep_runs_straight_away(self):
+        self.assertTrue(exp.sweep_due(SLOT, None, 7200))
+
+    def test_waits_for_the_interval(self):
+        self.assertFalse(exp.sweep_due(SLOT + 7199, SLOT, 7200))
+        self.assertTrue(exp.sweep_due(SLOT + 7200, SLOT, 7200))
+
+
+class DaySweep(unittest.TestCase):
+    """Experiment 15: one set of settings an hour through the day."""
+
+    def minute_at(self, past_hour):
+        return SLOT + 5 * 3600 + past_hour * 60
+
+    def test_runs_once_an_hour(self):
+        labels = [s.label for s in exp.day_shots(self.minute_at(exp.DAY_SWEEP_MINUTE), SUNSET)]
+        self.assertIn("sweep-ev-1", labels)
+        self.assertNotIn("sweep-ev-1", [s.label for s in exp.day_shots(self.minute_at(21), SUNSET)])
+
+    def test_never_on_a_capture_minute(self):
+        self.assertNotEqual(exp.DAY_SWEEP_MINUTE % 15, 0)
+
+    def test_fits_the_gap_budget(self):
+        total = sum(exp.estimate_s(s.shutter_us) for s in exp.day_sweep_shots())
+        self.assertLess(total, 180)
+
+
+class SunsetColour(unittest.TestCase):
+    """Experiment 16: auto white balance may be taking the orange out of a sunset."""
+
+    def test_every_five_minutes_tries_fixed_white_balance(self):
+        minute = SUNSET - (SUNSET % 300) - 600
+        if minute % 900 == 0:
+            minute += 300
+        labels = [s.label for s in exp.day_shots(minute, SUNSET)]
+        for label in ("ev-1", "awb-daylight", "awb-cloudy"):
+            self.assertIn(label, labels)
+
+
+class Sunrise(unittest.TestCase):
+    """Experiment 16: the same treatment either side of sunrise."""
+
+    SUNRISE = SUNSET - 9 * 3600
+
+    def minute(self, offset_s):
+        t = self.SUNRISE + offset_s
+        return t - t % 60 + 60
+
+    def labels(self, t):
+        return [s.label for s in exp.day_shots(t, SUNSET, self.SUNRISE)]
+
+    def test_brackets_around_sunrise(self):
+        t = self.minute(300)
+        if t % 900 < 60:
+            t += 60
+        self.assertEqual(self.labels(t)[:3], ["ev-2", "ev+0", "ev+2"])
+
+    def test_no_brackets_when_no_sunrise_is_given(self):
+        t = self.minute(300)
+        if t % 900 < 60:
+            t += 60
+        self.assertNotIn("ev-2", [s.label for s in exp.day_shots(t, SUNSET)])
+
+    def test_dawn_ladder_before_sunrise(self):
+        t = self.minute(-600)
+        if t % 900 < 60:
+            t += 60
+        self.assertIn("dawn-1000ms", self.labels(t))
+
+    def test_no_dawn_ladder_after_sunrise(self):
+        self.assertEqual([x for x in self.labels(self.minute(600)) if x.startswith("dawn-")], [])
+
+    def test_every_minute_fits_the_gap_budget(self):
+        for t in range(self.minute(-60 * 60), self.minute(60 * 60), 60):
+            total = sum(exp.estimate_s(s.shutter_us) for s in exp.day_shots(t, SUNSET, self.SUNRISE))
+            self.assertLess(total, 180, f"minute {t} plans {total} s of shooting")
+
+
+class FailureGuard(unittest.TestCase):
+    """A dead camera must not be retried non-stop: each try holds it through real capture slots."""
+
+    def failed(self, guard, times, now=SLOT):
+        for _ in range(times):
+            guard.note(False, now)
+
+    def test_keeps_shooting_through_a_single_failure(self):
+        guard = exp.FailureGuard()
+        self.failed(guard, 1)
+        self.assertTrue(guard.allowed(SLOT + 1))
+
+    def test_holds_off_after_repeated_failures(self):
+        guard = exp.FailureGuard()
+        self.failed(guard, exp.MAX_FAILURES)
+        self.assertFalse(guard.allowed(SLOT + 1))
+        self.assertFalse(guard.allowed(SLOT + exp.HOLD_OFF_S - 1))
+
+    def test_tries_again_after_the_hold(self):
+        guard = exp.FailureGuard()
+        self.failed(guard, exp.MAX_FAILURES)
+        self.assertTrue(guard.allowed(SLOT + exp.HOLD_OFF_S))
+
+    def test_one_more_failure_after_the_hold_holds_off_again(self):
+        guard = exp.FailureGuard()
+        self.failed(guard, exp.MAX_FAILURES)
+        later = SLOT + exp.HOLD_OFF_S
+        guard.note(False, later)
+        self.assertFalse(guard.allowed(later + 1))
+
+    def test_a_good_shot_clears_the_count(self):
+        guard = exp.FailureGuard()
+        self.failed(guard, exp.MAX_FAILURES - 1)
+        guard.note(True, SLOT)
+        self.failed(guard, exp.MAX_FAILURES - 1)
+        self.assertTrue(guard.allowed(SLOT + 1))
+
+    def test_a_good_shot_after_the_hold_returns_to_normal(self):
+        guard = exp.FailureGuard()
+        self.failed(guard, exp.MAX_FAILURES)
+        later = SLOT + exp.HOLD_OFF_S
+        guard.note(True, later)
+        guard.note(False, later)
+        self.assertTrue(guard.allowed(later + 1))
 
 
 class ShotCommand(unittest.TestCase):
