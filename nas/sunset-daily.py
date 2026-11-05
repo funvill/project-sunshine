@@ -265,7 +265,6 @@ def encode_video(cfg, frames, sunset_frame, crop, mask, out):
         chain = mask_filters(mask) + [
             "crop=%d:%d:%d:0" % (crop["width"], crop["height"], crop["x"]),
             "scale=1080:1920:flags=lanczos:out_range=tv",   # JPEGs are full range; yuv420p is not
-            "deflicker",
             "fps=24",
             "format=yuv420p"]
         run_tool([cfg.ffmpeg, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", list_path,

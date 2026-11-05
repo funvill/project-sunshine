@@ -708,6 +708,22 @@ class RealEncoding(unittest.TestCase):
             data = f.read()
         self.assertLess(data.index(b"moov"), data.index(b"mdat"), "moov atom must come first")
 
+    def test_sunset_frame_keeps_its_brightness_when_dark_frames_follow(self):
+        # Real dusk: a deflicker filter pulled the held sunset frame from 101 down to 59.
+        gray, black = os.path.join(self.dir, "gray.jpg"), os.path.join(self.dir, "black.jpg")
+        make_image(gray, color="gray")
+        make_image(black, color="black")
+        frames = [daily.Frame(SUNSET, gray, None) for _ in range(10)]
+        frames += [daily.Frame(SUNSET, black, None) for _ in range(5)]
+        tree = Tree(self)
+        os.makedirs(tree.daily)
+        out = os.path.join(tree.daily, "video.mp4")
+        crop = {"x": 0, "width": 270, "height": 480}
+        daily.encode_video(tree.config(), frames, frames[9], crop, [], out)
+        before = gray_row(out, 960, seek=0)
+        held = gray_row(out, 960, seek=1.0)   # 9 frames in, inside the 1.5 s hold
+        self.assertAlmostEqual(sum(held) / len(held), sum(before) / len(before), delta=2)
+
     def test_no_temporary_files_are_left_behind(self):
         tree = self.frames(68)
         self.run_real(tree)
