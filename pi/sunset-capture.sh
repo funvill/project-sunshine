@@ -8,8 +8,9 @@ OUT_ROOT="${OUT_ROOT:-$HOME/sunset/outbox}"
 LOG_FILE="${LOG_FILE:-$(dirname "$OUT_ROOT")/capture.log}"
 LOCK_FILE="${LOCK_FILE:-$(dirname "$OUT_ROOT")/.sunset-capture.lock}"
 NIGHT_LUX="${NIGHT_LUX:-5}"                       # below this lux, add a long exposure
-NIGHT_SHUTTER_US="${NIGHT_SHUTTER_US:-8000000}"   # 8 s
-NIGHT_GAIN="${NIGHT_GAIN:-4}"
+NIGHT_SHUTTER_US="${NIGHT_SHUTTER_US:-4000000}"   # 4 s
+NIGHT_GAIN="${NIGHT_GAIN:-1}"
+NIGHT_AWB="${NIGHT_AWB:-2.07,2.28}"               # red,blue colour gains, measured at night
 SAVE_RAW="${SAVE_RAW:-1}"                         # 1 = also save DNG
 CAPTURE_TIMEOUT_S="${CAPTURE_TIMEOUT_S:-60}"      # per rpicam-still call
 REQUIRE_TIME_SYNC="${REQUIRE_TIME_SYNC:-1}"       # 1 = refuse to capture until the clock has synced this boot
@@ -175,14 +176,14 @@ elif (( DARK )); then
   RC=0
   SHOT_START="$(date +%s.%N)"
   run_cam -n -t 1000 ${RAW_ARGS[@]+"${RAW_ARGS[@]}"} \
-    --shutter "$NIGHT_SHUTTER_US" --gain "$NIGHT_GAIN" --awbgains 1.6,1.8 \
+    --shutter "$NIGHT_SHUTTER_US" --gain "$NIGHT_GAIN" --awbgains "$NIGHT_AWB" \
     --metadata "${BASE}_night.json" --metadata-format json \
     -o "${BASE}_night.jpg" || RC=$?
   SHOT_END="$(date +%s.%N)"
   if [[ "$RC" == 0 && -s "${BASE}_night.jpg" ]]; then
     add_sun "${BASE}_night.json"
     add_meta "${BASE}_night.json" night "$SHOT_START" "$SHOT_END" "$LUX" settle_ms=1000 "raw=$RAW" \
-      "shutter_us=$NIGHT_SHUTTER_US" "gain=$NIGHT_GAIN" awbgains=1.6,1.8 "night_lux=$NIGHT_LUX"
+      "shutter_us=$NIGHT_SHUTTER_US" "gain=$NIGHT_GAIN" "awbgains=$NIGHT_AWB" "night_lux=$NIGHT_LUX"
     publish "${BASE}_night"
     NIGHT=1
   else

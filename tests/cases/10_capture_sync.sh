@@ -68,3 +68,16 @@ section "sync: first boot, no outbox yet"
 fresh_env
 sync_; rc=$?
 check "exits 0" test "$rc" = 0
+
+section "capture: night frame settings"
+fresh_env; export STUB_LUX=1
+capture
+night_call="$(grep -- '_night.jpg' "$STUB_CALLS")"
+check "default night shutter is 4 s" grep -q -- '--shutter 4000000' <<<"$night_call"
+check "default night gain is 1" grep -q -- '--gain 1 ' <<<"$night_call"
+check "default colour gains are the measured ones" grep -q -- '--awbgains 2.07,2.28' <<<"$night_call"
+fresh_env; export STUB_LUX=1 NIGHT_AWB=2.5,2.0
+capture
+check "NIGHT_AWB overrides the colour gains" grep -q -- '--awbgains 2.5,2.0' "$STUB_CALLS"
+check "the colour gains used are recorded on the frame" grep -rq 'awbgains=2.5,2.0\|"awbgains": "2.5,2.0"' "$OUT_ROOT"
+unset NIGHT_AWB

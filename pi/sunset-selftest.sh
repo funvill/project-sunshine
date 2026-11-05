@@ -14,8 +14,9 @@ OUT_ROOT="${OUT_ROOT:-$HOME/sunset/outbox}"
 LOG_FILE="${LOG_FILE:-$(dirname "$OUT_ROOT")/capture.log}"
 NAS_TARGET="${NAS_TARGET:-sunset@nas.local:/volume1/project-sunset/}"
 NIGHT_LUX="${NIGHT_LUX:-5}"
-NIGHT_SHUTTER_US="${NIGHT_SHUTTER_US:-8000000}"
-NIGHT_GAIN="${NIGHT_GAIN:-4}"
+NIGHT_SHUTTER_US="${NIGHT_SHUTTER_US:-4000000}"
+NIGHT_GAIN="${NIGHT_GAIN:-1}"
+NIGHT_AWB="${NIGHT_AWB:-2.07,2.28}"
 SAVE_RAW="${SAVE_RAW:-1}"
 CAPTURE_TIMEOUT_S="${CAPTURE_TIMEOUT_S:-60}"
 SUN_PY="${SUN_PY:-$HERE/sunset-sun.py}"
@@ -168,7 +169,7 @@ else
 
   head_ "Capture time: night shot (${NIGHT_SHUTTER_US} us, gain ${NIGHT_GAIN})"
   if timed_shot "night shot" -n -t 1000 ${RAW_ARGS[@]+"${RAW_ARGS[@]}"} \
-       --shutter "$NIGHT_SHUTTER_US" --gain "$NIGHT_GAIN" --awbgains 1.6,1.8 \
+       --shutter "$NIGHT_SHUTTER_US" --gain "$NIGHT_GAIN" --awbgains "$NIGHT_AWB" \
        --metadata "$TMP_ROOT/shot.json" --metadata-format json -o "$TMP_ROOT/shot.jpg"; then
     if (( ${CAP_S%.*} >= CAPTURE_TIMEOUT_S )); then fail "night shot took ${CAP_S}s, at the ${CAPTURE_TIMEOUT_S}s timeout"
     else pass "night shot took ${CAP_S}s (both shots must fit the service's TimeoutStartSec)"; fi

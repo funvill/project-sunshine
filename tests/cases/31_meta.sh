@@ -10,7 +10,7 @@ check "camera fields kept" test "$(field "$json" "d['ExposureTime']")" = 1000
 check "sun block kept" test "$(field "$json" "'azimuth_deg' in d['Sun']")" = True
 check "day kind" test "$(field "$json" "d['Capture']['kind']")" = auto
 check "night kind" test "$(field "$night" "d['Capture']['kind']")" = night
-check "night records its settings" test "$(field "$night" "d['Capture']['settings']['shutter_us']")" = 8000000
+check "night records its settings" test "$(field "$night" "d['Capture']['settings']['shutter_us']")" = 4000000
 check "night records the lux that triggered it" test "$(field "$night" "d['Capture']['decision_lux']")" = 1
 check "image checksums" grep -Eq '"sha256": "[0-9a-f]{64}"' "$json"
 check "dng recorded" test "$(field "$json" "d['Capture']['files']['dng']['bytes']")" = 7
