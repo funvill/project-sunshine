@@ -11,6 +11,7 @@ by date: add an entry with every change, including changes made only on the Pi.
 - `pi/`: everything that runs on the Pi. Copied flat into `~/sunset`; the systemd units expect that path.
 - `tests/`: offline tests with a stubbed camera and NAS. No Pi needed.
 - `experiments/`: pilot experiment runner (#3). Not part of the production capture.
+- `homeassistant/`: stale-frame alert, copied into Home Assistant by hand. Steps in `docs/setup.md`.
 - `docs/`: setup guide and hardware notes.
 
 Frames never go in this repo, and neither does `sunset.env`, which holds the real site coordinates.
@@ -131,9 +132,23 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
 - **Experiments (#3):** `experiments/sunset-experiment.py`, copied to `~/sunset/experiments/`, shoots
   between the real captures. Results go to `project_sunshine_experiments/` on the NAS, never the outbox
   or the production folder. Scheduled by transient systemd timers (`exp-*`), which a reboot clears.
-- **Camera will move slightly** when the bracket and supply arrive: redo anything tied to framing.
-- **Not done yet:** a suitable power supply, final mounting and framing, foam hood, Home Assistant
-  alert.
+- **Camera outage (2026-11-05):** the camera stopped delivering frames at about 07:17 UTC, and
+  41 production slots were lost. A driver reload, a reboot and a power-cycle didn't help; reseating
+  the ribbon at both ends did. The reason it failed is unknown. The reseat moved the camera about
+  1,400 px right, so `SETUP_ID` is `pilot-2`.
+- **Settings search (decided 2026-11-05):** Steven asked for wide experiments over a few days and for
+  me to choose the best settings for night, day, sunset and sunrise, posting the evidence on #3.
+  Night is 4 s gain 1, colour gains 2.07/2.28 for now (`NIGHT_AWB`). Steven will adjust focus,
+  so `SETUP_ID` changes then and sharpness gets rechecked. The foam hood is about 3 weeks away, so
+  reflections get rechecked after that too.
+- **Camera position (decided 2026-11-05):** it sits loose on a shelf and can't be put back exactly, so
+  testing continues from the new position until the new supply arrives.
+- **Camera will move again** when the bracket and supply arrive: redo anything tied to framing, and
+  change `SETUP_ID`.
+- **Home Assistant alert (2026-11-05):** installed from `homeassistant/`. HA reads the NAS share
+  directly at `/share/camera`, with its own copy of the `camera` login, and alerts about 70 to 75
+  minutes after the last frame. The phone notifier is set only in HA's copy of `sunset.yaml`.
+- **Not done yet:** a suitable power supply, final mounting and framing, foam hood.
 
 ### Pilot goals
 1. Window reflections with the foam hood, day and night (double-glazing ghosts).
@@ -206,7 +221,7 @@ Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi
 5. **Fog detection**: flag low-contrast frames.
 6. Port capture to **Picamera2** if finer control is needed than `rpicam-still` gives.
 7. SHT4x + TSL2591 logging.
-8. Home Assistant config for the stale-file alert.
+8. ~~Home Assistant config for the stale-file alert~~ **Done** (`homeassistant/`, steps in `docs/setup.md`).
 9. Mount design: start from Printables model 250692 or design a keyed plate + foam hood.
 10. Post-processing pipeline: deflicker, stabilisation, "sunset along the horizon" sequence
     (frame nearest each sunset), time slices, sky calendar.
