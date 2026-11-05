@@ -166,6 +166,33 @@ Stop the capture timer first for either of these.
 ### Tests (no Pi needed)
 `bash tests/run.sh` runs the scripts against stub `rpicam-still`/`rsync`/`df`/`ssh`.
 
+## Home Assistant alert
+Alerts when no new production frame has reached the NAS for an hour. It reads the NAS rather than
+the Pi, so it also catches a dead Pi, a dead camera or a stuck sync. Written for Home Assistant OS.
+
+1. **Connect the share.** Settings > System > Storage > Add network storage. Name `camera`, usage
+   **Share**, server `chipkin_nas.local`, protocol Samba, remote share `camera`, user `camera`.
+   It appears in Home Assistant as `/share/camera`. If you use another name or usage, set
+   `FRAME_ROOT` at the top of the script to match.
+2. **Copy the files** into Home Assistant's config folder (Samba or File editor add-on):
+   - `homeassistant/sunset_frame_age.sh` to `/config/sunset/sunset_frame_age.sh`
+   - `homeassistant/sunset.yaml` to `/config/packages/sunset.yaml`
+3. **Load packages.** In `configuration.yaml`, if it isn't already there:
+   ```yaml
+   homeassistant:
+     packages: !include_dir_named packages
+   ```
+4. **Add your phone.** Replace the commented line under `notifiers` in `sunset.yaml`. Your phone's
+   name is under Developer Tools > Actions: search for `notify.mobile_app`.
+5. **Restart.** Developer Tools > YAML > Check configuration, then restart Home Assistant.
+6. **Check the age.** `sensor.sunset_newest_frame_age` should show under 20 minutes within 5 minutes.
+7. **Test that it fires and clears.** Capture keeps running. Set `input_number.sunset_max_frame_age`
+   to 1 and wait up to 15 minutes for the notification, then set it back to 60: the "again" message
+   should arrive straight away.
+
+With the default settings, an alert comes 70 to 75 minutes after the last frame, then repeats every
+6 hours until frames return or you acknowledge it.
+
 ## Zero-specific limits
 - 12 MP JPEG + DNG takes several seconds: fine at 15 min, too slow for bracketed
   1-per-minute sunset bursts (move to a Pi 3 or newer for that).

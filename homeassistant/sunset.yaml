@@ -1,0 +1,52 @@
+# Project Sunset: alert when no new production frame has reached the NAS.
+# Install steps are in docs/setup.md. This reads the NAS directly, so it still works if the Pi is dead.
+
+command_line:
+  - sensor:
+      name: Sunset newest frame age
+      unique_id: sunset_newest_frame_age
+      command: "sh /config/sunset/sunset_frame_age.sh"
+      unit_of_measurement: min
+      scan_interval: 300
+      command_timeout: 30
+
+input_number:
+  sunset_max_frame_age:
+    name: Sunset max frame age
+    icon: mdi:timer-alert-outline
+    unit_of_measurement: min
+    min: 1
+    max: 1440
+    step: 1
+    initial: 60 # Also restores this after a restart. Lower it briefly to test the alert.
+    mode: box
+
+template:
+  - binary_sensor:
+      - name: Sunset frames stale
+        unique_id: sunset_frames_stale
+        device_class: problem
+        # An unknown age counts as stale, because the share being unreadable is also a failure.
+        # The delay keeps a Home Assistant restart from setting it off.
+        delay_on: "00:10:00"
+        state: >
+          {% set age = states('sensor.sunset_newest_frame_age') %}
+          {{ not is_number(age) or age | float > states('input_number.sunset_max_frame_age') | float(60) }}
+
+alert:
+  sunset_frames_stale:
+    name: Project Sunset has no new frames
+    entity_id: binary_sensor.sunset_frames_stale
+    state: "on"
+    repeat: 360
+    can_acknowledge: true
+    message: >
+      {% set age = states('sensor.sunset_newest_frame_age') %}
+      {% if is_number(age) %}The newest frame on the NAS is {{ age }} minutes old.
+      {% else %}Home Assistant can't find a recent frame on the NAS: no frames in two days, or the share is unreadable.{% endif %}
+      Open the diag page on timelaps to see why.
+    done_message: Project Sunset frames are reaching the NAS again.
+    notifiers:
+      - persistent_notification
+      # Add your phone here so an alert reaches you overnight, for example:
+      # - mobile_app_your_phone
