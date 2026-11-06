@@ -10,7 +10,7 @@ LOCK_FILE="${LOCK_FILE:-$(dirname "$OUT_ROOT")/.sunset-capture.lock}"
 NIGHT_LUX="${NIGHT_LUX:-5}"                       # below this lux, add a long exposure
 NIGHT_SHUTTER_US="${NIGHT_SHUTTER_US:-4000000}"   # 4 s
 NIGHT_GAIN="${NIGHT_GAIN:-1}"
-NIGHT_AWB="${NIGHT_AWB:-2.07,2.28}"               # red,blue colour gains, measured at night
+NIGHT_AWB="${NIGHT_AWB:-2.25,2.40}"               # red,blue colour gains, measured at night
 SAVE_RAW="${SAVE_RAW:-1}"                         # 1 = also save DNG
 CAPTURE_TIMEOUT_S="${CAPTURE_TIMEOUT_S:-60}"      # per rpicam-still call
 REQUIRE_TIME_SYNC="${REQUIRE_TIME_SYNC:-1}"       # 1 = refuse to capture until the clock has synced this boot

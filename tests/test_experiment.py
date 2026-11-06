@@ -183,7 +183,7 @@ class NightSweep(unittest.TestCase):
     def test_colour_gains_are_a_grid_not_a_guess(self):
         grid = [s for s in self.shots if s.label.startswith("gains-")]
         self.assertGreaterEqual(len(grid), 30)
-        for label in ("gains-1.6-1.6", "gains-2.6-2.8", "gains-2.2-2.2", "gains-2.07-2.28"):
+        for label in ("gains-1.6-1.6", "gains-2.6-2.8", "gains-2.2-2.2", "gains-2.25-2.40"):
             self.assertIn(label, self.labels)
 
     def test_every_white_balance_mode(self):

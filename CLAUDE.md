@@ -139,7 +139,9 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   1,400 px right, so `SETUP_ID` is `pilot-2`.
 - **Settings search (decided 2026-11-05):** Steven asked for wide experiments over a few days and for
   me to choose the best settings for night, day, sunset and sunrise, posting the evidence on #3.
-  Night is 4 s gain 1, colour gains 2.07/2.28 for now (`NIGHT_AWB`). Steven will adjust focus,
+  Night is 4 s gain 1 (confirmed by the first night sweep, 2026-11-06), with fixed colour gains
+  2.25/2.40 (`NIGHT_AWB`), which give a neutral grey sky. 2.07/2.28 left it green and auto white
+  balance drifted through the night. Nights 2 and 3 can still change this. Steven will adjust focus,
   so `SETUP_ID` changes then and sharpness gets rechecked. The foam hood is about 3 weeks away, so
   reflections get rechecked after that too.
 - **Camera position (decided 2026-11-05):** it sits loose on a shelf and can't be put back exactly, so

@@ -75,7 +75,7 @@ capture
 night_call="$(grep -- '_night.jpg' "$STUB_CALLS")"
 check "default night shutter is 4 s" grep -q -- '--shutter 4000000' <<<"$night_call"
 check "default night gain is 1" grep -q -- '--gain 1 ' <<<"$night_call"
-check "default colour gains are the measured ones" grep -q -- '--awbgains 2.07,2.28' <<<"$night_call"
+check "default colour gains are the measured ones" grep -q -- '--awbgains 2.25,2.40' <<<"$night_call"
 fresh_env; export STUB_LUX=1 NIGHT_AWB=2.5,2.0
 capture
 check "NIGHT_AWB overrides the colour gains" grep -q -- '--awbgains 2.5,2.0' "$STUB_CALLS"
