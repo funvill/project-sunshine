@@ -4,12 +4,17 @@
 seconds. It only reads frames and writes to its own folder.
 
 Each video runs from dark to dark. It ends on the first frame after sunset where the sun is at least
-9° below the horizon, and the next video starts on the frame after that, so every frame appears once.
-Night is a larger share of a winter video and day of a summer one. The 9° comes from one morning's
+9Â° below the horizon, and the next video starts on the frame after that, so every frame appears once.
+Night is a larger share of a winter video and day of a summer one. The 9Â° comes from one morning's
 Lux readings (2026-11-04) and is the `DARK_ELEVATION_DEG` constant, so check it against real dusks.
 
 The record's `start_utc` and `end_utc` give the range. With no record for the day before, the video
 covers the 24 hours before its end.
+
+Each frame carries its local time, as `2026-Nov-06 16:45`, at the bottom left, with
+"Project Sunshine   @FUNVILL" on the line above it. The text sits above the bottom 400 px and away
+from the right edge, which Instagram covers with the caption and buttons. Its position, size and
+wording are constants at the top of the script.
 
 **It posts nothing.** Publishing to Instagram is a later step. See
 [issue #2](https://github.com/funvill/project-sunshine/issues/2) for the plan and decisions.
@@ -46,6 +51,7 @@ be retried by the next run, and 2 when a required setting is missing.
 | `EXPECTED_FRAMES` | `96` | Frames in a full 24 hours, which sets the capture interval |
 | `MIN_FRAME_FRACTION` | `0.7` | Below this share of the frames expected between the video's start and end, the day is skipped. An estimate to tune |
 | `LOOKBACK_DAYS` | `2` | How far back a missed day is still caught up |
+| `FONT_FILE` | `/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf` | Font for the text on the video. The image installs this one |
 
 ## What it writes
 

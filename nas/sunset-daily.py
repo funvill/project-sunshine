@@ -40,6 +40,16 @@ SUNSET_HOLD_SECONDS = 1.5
 LOCK_STALE_SECONDS = 6 * 3600     # longer than any real run; a crash must not stop the job for good
 DEFAULT_TAGS = "#sunset #timelapse #raspberrypi"
 
+# Text drawn on the video, in 1080x1920 pixels. It sits above Instagram's caption and
+# buttons, which cover roughly the bottom 400 px and the right-hand 150 px of a Reel.
+OVERLAY_TITLE = "Project Sunshine"
+OVERLAY_HANDLE = "@FUNVILL"
+DEFAULT_FONT_FILE = "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"   # Alpine's font-dejavu
+TEXT_X = 60
+TITLE_Y, TITLE_SIZE = 1350, 46
+TIME_Y, TIME_SIZE = 1416, 64
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
 Frame = collections.namedtuple("Frame", "time jpg sun")
 
 
@@ -59,6 +69,7 @@ class Config:
     expected_frames: int = 96
     min_fraction: float = 0.7
     lookback_days: int = 2
+    font_file: str = DEFAULT_FONT_FILE
     ffmpeg: str = "ffmpeg"
     ffprobe: str = "ffprobe"
 
@@ -243,6 +254,42 @@ def concat_list(frames, sunset_frame):
     return "\n".join(lines) + "\n"
 
 
+def overlay_time(t, tz):
+    """The frame's local time as YYYY-MMM-DD HH:MM, in English whatever the locale."""
+    local = t.astimezone(tz)
+    return "%d-%s-%02d %02d:%02d" % (local.year, MONTHS[local.month - 1], local.day, local.hour, local.minute)
+
+
+def filter_quote(text):
+    """Quote a value for an ffmpeg filter option. Our text and font paths have no quotes."""
+    return "'%s'" % text.replace("\\", "/").replace("'", "").replace(":", "\\:")
+
+
+def drawtext(cfg, text, y, size, enable=None):
+    args = ["fontfile=" + filter_quote(cfg.font_file), "expansion=none", "text=" + filter_quote(text),
+            "x=%d" % TEXT_X, "y=%d" % y, "fontsize=%d" % size, "fontcolor=white",
+            "borderw=3", "bordercolor=black@0.6"]
+    if enable:
+        args.append("enable=" + filter_quote(enable))
+    return "drawtext=" + ":".join(args)
+
+
+def overlay_filters(cfg, frames, sunset_frame):
+    """The title line, and one timestamp per frame, each shown only while its frame is.
+    Frames reach these filters one each, at the times concat_list gives them."""
+    chain = [drawtext(cfg, "%s   %s" % (OVERLAY_TITLE, OVERLAY_HANDLE), TITLE_Y, TITLE_SIZE)]
+    start = 0.0
+    for i, frame in enumerate(frames):
+        end = start + FRAME_SECONDS + (SUNSET_HOLD_SECONDS if frame is sunset_frame else 0)
+        # Half a frame of slack each side; the last one also covers concat's repeated last file.
+        enable = "gte(t,%.4f)" % (start - FRAME_SECONDS / 2)
+        if i < len(frames) - 1:
+            enable += "*lt(t,%.4f)" % (end - FRAME_SECONDS / 2)
+        chain.append(drawtext(cfg, overlay_time(frame.time, cfg.tz), TIME_Y, TIME_SIZE, enable))
+        start = end
+    return chain
+
+
 def mask_filters(mask):
     return ["drawbox=x=%d:y=%d:w=%d:h=%d:color=black:t=fill" % tuple(box) for box in mask]
 
@@ -257,23 +304,30 @@ def run_tool(args):
 
 def encode_video(cfg, frames, sunset_frame, crop, mask, out):
     """Encode to the Reel format in the issue. The mask goes on before the crop, in
-    full-frame coordinates, so it stays on the same part of the scene as the crop moves."""
-    fd, list_path = tempfile.mkstemp(prefix=".concat-", suffix=".txt", dir=os.path.dirname(out))
+    full-frame coordinates, so it stays on the same part of the scene as the crop moves.
+    The filters go in a file: one timestamp per frame is too long for a command line."""
+    work = os.path.dirname(out)
+    fd, list_path = tempfile.mkstemp(prefix=".concat-", suffix=".txt", dir=work)
+    with os.fdopen(fd, "w") as f:
+        f.write(concat_list(frames, sunset_frame))
+    fd, filter_path = tempfile.mkstemp(prefix=".filters-", suffix=".txt", dir=work)
     try:
-        with os.fdopen(fd, "w") as f:
-            f.write(concat_list(frames, sunset_frame))
         chain = mask_filters(mask) + [
             "crop=%d:%d:%d:0" % (crop["width"], crop["height"], crop["x"]),
-            "scale=1080:1920:flags=lanczos:out_range=tv",   # JPEGs are full range; yuv420p is not
+            "scale=1080:1920:flags=lanczos:out_range=tv"]   # JPEGs are full range; yuv420p is not
+        chain += overlay_filters(cfg, frames, sunset_frame) + [
             "fps=24",
             "format=yuv420p"]
+        with os.fdopen(fd, "w") as f:
+            f.write(",\n".join(chain))
         run_tool([cfg.ffmpeg, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", list_path,
-                  "-vf", ",".join(chain), "-an", "-sn", "-map_metadata", "-1",
+                  "-filter_script:v", filter_path, "-an", "-sn", "-map_metadata", "-1",
                   "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-maxrate", "25M", "-bufsize", "50M",
                   "-flags", "+cgop", "-g", "48", "-use_editlist", "0", "-movflags", "+faststart",
                   "-f", "mp4", out])
     finally:
         os.remove(list_path)
+        os.remove(filter_path)
 
 
 def probe_frame_size(cfg, path):
@@ -431,7 +485,8 @@ def main():
                  tags=env.get("CAPTION_TAGS", DEFAULT_TAGS),
                  expected_frames=int(env.get("EXPECTED_FRAMES", "96")),
                  min_fraction=float(env.get("MIN_FRAME_FRACTION", "0.7")),
-                 lookback_days=int(env.get("LOOKBACK_DAYS", "2")))
+                 lookback_days=int(env.get("LOOKBACK_DAYS", "2")),
+                 font_file=env.get("FONT_FILE") or DEFAULT_FONT_FILE)
     return run(cfg, datetime.now(UTC))
 
 

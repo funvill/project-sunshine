@@ -24,6 +24,9 @@ UTC = timezone.utc
 PST = timezone(timedelta(hours=-8))   # enough for December cases; no tz database needed
 SUNSET = datetime(2026, 12, 22, 0, 14, tzinfo=UTC)   # local 21 December, 4:14 pm
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+FONT_CANDIDATES = (daily.DEFAULT_FONT_FILE, "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                   "C:/Windows/Fonts/arialbd.ttf", "/Library/Fonts/Arial Bold.ttf")
+TEST_FONT = next((f for f in FONT_CANDIDATES if os.path.exists(f)), None)
 
 
 def real_tz():
@@ -91,7 +94,7 @@ class Tree:
 
     def config(self, **over):
         values = dict(frames_dir=self.frames, daily_dir=self.daily, crop_file=self.crop_file,
-                      tz=PST, start_date=datetime(2026, 12, 21).date())
+                      tz=PST, start_date=datetime(2026, 12, 21).date(), font_file=TEST_FONT)
         values.update(over)
         return daily.Config(**values)
 
@@ -431,6 +434,21 @@ class Caption(unittest.TestCase):
         self.assertIn("12:05 pm", got)
 
 
+class OverlayTime(unittest.TestCase):
+    def test_is_year_short_month_day_and_24_hour_local_time(self):
+        self.assertEqual(daily.overlay_time(SUNSET, PST), "2026-Dec-21 16:14")
+
+    def test_frame_after_midnight_utc_keeps_its_local_date(self):
+        self.assertEqual(daily.overlay_time(datetime(2026, 12, 22, 7, 30, tzinfo=UTC), PST), "2026-Dec-21 23:30")
+
+    def test_summer_frame_uses_daylight_time(self):
+        self.assertEqual(daily.overlay_time(datetime(2027, 6, 22, 4, 22, tzinfo=UTC), real_tz()),
+                         "2027-Jun-21 21:22")
+
+    def test_seconds_are_dropped_not_rounded(self):
+        self.assertEqual(daily.overlay_time(datetime(2026, 11, 5, 6, 5, 34, tzinfo=UTC), PST), "2026-Nov-04 22:05")
+
+
 class ConcatList(unittest.TestCase):
     def test_shows_each_frame_a_twelfth_of_a_second_and_holds_sunset(self):
         frames = [daily.Frame(SUNSET, "/a/one.jpg", None), daily.Frame(SUNSET, "/a/two.jpg", None),
@@ -670,7 +688,7 @@ class RunWithoutEncoding(unittest.TestCase):
         self.assertEqual(crop["sun_x"], 2028)
 
 
-@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg not installed")
+@unittest.skipUnless(HAVE_FFMPEG and TEST_FONT, "ffmpeg or a bold font not installed")
 class RealEncoding(unittest.TestCase):
     """The real ffmpeg, against what the issue says Instagram needs."""
 
@@ -723,6 +741,56 @@ class RealEncoding(unittest.TestCase):
         before = gray_row(out, 960, seek=0)
         held = gray_row(out, 960, seek=1.0)   # 9 frames in, inside the 1.5 s hold
         self.assertAlmostEqual(sum(held) / len(held), sum(before) / len(before), delta=2)
+
+    def overlay_video(self, minutes, hold=-1):
+        """Gray frames at these minutes after SUNSET, encoded with the overlay."""
+        gray = os.path.join(self.dir, "gray.jpg")
+        make_image(gray, color="gray")
+        frames = [daily.Frame(SUNSET + timedelta(minutes=m), gray, None) for m in minutes]
+        tree = Tree(self)
+        os.makedirs(tree.daily)
+        out = os.path.join(tree.daily, "video.mp4")
+        daily.encode_video(tree.config(), frames, frames[hold], {"x": 0, "width": 270, "height": 480}, [], out)
+        return out
+
+    def band(self, path, top, height, seek):
+        """Rows top..top+height of one frame, as luma bytes."""
+        return b"".join(gray_row(path, y, seek=seek) for y in range(top, top + height))
+
+    def change(self, a, b):
+        """Mean luma difference. Compression noise alone stays well under 1."""
+        return sum(abs(x - y) for x, y in zip(a, b)) / len(a)
+
+    def test_title_and_timestamp_are_drawn_bottom_left_and_nothing_else(self):
+        out = self.overlay_video([0, 15, 30])
+        title = gray_row(out, daily.TITLE_Y + daily.TITLE_SIZE // 2, seek=0)
+        time_row = gray_row(out, daily.TIME_Y + daily.TIME_SIZE // 2, seek=0)
+        for row in (title, time_row):
+            self.assertGreater(max(row[:540]) - min(row[:540]), 100, "text should be drawn on the left")
+        self.assertGreater(max(title[540:800]) - min(title[540:800]), 100, "the handle follows the title")
+        self.assertLess(max(time_row[700:]) - min(time_row[700:]), 20, "the timestamp stays on the left")
+        for y in (100, 960, 1800):   # top, middle and Instagram's caption area stay clear
+            row = gray_row(out, y, seek=0)
+            self.assertLess(max(row) - min(row), 20, "row %d should be untouched" % y)
+
+    def test_timestamp_follows_each_frame(self):
+        out = self.overlay_video([0, 15, 30])   # frame 1 starts at 1/12 s, frame 2 is held from 2/12 s
+        top, height = daily.TIME_Y, daily.TIME_SIZE
+        first, second = self.band(out, top, height, 0.02), self.band(out, top, height, 0.1)
+        held_early, held_late = self.band(out, top, height, 0.3), self.band(out, top, height, 1.5)
+        self.assertGreater(self.change(first, second), 3)
+        self.assertGreater(self.change(second, held_early), 3)
+        self.assertLess(self.change(held_early, held_late), 1, "the held frame keeps its own timestamp")
+
+    def test_a_day_of_one_minute_frames_still_encodes(self):
+        # One timestamp filter per frame: 1,440 of them would not fit on a command line.
+        out = self.overlay_video(range(1440), hold=0)
+        self.assertAlmostEqual(float(probe(out)["format"]["duration"]), 1440 / 12 + 1.5, delta=0.2)
+
+    def test_title_stays_the_same_from_frame_to_frame(self):
+        out = self.overlay_video([0, 15, 30])
+        top, height = daily.TITLE_Y, daily.TITLE_SIZE
+        self.assertLess(self.change(self.band(out, top, height, 0.02), self.band(out, top, height, 0.3)), 1)
 
     def test_no_temporary_files_are_left_behind(self):
         tree = self.frames(68)
@@ -785,7 +853,7 @@ class CommandLine(unittest.TestCase):
         sunset = (datetime.now(UTC) - timedelta(hours=1)).replace(microsecond=0)
         tree.add_day(68, sunset=sunset)
         env = dict(os.environ, FRAMES_DIR=tree.frames, DAILY_DIR=tree.daily, CROP_FILE=tree.crop_file,
-                   SITE_TZ="America/Vancouver", START_DATE="2026-12-21")
+                   SITE_TZ="America/Vancouver", START_DATE="2026-12-21", FONT_FILE=TEST_FONT or "")
         got = subprocess.run([sys.executable, SCRIPT], env=env, capture_output=True, text=True)
         self.assertEqual(got.returncode, 0, got.stderr)
         self.assertEqual(len([n for n in os.listdir(tree.daily) if n.endswith(".mp4")]), 1)
