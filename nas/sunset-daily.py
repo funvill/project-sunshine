@@ -40,14 +40,14 @@ SUNSET_HOLD_SECONDS = 1.5
 LOCK_STALE_SECONDS = 6 * 3600     # longer than any real run; a crash must not stop the job for good
 DEFAULT_TAGS = "#sunset #timelapse #raspberrypi"
 
-# Text drawn on the video, in 1080x1920 pixels. It sits above Instagram's caption and
-# buttons, which cover roughly the bottom 400 px and the right-hand 150 px of a Reel.
+# Text drawn on the video, in 1080x1920 pixels, 140 px above the bottom edge. Instagram's
+# caption may cover it in the Reels feed; that was accepted (2026-11-07).
 OVERLAY_TITLE = "Project Sunshine"
 OVERLAY_HANDLE = "@FUNVILL"
 DEFAULT_FONT_FILE = "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"   # Alpine's font-dejavu
 TEXT_X = 60
-TITLE_Y, TITLE_SIZE = 1350, 46
-TIME_Y, TIME_SIZE = 1416, 64
+TITLE_Y, TITLE_SIZE = 1650, 46
+TIME_Y, TIME_SIZE = 1716, 64
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 Frame = collections.namedtuple("Frame", "time jpg sun")

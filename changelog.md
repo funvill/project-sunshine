@@ -5,6 +5,7 @@ Changes to Project Sunset by date, newest first. Dates are Vancouver local time.
 ## 2026-11-07
 
 ### Daily video
+- Moved the title and timestamp down so the timestamp ends 140 px above the bottom edge of the video, at Steven's request, accepting that Instagram's caption may cover them.
 - Each frame of the daily video now shows its local time (`2026-Nov-06 16:45`) at the bottom left, with "Project Sunshine   @FUNVILL" above it, placed clear of Instagram's caption and buttons. The Docker image now installs a font for it (`font-dejavu`), and `FONT_FILE` can point to another one.
 - The daily video's ffmpeg filters now go in a file instead of on the command line. With one timestamp per frame, a day of 1-minute frames would not fit on a command line.
 - Fixed two degree signs in `nas/README.md` that were saved as Latin-1 instead of UTF-8.

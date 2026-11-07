@@ -474,7 +474,7 @@ class RunWithoutEncoding(unittest.TestCase):
 
     def run_job(self, now=NOW, **over):
         def fake_encode(cfg, frames, sunset_frame, crop, mask, out):
-            self.encoded.append((out, len(frames), [f.time for f in frames]))
+            self.encoded.append((out, len(frames), [f.time for f in frames], sunset_frame))
             with open(out, "wb") as f:
                 f.write(b"video")
         return daily.run(self.tree.config(**over), now, encode=fake_encode,
@@ -497,6 +497,19 @@ class RunWithoutEncoding(unittest.TestCase):
         self.assertTrue(rec["caption"].startswith("Sunset, 21 December 2026"))
         self.assertTrue(os.path.exists(os.path.join(self.tree.daily, rec["video"])))
         self.assertFalse(rec["posted"])
+
+    def test_one_minute_frames_around_sunset_all_go_in(self):
+        # The Pi adds 1-a-minute frames near sunset on top of the 15-minute ones.
+        self.tree.add_day()
+        for m in range(-60, 31):
+            if m % 15:
+                self.tree.add(SUNSET + timedelta(minutes=m))
+        self.assertEqual(self.run_job(), 0)
+        times, held = self.encoded[0][2], self.encoded[0][3]
+        self.assertEqual(len(times), 96 + 91 - 7)
+        self.assertEqual(times, sorted(times))
+        self.assertEqual(held.time, SUNSET, "the hold is on the frame closest to sunset")
+        self.assertEqual(times[-1], SUNSET + timedelta(minutes=30), "it still ends on the first dark frame")
 
     def test_first_day_with_no_video_before_it_covers_24_hours(self):
         self.tree.add_day()
@@ -769,7 +782,8 @@ class RealEncoding(unittest.TestCase):
             self.assertGreater(max(row[:540]) - min(row[:540]), 100, "text should be drawn on the left")
         self.assertGreater(max(title[540:800]) - min(title[540:800]), 100, "the handle follows the title")
         self.assertLess(max(time_row[700:]) - min(time_row[700:]), 20, "the timestamp stays on the left")
-        for y in (100, 960, 1800):   # top, middle and Instagram's caption area stay clear
+        self.assertEqual(1920 - (daily.TIME_Y + daily.TIME_SIZE), 140, "140 px above the bottom edge")
+        for y in (100, 960, 1400):   # top, middle and the rest of the bottom half stay clear
             row = gray_row(out, y, seek=0)
             self.assertLess(max(row) - min(row), 20, "row %d should be untouched" % y)
 

@@ -12,9 +12,9 @@ The record's `start_utc` and `end_utc` give the range. With no record for the da
 covers the 24 hours before its end.
 
 Each frame carries its local time, as `2026-Nov-06 16:45`, at the bottom left, with
-"Project Sunshine   @FUNVILL" on the line above it. The text sits above the bottom 400 px and away
-from the right edge, which Instagram covers with the caption and buttons. Its position, size and
-wording are constants at the top of the script.
+"Project Sunshine   @FUNVILL" on the line above it, 140 px above the bottom edge. Instagram's caption
+may cover it in the Reels feed. Its position, size and wording are constants at the top of the
+script.
 
 **It posts nothing.** Publishing to Instagram is a later step. See
 [issue #2](https://github.com/funvill/project-sunshine/issues/2) for the plan and decisions.
