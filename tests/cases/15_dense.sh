@@ -82,3 +82,9 @@ if command -v flock >/dev/null 2>&1; then
 else
   echo "  (flock not installed here: lock tests skipped)"
 fi
+
+section "dense: disk guard still applies"
+dense_env; export STUB_DF_PCT=99 STUB_DF_FREE_MB=50
+dense; rc=$?
+check "nothing captured when nearly full" test -z "$(frames)"
+check "skip logged" grep -q 'SKIPPED: disk full' "$LOG_FILE"

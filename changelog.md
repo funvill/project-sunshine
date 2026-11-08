@@ -7,6 +7,9 @@ Changes to Project Sunset by date, newest first. Dates are Vancouver local time.
 ### Experiments
 - The experiment runner now keeps taking the fixed 100 µs and 500 µs direct-sun shots (experiment 7) every 5 minutes inside the 45 minutes before sunset, until sunset. At the `pilot-3` framing the sun only enters the frame in that window. **Pi:** deployed, and `day-5` restarted on it into the same folder.
 
+### Capture
+- Added a test that the disk guard also stops the 1-a-minute dense frames when the SD card is nearly full. The guard itself (85% drops the DNG, 95% skips the night frame, under 100 MB free skips the capture) was already in place.
+
 ## 2026-11-07
 
 ### Schedule
