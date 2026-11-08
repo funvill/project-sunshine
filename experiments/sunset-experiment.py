@@ -232,6 +232,11 @@ def day_shots(minute, sunset, sunrise=None):
                       Shot("ev-1", ev=-1),
                       Shot("awb-daylight", extra=("--awb", "daylight")),
                       Shot("awb-cloudy", extra=("--awb", "cloudy"))]
+            if minute < sunset:
+                # Experiment 7: at the pilot-3 framing the sun only enters the frame in the last
+                # ~30 minutes, so the fixed short exposures carry on until it sets.
+                shots += [Shot("sun-100us", shutter_us=100, gain=1),
+                          Shot("sun-500us", shutter_us=500, gain=1)]
         return shots + twilight
     shots = [Shot("rate")]
     if sunset - SUN_LADDER_BEFORE_S <= minute < sunset - SUNSET_WINDOW_S and (minute - 60) % 600 < 60:

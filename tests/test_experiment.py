@@ -94,6 +94,21 @@ class DayPlan(unittest.TestCase):
         minute = minute - minute % 600 + 60   # the minute after a regular capture
         self.assertIn("sun-100us", self.labels(minute))
 
+    def test_sun_ladder_continues_into_the_sunset_window_until_sunset(self):
+        # The sun is only in frame in the last ~30 minutes before sunset at the pilot-3 framing.
+        minute = SUNSET - (SUNSET % 300) - 600 + 60   # the minute after a regular capture
+        labels = self.labels(minute)
+        self.assertIn("sun-100us", labels)
+        self.assertIn("sun-500us", labels)
+
+    def test_sun_ladder_in_the_sunset_window_is_only_every_five_minutes(self):
+        minute = SUNSET - (SUNSET % 300) - 600 + 120   # two minutes after a regular capture
+        self.assertNotIn("sun-100us", self.labels(minute))
+
+    def test_no_sun_ladder_after_sunset(self):
+        minute = SUNSET - (SUNSET % 300) + 600 + 60
+        self.assertNotIn("sun-100us", self.labels(minute))
+
     def test_every_minute_of_the_sunset_window_fits_in_the_gap_budget(self):
         for t in range(SUNSET - SUNSET % 60 - 45 * 60, SUNSET + 45 * 60, 60):
             total = sum(exp.estimate_s(s.shutter_us) for s in exp.day_shots(t, SUNSET))
