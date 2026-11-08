@@ -9,6 +9,8 @@ refraction. "Sunset" is the upper limb touching the horizon (zenith 90.833 deg).
     sunset-sun.py position  [--time T]
     sunset-sun.py sunset    [--after T] [--epoch|--json]
     sunset-sun.py annotate  FRAME.json [FRAME2.json ...] [--time T]
+    sunset-sun.py dense     [--time T]    exit 0 and "sunrise"/"sunset" inside a
+                                          1-a-minute window, exit 1 and "none" outside
 
 Site comes from --lat/--lon or the SITE_LAT / SITE_LON environment variables
 (sunset.env). T is ISO 8601 (2026-12-21T16:00:00Z) or the filename form
@@ -24,6 +26,8 @@ from datetime import datetime, timedelta, timezone
 
 UTC = timezone.utc
 SUNSET_ZENITH = 90.833
+DENSE_DARK_DEG = -9.0      # dense windows reach out to the sun at this elevation
+DENSE_DAY_MIN = 60         # and this far into the day from sunrise / sunset
 
 
 def parse_time(text):
@@ -118,8 +122,9 @@ def sun_position(dt, lat, lon):
     return az, elev + refraction_deg(elev)
 
 
-def _sunset_for_noon_day(day, lat, lon):
-    """Sunset belonging to the solar day whose noon falls on UTC date `day` (datetime at 00:00Z)."""
+def _sunset_for_noon_day(day, lat, lon, sign=1):
+    """Sunset (sign=1) or sunrise (sign=-1) of the solar day whose noon falls on UTC date `day`
+    (datetime at 00:00Z). Both use the same sun height, so they match each other."""
     minutes = 720.0 - 4.0 * lon
     for _ in range(4):  # decl/eqtime move slowly; 3-4 passes converge to seconds
         decl, eqtime = solar_declination_eqtime(julian_day(day + timedelta(minutes=minutes)))
@@ -129,18 +134,41 @@ def _sunset_for_noon_day(day, lat, lon):
         if cos_h < -1.0 or cos_h > 1.0:
             return None  # polar day / night
         h = math.degrees(math.acos(cos_h))
-        minutes = 720.0 - 4.0 * lon - eqtime + 4.0 * h
+        minutes = 720.0 - 4.0 * lon - eqtime + sign * 4.0 * h
     return day + timedelta(minutes=minutes)
 
 
-def sunsets_around(dt, lat, lon, span=2):
+def sunsets_around(dt, lat, lon, span=2, sign=1):
     midnight = dt.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     out = []
     for d in range(-span, span + 1):
-        s = _sunset_for_noon_day(midnight + timedelta(days=d), lat, lon)
+        s = _sunset_for_noon_day(midnight + timedelta(days=d), lat, lon, sign)
         if s is not None:
             out.append(s)
     return sorted(out)
+
+
+def next_sunrise(after, lat, lon):
+    for s in sunsets_around(after, lat, lon, sign=-1):
+        if s > after:
+            return s
+    return None
+
+
+def dense_window(dt, lat, lon):
+    """"sunrise" from the sun at DENSE_DARK_DEG until DENSE_DAY_MIN after sunrise, "sunset" from
+    DENSE_DAY_MIN before sunset until the sun is down to DENSE_DARK_DEG, otherwise None."""
+    if sun_position(dt, lat, lon)[1] < DENSE_DARK_DEG:
+        return None
+    day = timedelta(minutes=DENSE_DAY_MIN)
+    dark = timedelta(hours=3)   # the sun reaches -9 deg well within this of sunrise/sunset here
+    for rise in sunsets_around(dt, lat, lon, span=1, sign=-1):
+        if rise - dark <= dt <= rise + day:
+            return "sunrise"
+    for sset in sunsets_around(dt, lat, lon, span=1):
+        if sset - day <= dt <= sset + dark:
+            return "sunset"
+    return None
 
 
 def next_sunset(after, lat, lon):
@@ -204,6 +232,8 @@ def main(argv=None):
     g = ss.add_mutually_exclusive_group()
     g.add_argument("--epoch", action="store_true", help="print Unix seconds")
     g.add_argument("--json", action="store_true")
+    sd = sub.add_parser("dense")
+    sd.add_argument("--time")
     sa = sub.add_parser("annotate")
     sa.add_argument("files", nargs="+")
     sa.add_argument("--time")
@@ -229,6 +259,10 @@ def main(argv=None):
                                   "azimuth_deg": round(az, 2), "after_utc": iso(after)}))
             else:
                 print(iso(s))
+        elif args.cmd == "dense":
+            window = dense_window(parse_time(args.time), lat, lon)
+            print(window or "none")
+            return 0 if window else 1
         else:
             dt = parse_time(args.time)
             for path in args.files:

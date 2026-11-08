@@ -386,6 +386,20 @@ class Annotate(CaptureBlock):
         self.run_main()
         self.assertEqual(sorted(os.listdir(self.d)), ["f.dng", "f.jpg", "f.json"])
 
+    def test_regular_schedule_by_default(self):
+        self.run_main()
+        with open(self.json_path) as f:
+            self.assertEqual(json.load(f)["Capture"]["schedule"], "regular")
+
+    def test_dense_frames_are_marked(self):
+        self.assertEqual(self.run_main("--schedule", "dense"), 0)
+        with open(self.json_path) as f:
+            self.assertEqual(json.load(f)["Capture"]["schedule"], "dense")
+
+    def test_unknown_schedule_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.run_main("--schedule", "burst")
+
     def test_bad_json_is_an_error_and_the_file_is_untouched(self):
         with open(self.json_path, "w") as f:
             f.write("{not json")

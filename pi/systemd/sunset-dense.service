@@ -1,0 +1,11 @@
+[Unit]
+Description=Project Sunset extra 1-a-minute frame around sunrise and sunset
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/sunset
+EnvironmentFile=-/home/pi/sunset/sunset.env
+# Exits at once outside the sunrise and sunset windows and on regular slot minutes.
+ExecStart=/home/pi/sunset/sunset-capture.sh --dense
+TimeoutStartSec=120

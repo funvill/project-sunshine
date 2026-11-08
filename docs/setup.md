@@ -5,7 +5,8 @@
 > are in the repo's `pi/` folder unless a path says otherwise.
 
 One IMX477 camera (Pi HQ or Arducam UC-517) on a Raspberry Pi.
-Captures every 15 minutes to the SD card, then syncs to the NAS every 5 minutes.
+Captures every 15 minutes to the SD card, then syncs to the NAS every 5 minutes. Around sunrise
+and sunset it adds a frame every minute (see "Dense frames" below).
 Local-first, so a NAS or Wi-Fi outage never loses frames.
 
 ## 1. Hardware
@@ -54,12 +55,26 @@ chmod +x *.sh
 cp sunset.env.example sunset.env      # edit NAS_TARGET, CAM_NAME, SITE_LAT, SITE_LON
 sudo ./install.sh --uc517    # installs units for your user; --uc517 sets the camera overlay
 sudo reboot                  # only needed if the camera config changed
-sudo systemctl enable --now sunset-capture.timer sunset-sync.timer
+sudo systemctl enable --now sunset-capture.timer sunset-sync.timer sunset-dense.timer
 ```
 Run the self-test first (camera, clock, disk, memory, capture time, IR-cut, NAS):
 `./sunset-selftest.sh` (`--quick` skips the timed captures, `--no-nas` skips the NAS).
 
 Test immediately: `sudo systemctl start sunset-capture.service && ls -R outbox`
+
+### Dense frames
+`sunset-dense.timer` runs `sunset-capture.sh --dense` every minute. It takes a frame only from the
+sun at -9° until 60 minutes after sunrise, and from 60 minutes before sunset until the sun is at
+-9° (`sunset-sun.py dense` decides, from `SITE_LAT`/`SITE_LON`). Outside those windows, and on the
+regular slot minutes, it exits without touching the camera or the log.
+- Same name, folder and auto exposure as the regular frame: `wide_<UTC>.jpg` + `.json`. No DNG and
+  no night frame.
+- `Capture.schedule` in the JSON is `"dense"` for these and `"regular"` for the 15-minute frames.
+- The regular frame always wins: it waits up to `LOCK_WAIT_S` (90 s) for a dense frame to finish,
+  a dense frame never waits, and a hung camera is given up after `DENSE_TIMEOUT_S` (30 s).
+- Log lines start `dense window=sunrise` or `dense window=sunset`.
+- Anything else that uses the camera (the experiment runner) must stay out of these windows.
+- To stop them: `sudo systemctl disable --now sunset-dense.timer`.
 Check schedule: `systemctl list-timers 'sunset*'`
 
 ## 5. Reduce SD card writes

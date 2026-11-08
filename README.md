@@ -4,9 +4,9 @@ A five-year time-lapse of the western sky through a window, with sunset as the s
 starts on the winter solstice, 2026-12-21. A pilot runs first on a Raspberry Pi 3 B+ with an IMX477
 camera.
 
-The Pi takes a frame every 15 minutes and saves it to its SD card. A sync then copies each frame to a
-NAS and removes the local copy once the copy succeeds, so a NAS or network outage does not lose
-frames.
+The Pi takes a frame every 15 minutes, and every minute around sunrise and sunset, and saves it to
+its SD card. A sync then copies each frame to a NAS and removes the local copy once the copy
+succeeds, so a NAS or network outage does not lose frames.
 
 ## Layout
 

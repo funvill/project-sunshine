@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 # Project Sunset - single capture for Pi Zero W + IMX477 (Pi HQ / Arducam UC-517)
 # Captures locally first; sunset-sync.sh moves frames to the NAS.
+#   sunset-capture.sh           the regular 15-minute frame (+ night frame when dark)
+#   sunset-capture.sh --dense   an extra 1-a-minute frame around sunrise and sunset:
+#                               JPEG + JSON only, same auto exposure as the regular frame
 set -euo pipefail
+
+SCHEDULE=regular
+for arg in "$@"; do
+  case "$arg" in
+    --dense) SCHEDULE=dense ;;
+    *) echo "sunset-capture.sh: unknown option $arg" >&2; exit 2 ;;
+  esac
+done
 
 CAM_NAME="${CAM_NAME:-wide}"                     # wide | tight
 OUT_ROOT="${OUT_ROOT:-$HOME/sunset/outbox}"
@@ -18,16 +29,15 @@ CLOCK_OK_FILE="${CLOCK_OK_FILE:-/dev/shm/sunset-clock-ok}"   # tmpfs: cleared on
 DISK_DROP_RAW_PCT="${DISK_DROP_RAW_PCT:-85}"      # at/above this % full, stop saving DNG
 DISK_SKIP_NIGHT_PCT="${DISK_SKIP_NIGHT_PCT:-95}"  # at/above this % full, skip the night frame
 DISK_MIN_FREE_MB="${DISK_MIN_FREE_MB:-100}"       # below this, skip everything (keep the OS and log writable)
+SLOT_EVERY_MIN="${SLOT_EVERY_MIN:-15}"            # regular slot spacing; dense mode leaves these minutes alone
+LOCK_WAIT_S="${LOCK_WAIT_S:-90}"                  # a regular capture waits this long for a dense one to finish
+DENSE_TIMEOUT_S="${DENSE_TIMEOUT_S:-30}"          # per rpicam-still call in dense mode, so a hang ends early
+SUN_PY="${SUN_PY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sunset-sun.py}"
 
-log() { echo "$(date -u +%FT%TZ) cam=$CAM_NAME $*" >> "$LOG_FILE" 2>/dev/null || true; }
+TAG=""
+log() { echo "$(date -u +%FT%TZ) cam=$CAM_NAME ${TAG}$*" >> "$LOG_FILE" 2>/dev/null || true; }
 
 mkdir -p "$(dirname "$LOG_FILE")" "$OUT_ROOT"
-
-# Never run two captures at once (camera is exclusive; a slow run must not collide).
-if command -v flock >/dev/null 2>&1; then
-  exec 9>"$LOCK_FILE"
-  flock -n 9 || { log "skipped: previous capture still running"; exit 0; }
-fi
 
 # Clock. The Zero has no RTC: after a power cut it boots with the time fake-hwclock
 # last saved, which is hours or days wrong until NTP answers. UTC filenames from a
@@ -43,6 +53,32 @@ clock_synced() {
   fi
   return 1
 }
+
+# Dense mode runs every minute, so everything that rules it out exits quietly: an
+# unsynced clock (the regular capture already logs that), a regular slot minute, and
+# any minute outside the sunrise and sunset windows.
+if [[ "$SCHEDULE" == dense ]]; then
+  [[ "$REQUIRE_TIME_SYNC" == "1" ]] && ! clock_synced && exit 0
+  MINUTE="$(date -u +%M)"
+  (( 10#$MINUTE % SLOT_EVERY_MIN == 0 )) && exit 0
+  [[ -n "${SITE_LAT:-}" && -n "${SITE_LON:-}" ]] || exit 0
+  WINDOW="$(python3 "$SUN_PY" dense 2>/dev/null)" || exit 0
+  TAG="dense window=$WINDOW "
+  CAPTURE_TIMEOUT_S="$DENSE_TIMEOUT_S"
+  SAVE_RAW=0
+fi
+
+# Never run two captures at once (the camera is exclusive). The regular frame always
+# wins: it waits for a dense frame to finish, and a dense frame never waits.
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$LOCK_FILE"
+  if [[ "$SCHEDULE" == dense ]]; then
+    flock -n 9 || { log "skipped: camera busy"; exit 0; }
+  else
+    flock -w "$LOCK_WAIT_S" 9 || { log "skipped: previous capture still running"; exit 0; }
+  fi
+fi
+
 if [[ "$REQUIRE_TIME_SYNC" == "1" ]] && ! clock_synced; then
   log "SKIPPED: clock not synced since boot (not capturing with an unverified UTC clock)"
   exit 1
@@ -100,7 +136,6 @@ fail() { # fail <what> <rc>
 
 # Add sun azimuth/elevation (true north) and minutes from sunset to a frame's JSON.
 # Pure arithmetic, no network. A failure here must never cost the frame.
-SUN_PY="${SUN_PY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sunset-sun.py}"
 SUN="na"
 add_sun() { # add_sun <json>
   local out
@@ -122,7 +157,7 @@ META="ok"
 add_meta() { # add_meta <json> <auto|night> <started> <finished> <decision lux or ""> <key=value>...
   local json="$1" kind="$2" started="$3" finished="$4" lux="$5" setting
   shift 5
-  local args=(annotate "$json" --kind "$kind" --camera "$CAM_NAME" --slot "$TS"
+  local args=(annotate "$json" --kind "$kind" --camera "$CAM_NAME" --schedule "$SCHEDULE" --slot "$TS"
     --started "$started" --finished "$finished" --outbox "$OUT_ROOT"
     --script "${BASH_SOURCE[0]}" --decision-lux "$lux"
     --setup-id "${SETUP_ID:-}" --setup-note "${SETUP_NOTE:-}"
@@ -154,6 +189,13 @@ add_sun "$BASE.json"
 add_meta "$BASE.json" auto "$SHOT_START" "$SHOT_END" "" settle_ms=3000 "raw=$RAW" "night_lux=$NIGHT_LUX"
 publish "$BASE"
 RAW_DAY="$RAW"
+
+# A dense frame is only this one shot: no night frame, so it stays short.
+if [[ "$SCHEDULE" == dense ]]; then
+  TEMP="$( (vcgencmd measure_temp 2>/dev/null || true) | cut -d= -f2)"
+  log "soc=${TEMP:-na} disk=${DISK_PCT}% raw=0 meta=$META sun=$SUN ok"
+  exit 0
+fi
 
 # 2) Read the scene lux the camera reported (9999 = unknown, so no night shot).
 LUX="$(sed -n 's/.*"Lux"[[:space:]]*:[[:space:]]*\([0-9.eE+-]*\).*/\1/p' "$DAY_DIR/$NAME.json" 2>/dev/null | head -n 1)"

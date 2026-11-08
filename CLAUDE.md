@@ -43,8 +43,12 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
 
 ## Decisions made
 - Capture every **15 min, 24/7**, day and night.
-- **Denser capture around sunset** (~1/min for the hour around sunset, bracketed ×3) —
-  needs a faster Pi than the Zero; deferred to the real build.
+- **Dense frames around sunrise and sunset (decided 2026-11-07, starts 02:30 UTC 2026-11-09):**
+  Steven chose 1 a minute after comparing daily videos at 15, 5, 3 and 1 min. Windows: sun at -9°
+  to 60 min after sunrise, and 60 min before sunset to -9°. On top of the 15-min frames, in the same
+  folder and names, JPEG + JSON only, same auto exposure, `Capture.schedule: "dense"`. The regular
+  slot always wins the camera. `sunset-dense.timer`; details in `docs/setup.md`. About 230 extra
+  frames a day in November, roughly 1 GB a day more on the NAS. The ×3 bracket is not done.
 - **Two cameras eventually**: one wide (all sunsets), one tight (downtown or another subject).
 - Hidden, compact setup. DSLR/mirrorless considered and set aside for size/visibility,
   though a used Sony a6300/a6400 tethered via gphoto2 remains the image-quality upgrade path.
@@ -219,7 +223,7 @@ Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi
 2. ~~Sun-position module~~ **Done**: `sunset-sun.py` (stdlib NOAA formula, no network). Writes the
    `Sun` block per frame; `sunset-sun.py sunset [--epoch|--json]` gives the next sunset for burst
    scheduling (backlog #3).
-3. **Sunset burst mode** (1/min, 3-shot bracket) — for the Pi 3, not the Zero.
+3. **Sunset burst mode**: 1/min done (dense frames, from 2026-11-09). The 3-shot bracket is not.
 4. **Sensor protection** for the telephoto camera based on sun azimuth vs. its FOV.
 5. **Fog detection**: flag low-contrast frames.
 6. Port capture to **Picamera2** if finer control is needed than `rpicam-still` gives.

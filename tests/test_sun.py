@@ -91,6 +91,70 @@ class SunMath(unittest.TestCase):
             sun.parse_time("tomorrow")
 
 
+class Sunrise(unittest.TestCase):
+    def test_sunrise_matches_the_frames_on_6_november(self):
+        # The frames' Sun blocks put the crossing at about 15:08Z (daily-video session, checked on the Pi).
+        r = sun.next_sunrise(utc(2026, 11, 6, 12, 0), LAT, LON)
+        self.assertLess(abs((r - utc(2026, 11, 6, 15, 8, 20)).total_seconds()), 90, r)
+
+    def test_sunrise_and_sunset_use_the_same_sun_height(self):
+        r = sun.next_sunrise(utc(2026, 11, 6, 12, 0), LAT, LON)
+        s = sun.next_sunset(utc(2026, 11, 6, 12, 0), LAT, LON)
+        self.assertAlmostEqual(sun.sun_position(r, LAT, LON)[1], sun.sun_position(s, LAT, LON)[1], delta=0.05)
+
+    def test_winter_solstice_sunrise(self):
+        # ~08:05 PST = 16:05 UTC
+        r = sun.next_sunrise(utc(2026, 12, 21, 12, 0), LAT, LON)
+        self.assertLess(abs((r - utc(2026, 12, 21, 16, 5)).total_seconds()), 3 * 60, r)
+
+
+class DenseWindow(unittest.TestCase):
+    """1-a-minute frames: sun at -9 deg to sunrise + 60 min, and sunset - 60 min to -9 deg."""
+    def window(self, *t):
+        return sun.dense_window(utc(*t), LAT, LON)
+
+    def test_around_sunrise(self):
+        rise = sun.next_sunrise(utc(2026, 11, 6, 12, 0), LAT, LON)
+        self.assertEqual(sun.dense_window(rise, LAT, LON), "sunrise")
+        self.assertEqual(sun.dense_window(rise + timedelta(minutes=59), LAT, LON), "sunrise")
+        self.assertIsNone(sun.dense_window(rise + timedelta(minutes=61), LAT, LON))
+
+    def test_around_sunset(self):
+        sset = sun.next_sunset(utc(2026, 11, 6, 12, 0), LAT, LON)
+        self.assertEqual(sun.dense_window(sset, LAT, LON), "sunset")
+        self.assertEqual(sun.dense_window(sset - timedelta(minutes=59), LAT, LON), "sunset")
+        self.assertIsNone(sun.dense_window(sset - timedelta(minutes=61), LAT, LON))
+
+    def test_dark_ends_at_minus_9_degrees(self):
+        sset = sun.next_sunset(utc(2026, 11, 6, 12, 0), LAT, LON)
+        t = sset
+        while sun.sun_position(t, LAT, LON)[1] >= -9:
+            self.assertEqual(sun.dense_window(t, LAT, LON), "sunset")
+            t += timedelta(minutes=1)
+        self.assertIsNone(sun.dense_window(t, LAT, LON))
+        self.assertLess((t - sset).total_seconds(), 90 * 60)   # about an hour at this latitude
+
+    def test_dawn_starts_at_minus_9_degrees(self):
+        rise = sun.next_sunrise(utc(2026, 11, 6, 12, 0), LAT, LON)
+        t = rise
+        while sun.sun_position(t, LAT, LON)[1] >= -9:
+            self.assertEqual(sun.dense_window(t, LAT, LON), "sunrise")
+            t -= timedelta(minutes=1)
+        self.assertIsNone(sun.dense_window(t, LAT, LON))
+
+    def test_midday_and_midnight_are_not_dense(self):
+        self.assertIsNone(self.window(2026, 11, 6, 20, 0))     # noon local
+        self.assertIsNone(self.window(2026, 11, 6, 9, 0))      # 1 am local
+        self.assertIsNone(self.window(2027, 6, 21, 20, 0))     # summer noon
+        self.assertIsNone(self.window(2027, 6, 22, 9, 0))      # summer 2 am, sun about -17
+
+    def test_summer_windows_exist(self):
+        sset = sun.next_sunset(utc(2027, 6, 21, 12, 0), LAT, LON)
+        rise = sun.next_sunrise(utc(2027, 6, 22, 6, 0), LAT, LON)
+        self.assertEqual(sun.dense_window(sset + timedelta(minutes=30), LAT, LON), "sunset")
+        self.assertEqual(sun.dense_window(rise + timedelta(minutes=30), LAT, LON), "sunrise")
+
+
 class Cli(unittest.TestCase):
     def run_cli(self, *args, env=None):
         e = dict(os.environ)
@@ -138,6 +202,16 @@ class Cli(unittest.TestCase):
         j = json.loads(self.run_cli("sunset", "--after", "2026-12-21T20:00:00Z", "--json", env=env).stdout)
         self.assertEqual(int(e.stdout), j["epoch"])
         self.assertTrue(j["sunset_utc"].startswith("2026-12-22T00:1"))
+
+    def test_dense_exit_status(self):
+        env = {"SITE_LAT": str(LAT), "SITE_LON": str(LON)}
+        r = self.run_cli("dense", "--time", "20261107T003000Z", env=env)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "sunset"))
+        r = self.run_cli("dense", "--time", "20261106T153000Z", env=env)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "sunrise"))
+        r = self.run_cli("dense", "--time", "20261106T200000Z", env=env)
+        self.assertEqual((r.returncode, r.stdout.strip()), (1, "none"))
+        self.assertEqual(self.run_cli("dense").returncode, 2)   # no site
 
 
 if __name__ == "__main__":

@@ -339,9 +339,10 @@ def slot_iso(slot):
 
 
 def capture_block(json_path, data, kind, camera, slot, started, finished, setup_id, system_id,
-                  settings, decision_lux, checksums):
+                  settings, decision_lux, checksums, schedule="regular"):
     base = json_path[:-len(".json")] if json_path.endswith(".json") else json_path
-    block = {"schema_version": SCHEMA_VERSION, "camera": camera, "kind": kind}
+    # schedule: "regular" for the 15-minute slots, "dense" for the extra 1-a-minute frames.
+    block = {"schema_version": SCHEMA_VERSION, "camera": camera, "kind": kind, "schedule": schedule}
     if setup_id:
         block["setup_id"] = setup_id
     block["system_id"] = system_id
@@ -376,7 +377,7 @@ def annotate(args):
     data["Capture"] = capture_block(
         args.file, data, kind=args.kind, camera=args.camera, slot=args.slot, started=args.started,
         finished=args.finished, setup_id=args.setup_id, system_id=system_id, settings=args.set,
-        decision_lux=args.decision_lux, checksums=not args.no_checksums)
+        decision_lux=args.decision_lux, checksums=not args.no_checksums, schedule=args.schedule)
     data["System"] = system_block(args.root, args.outbox, args.nas_target or "", sync_log)
     if system_id is None:
         data["System"]["unavailable"].append("system_json")
@@ -392,6 +393,7 @@ def main(argv=None):
     a.add_argument("file")
     a.add_argument("--kind", required=True, choices=["auto", "night"])
     a.add_argument("--camera", required=True)
+    a.add_argument("--schedule", default="regular", choices=["regular", "dense"])
     a.add_argument("--slot", required=True, help="the frame's UTC filename time")
     a.add_argument("--started", required=True)
     a.add_argument("--finished", required=True)

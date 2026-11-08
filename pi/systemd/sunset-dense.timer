@@ -1,0 +1,9 @@
+[Unit]
+Description=Project Sunset dense frames: check every minute
+
+[Timer]
+OnCalendar=*:*:00
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
