@@ -129,7 +129,11 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   cable was changed. With the replacement cable and the camera connected, the kernel still reported
   undervoltage three times in the first two minutes, with almost nothing running
   (`throttled=0x50005`). In the same period the shell lost `ls` and `sudo` and SSH failed, probably
-  the SD card dropping out (unproven; those logs were in RAM). Still needs a 5.1 V 2.5 A supply.
+  the SD card dropping out (unproven; those logs were in RAM).
+- **New power supply (2026-11-08, about 05:40 UTC):** Steven replaced the supply (model and rating
+  not recorded here). The last undervoltage warning was at 05:30 UTC, just before the swap; in the
+  first 3.5 hours after it there were none (`throttled=0x80000`: only the soft temperature limit,
+  no undervoltage bits). Keep watching for a few days before calling it fixed.
 - **Freeze (2026-11-05):** `timelaps` froze at about 01:26 UTC during an experiment run: red light
   on, no green, no network, until a power-cycle at about 06:04 UTC. 19 production frames lost. Cause
   unproven because the logs were in RAM; undervoltage is the leading suspect, with 7 warnings in the
@@ -144,13 +148,27 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
 - **Camera outage (2026-11-05):** the camera stopped delivering frames at about 07:17 UTC, and
   41 production slots were lost. A driver reload, a reboot and a power-cycle didn't help; reseating
   the ribbon at both ends did. The reason it failed is unknown. The reseat moved the camera about
-  1,400 px right, so `SETUP_ID` is `pilot-2`.
+  1,400 px right, so `SETUP_ID` was `pilot-2`.
+- **Refocus (2026-11-08, about 05:35 UTC):** Steven refocused using the diag page's focus peaking,
+  during the same power-off as the supply swap. `SETUP_ID` is now `pilot-3` (set at 09:19 UTC, so
+  frames from about 05:45 to 09:15 UTC still say `pilot-2`). Night frames are about 3x sharper by
+  Laplacian variance on the city band (about 48 before, 155 after), and lit windows that were blobs
+  now show their frames. The camera also turned: the skyline moved about 650 px left and 200 px up
+  (about 10° to the right, same scale), measured by matching skyline patches across the refocus.
+- **Framing vs the sunset swing (estimate, 2026-11-08):** fitting skyline landmarks (downtown
+  Vancouver, Oakridge) with known bearings gives a rectilinear lens of about 5.6 mm (f ≈ 3,630 px,
+  ~58° horizontal). At `pilot-3` the frame spans about 239° to 298° true. Predicted: the sunset is
+  out of frame on the left from about Nov 21 to Jan 19 (Dec solstice 233.7° is ~6° past the edge)
+  and on the right from about May 7 to Aug 4 (June solstice 308.8° is ~11° past). The near towers
+  hide it for about a week each around Feb 23-Mar 3 / Oct 10-18, Mar 9-18 / Sep 24-Oct 3 and
+  Apr 28-May 6 / Aug 5-14. This lens cannot cover the 75° swing at any heading. Not yet checked
+  against a real sunset: every afternoon since the pilot began has been overcast.
 - **Settings search (decided 2026-11-05):** Steven asked for wide experiments over a few days and for
   me to choose the best settings for night, day, sunset and sunrise, posting the evidence on #3.
   Night is 4 s gain 1 (confirmed by the first night sweep, 2026-11-06), with fixed colour gains
   2.25/2.40 (`NIGHT_AWB`), which give a neutral grey sky. 2.07/2.28 left it green and auto white
-  balance drifted through the night. Nights 2 and 3 can still change this. Steven will adjust focus,
-  so `SETUP_ID` changes then and sharpness gets rechecked. The foam hood is about 3 weeks away, so
+  balance drifted through the night. Nights 2 and 3 can still change this. Focus was adjusted on
+  2026-11-08 (`pilot-3`), so sharpness-dependent results from before then don't carry over. The foam hood is about 3 weeks away, so
   reflections get rechecked after that too.
 - **Camera position (decided 2026-11-05):** it sits loose on a shelf and can't be put back exactly, so
   testing continues from the new position until the new supply arrives.
@@ -159,7 +177,13 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
 - **Home Assistant alert (2026-11-05):** installed from `homeassistant/`. HA reads the NAS share
   directly at `/share/camera`, with its own copy of the `camera` login, and alerts about 70 to 75
   minutes after the last frame. The phone notifier is set only in HA's copy of `sunset.yaml`.
-- **Not done yet:** a suitable power supply, final mounting and framing, foam hood.
+- **Not done yet:** confirming the new supply over several days, final mounting and framing, foam hood.
+- **To do: heatsink on `timelaps` (2026-11-08).** SoC temperature at capture is 54.8 to 58.5 °C,
+  and the Pi 3 B+ soft limit is 60 °C (`throttled=0x80000`: reached since boot). It runs close to
+  the limit while experiments add load, and summer sun through the window will add more. On the
+  sunny afternoon of Nov 8, with the diag stream running, it reached 61.8 °C and the soft limit was
+  active (`0x80008`, CPU held at 1.2 GHz); captures were unaffected. A small
+  stick-on heatsink is enough to start with (a buying decision, Steven's call).
 
 ### Pilot goals
 1. Window reflections with the foam hood, day and night (double-glazing ghosts).
@@ -184,8 +208,8 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   for this board). `sunset-selftest.sh` therefore judges it from image colour (heuristic). Has a
   22-pin connector, not the 15-pin one on the official HQ camera. Needs
   `camera_auto_detect=0` + `dtoverlay=imx477`. Known detection issues reported on Pi 3 + Bookworm 64-bit.
-  Has an **unlabelled CS/C-mount lens** with iris ring; identify by measuring:
-  focal length (mm) ≈ 6.29 × distance ÷ visible width.
+  **Currently fitted with the official Pi 6 mm CS lens** (Steven, 2026-11-08); the skyline fit gives
+  about 5.6 mm and ~58° H, consistent with it. Too narrow for the sunset swing: see issue #4.
 - **Pi HQ Camera lenses (Adafruit):** 6 mm wide (#4563, ~55° H) and 16 mm telephoto (#4562, ~22° H).
   Neither alone covers the 73° sunset swing. A ~3–4 mm CS lens (~90°) is the cheap fix.
   Unclear whether an official Pi HQ camera body is owned or only the UC-517.
