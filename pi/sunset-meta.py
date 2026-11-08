@@ -341,7 +341,7 @@ def slot_iso(slot):
 def capture_block(json_path, data, kind, camera, slot, started, finished, setup_id, system_id,
                   settings, decision_lux, checksums, schedule="regular"):
     base = json_path[:-len(".json")] if json_path.endswith(".json") else json_path
-    # schedule: "regular" for the 15-minute slots, "dense" for the extra 1-a-minute frames.
+    # schedule: "regular" for the 5-minute slots, "dense" for the extra 1-a-minute frames.
     block = {"schema_version": SCHEMA_VERSION, "camera": camera, "kind": kind, "schedule": schedule}
     if setup_id:
         block["setup_id"] = setup_id

@@ -1,4 +1,4 @@
-# Dense mode: 1-a-minute frames around sunrise and sunset, on top of the 15-minute slots.
+# Dense mode: 1-a-minute frames around sunrise and sunset, on top of the 5-minute slots.
 # sun_wrap answers "dense" from STUB_DENSE (sunrise|sunset|none) and hands everything
 # else to the real sunset-sun.py, so the tests don't depend on today's sun.
 dense_env() {

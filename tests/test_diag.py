@@ -34,6 +34,15 @@ def write(path, text):
         f.write(text)
 
 
+
+def timer_spacing_s():
+    """Minutes between regular captures, read from the production capture timer."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pi", "systemd", "sunset-capture.timer")
+    with open(path) as f:
+        spec = [l.split("=", 1)[1].strip() for l in f if l.startswith("OnCalendar=")][0]
+    return int(spec.split("/")[1]) * 60
+
+
 class Throttled(unittest.TestCase):
     def test_all_clear(self):
         self.assertEqual(diag.parse_throttled("throttled=0x0"), {"now": [], "since_boot": []})
@@ -321,7 +330,7 @@ class StreamCommand(unittest.TestCase):
 
 class NextCapture(unittest.TestCase):
     # Format from `systemctl list-timers --output=json` on the pilot Pi (systemd 252), with a time
-    # off the quarter hour so that the fallback cannot pass these by accident.
+    # off the 5-minute slots so that the fallback cannot pass these by accident.
     RUNNING = ('[{"next":1793774760000000,"left":1793774760000000,"last":0,"passed":0,'
                '"unit":"sunset-capture.timer","activates":"sunset-capture.service"}]\n')
 
@@ -329,24 +338,27 @@ class NextCapture(unittest.TestCase):
         self.assertEqual(diag.parse_next_capture(self.RUNNING, 1793774285), 1793774760)
 
     def test_a_time_already_passed_is_not_used(self):
-        self.assertEqual(diag.parse_next_capture(self.RUNNING, 1793774761), (1793774761 // 900 + 1) * 900)
+        self.assertEqual(diag.parse_next_capture(self.RUNNING, 1793774761), (1793774761 // 300 + 1) * 300)
 
-    def test_timer_stopped_falls_back_to_the_quarter_hour(self):
-        self.assertEqual(diag.parse_next_capture("[]\n", epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:15:00Z"))
+    def test_timer_stopped_falls_back_to_the_next_slot(self):
+        self.assertEqual(diag.parse_next_capture("[]\n", epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:10:00Z"))
 
     def test_unexpected_json_falls_back(self):
-        self.assertEqual(diag.parse_next_capture('[{"next":null}]', epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:15:00Z"))
-        self.assertEqual(diag.parse_next_capture('{"a":1}', epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:15:00Z"))
+        self.assertEqual(diag.parse_next_capture('[{"next":null}]', epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:10:00Z"))
+        self.assertEqual(diag.parse_next_capture('{"a":1}', epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:10:00Z"))
 
-    def test_timer_disabled_falls_back_to_the_quarter_hour(self):
+    def test_timer_disabled_falls_back_to_the_next_slot(self):
         # A timer change must never remove the protection.
-        self.assertEqual(diag.parse_next_capture("\n", epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:15:00Z"))
-        self.assertEqual(diag.parse_next_capture(None, epoch("2026-11-04T12:15:00Z")), epoch("2026-11-04T12:30:00Z"))
+        self.assertEqual(diag.parse_next_capture("\n", epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:10:00Z"))
+        self.assertEqual(diag.parse_next_capture(None, epoch("2026-11-04T12:15:00Z")), epoch("2026-11-04T12:20:00Z"))
         self.assertEqual(diag.parse_next_capture("n/a", epoch("2026-11-04T12:59:59Z")), epoch("2026-11-04T13:00:00Z"))
+
+    def test_fallback_spacing_matches_the_capture_timer(self):
+        self.assertEqual(diag.SLOT_S, timer_spacing_s())
 
 
 SLOT = epoch("2026-11-04T12:15:00Z")
-NEXT = SLOT + 900
+NEXT = SLOT + 300
 
 
 class Handover(unittest.TestCase):

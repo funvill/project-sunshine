@@ -16,3 +16,7 @@ check "dense service reads sunset.env" grep -qx 'EnvironmentFile=-/home/pi/sunse
 check "dense service timeout is set" grep -qx 'TimeoutStartSec=120' "$SRC/systemd/sunset-dense.service"
 check "install.sh installs the dense units" grep -q 'sunset-dense.service sunset-dense.timer' "$SRC/install.sh"
 check "install.sh enables the dense timer" grep -q 'enable --now sunset-capture.timer sunset-sync.timer sunset-dense.timer' "$SRC/install.sh"
+
+section "capture every 5 minutes"
+check "capture timer fires every 5 minutes" grep -qx 'OnCalendar=\*:00/5' "$SRC/systemd/sunset-capture.timer"
+check "dense mode skips the same slot minutes" grep -q 'SLOT_EVERY_MIN="${SLOT_EVERY_MIN:-5}"' "$SRC/sunset-capture.sh"

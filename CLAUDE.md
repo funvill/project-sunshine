@@ -42,10 +42,14 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
 - Magnetic declination in Vancouver ~16° E (phone compass must use true north).
 
 ## Decisions made
-- Capture every **15 min, 24/7**, day and night.
+- Capture every **5 min, 24/7**, day and night (changed from 15 min on 2026-11-07 at Steven's
+  request). Every frame keeps its DNG, and dark slots still add the night frame, so this is
+  about 3x the data: an estimated 8-15 GB a day on the NAS, and a full SD card now holds about
+  2-3 days if the NAS is down, not 10. `SLOT_S` in the experiment runner and the diag page must
+  match the timer (a test checks it).
 - **Dense frames around sunrise and sunset (decided 2026-11-07, starts 02:30 UTC 2026-11-09):**
   Steven chose 1 a minute after comparing daily videos at 15, 5, 3 and 1 min. Windows: sun at -9°
-  to 60 min after sunrise, and 60 min before sunset to -9°. On top of the 15-min frames, in the same
+  to 60 min after sunrise, and 60 min before sunset to -9°. On top of the 5-min frames, in the same
   folder and names, JPEG + JSON only, same auto exposure, `Capture.schedule: "dense"`. The regular
   slot always wins the camera. `sunset-dense.timer`; details in `docs/setup.md`. About 230 extra
   frames a day in November, roughly 1 GB a day more on the NAS. The ×3 bracket is not done.
@@ -61,7 +65,7 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   `REQUIRE_TIME_SYNC=0` turns it off. A DS3231 RTC would remove the gap after power cuts
   (not bought; your call).
 - **Disk guard:** ≥85% full drops the DNG, ≥95% skips the night frame, <100 MB free skips the
-  capture. All logged. Does not change the 15-min schedule.
+  capture. All logged. Does not change the 5-min schedule.
 - **Per-frame sun data:** each `.json` gets a `Sun` block (true-north azimuth, elevation, nearest
   sunset, minutes from sunset). Site coordinates live in `sunset.env` (`SITE_LAT`/`SITE_LON`,
   currently approximate Burnaby, **set the real ones**) and are deliberately NOT written into
@@ -96,7 +100,7 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   `tzdata` 2026c gives UTC-7 all year, shown as `MST`); filenames are UTC and nothing depends on the zone.
 - **Camera: Arducam UC-517** in the CAMERA port, `camera_auto_detect=0` + `dtoverlay=imx477`
   (auto-detect does not find it). Manually focused on the distant view.
-- 15-min captures only for now: burst mode (backlog #3) still needs a schedule decision.
+- 5-min captures, plus 1-a-minute dense frames around sunrise and sunset from 2026-11-09.
 - The Zero W path is no longer the target. The scripts have no Zero-specific code, but this camera
   has not been shown working on a Zero. See `docs/hardware/README.md`.
 - **OS (2026-11-03):** upgraded to kernel 6.12.109, rpicam-apps 1.9.0, libcamera 0.5. Desktop and
@@ -104,8 +108,8 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   `sunset-lowwear.sh` applied. `cmdline.txt` had been empty for many boots (firmware defaults, no
   `fsck.repair`); it is now set. Kernels kept: v7 (this Pi) and v6 (Zero).
 - **SD card:** a 32 GB card (ID `SH32G`, manufacturer ID 0x03, which is normally SanDisk, dated
-  07/2021) with ~26 GB free, about 10 days of frames
-  if the NAS is down, fewer with night frames. Run a write test and replace with a High Endurance
+  07/2021) with ~26 GB free, about 2-3 days of frames at 5-minute captures
+  if the NAS is down (it was about 10 days at 15 minutes). Run a write test and replace with a High Endurance
   card for the real run (a buying decision).
 - **SD writes, measured:** idle OS 584 KB per 10 min before `sunset-lowwear.sh`, 108 KB after
   (~16 MB/day). Each capture writes ~27 MB, ~52 MB with a night frame, so frames are an estimated

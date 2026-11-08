@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Project Sunset - single capture for Pi Zero W + IMX477 (Pi HQ / Arducam UC-517)
 # Captures locally first; sunset-sync.sh moves frames to the NAS.
-#   sunset-capture.sh           the regular 15-minute frame (+ night frame when dark)
+#   sunset-capture.sh           the regular 5-minute frame (+ night frame when dark)
 #   sunset-capture.sh --dense   an extra 1-a-minute frame around sunrise and sunset:
 #                               JPEG + JSON only, same auto exposure as the regular frame
 set -euo pipefail
@@ -29,7 +29,7 @@ CLOCK_OK_FILE="${CLOCK_OK_FILE:-/dev/shm/sunset-clock-ok}"   # tmpfs: cleared on
 DISK_DROP_RAW_PCT="${DISK_DROP_RAW_PCT:-85}"      # at/above this % full, stop saving DNG
 DISK_SKIP_NIGHT_PCT="${DISK_SKIP_NIGHT_PCT:-95}"  # at/above this % full, skip the night frame
 DISK_MIN_FREE_MB="${DISK_MIN_FREE_MB:-100}"       # below this, skip everything (keep the OS and log writable)
-SLOT_EVERY_MIN="${SLOT_EVERY_MIN:-15}"            # regular slot spacing; dense mode leaves these minutes alone
+SLOT_EVERY_MIN="${SLOT_EVERY_MIN:-5}"             # regular slot spacing; dense mode leaves these minutes alone
 LOCK_WAIT_S="${LOCK_WAIT_S:-90}"                  # a regular capture waits this long for a dense one to finish
 DENSE_TIMEOUT_S="${DENSE_TIMEOUT_S:-30}"          # per rpicam-still call in dense mode, so a hang ends early
 SUN_PY="${SUN_PY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sunset-sun.py}"

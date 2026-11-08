@@ -17,7 +17,8 @@ from urllib.parse import parse_qs, urlsplit
 Config = namedtuple("Config", "out_root capture_log sync_log nas_target sun_script mountinfo")
 
 # Estimates, to tune from pilot data.
-STALE_CAPTURE_S = 20 * 60      # one missed 15-minute slot, plus some slack
+SLOT_S = 300                   # regular capture spacing; must match pi/systemd/sunset-capture.timer
+STALE_CAPTURE_S = 10 * 60      # one missed 5-minute slot, plus some slack
 STUCK_FRAMES_S = 60 * 60       # the sync normally clears a frame within about 7 minutes
 DISK_WARN_PCT = 85             # the capture script starts dropping DNGs here
 
@@ -304,14 +305,14 @@ def stream_command(view, width, height):
 
 def parse_next_capture(text, now):
     """Next capture from `systemctl list-timers --output=json`. If the timer has none, assume the
-    15-minute schedule, so the camera is still released for a capture started some other way."""
+    5-minute schedule, so the camera is still released for a capture started some other way."""
     try:
         value = json.loads(text)[0]["next"] / 1000000
         if value > now:
             return value
     except (TypeError, ValueError, LookupError):
         pass
-    return (int(now) // 900 + 1) * 900
+    return (int(now) // SLOT_S + 1) * SLOT_S
 
 
 class HandoverPolicy:

@@ -2,8 +2,8 @@
 """Pilot experiments: extra test shots between the real captures.
 
 Results go to experiments/runs/<run>/ and then to a NAS folder of their own, never to the outbox
-or the production NAS folder, so the 15-minute series and anything reading it are untouched. Real
-captures always win: no shot starts unless it will finish before the next quarter-hour slot, and
+or the production NAS folder, so the regular series and anything reading it are untouched. Real
+captures always win: no shot starts unless it will finish before the next 5-minute slot, and
 the runner waits while diag or a real capture has the camera.
 
     sunset-experiment.py night --run night-1
@@ -30,7 +30,7 @@ SUN_PY = HERE.parent / "sunset-sun.py"
 ENV_FILE = HERE.parent / "sunset.env"
 LOCK_FILE = HERE / ".experiment.lock"
 
-SLOT_S = 900
+SLOT_S = 300  # must match OnCalendar in pi/systemd/sunset-capture.timer
 AFTER_SLOT_S = 45  # the real capture took 17 s with a night frame; leave it plenty of room
 BEFORE_SLOT_S = 5
 SUNSET_WINDOW_S = 45 * 60
@@ -39,7 +39,7 @@ DUSK_FROM_S = 600
 DUSK_EVERY_S = 300
 DUSK_POINTS = 9  # +10 to +50 minutes after sunset
 DUSK_MS = (250, 500, 1000, 2000, 4000)
-DAY_SWEEP_MINUTE = 20  # past each hour, clear of the real captures
+DAY_SWEEP_MINUTE = 21  # past each hour, clear of the real captures
 NIGHT_SWEEP_EVERY_S = 2 * 3600
 NIGHT_AWB = "2.25,2.40"
 MIN_SD_FREE_GB = 5
@@ -224,7 +224,7 @@ def day_shots(minute, sunset, sunrise=None):
     twilight = dusk_shots(minute, sunset) + dawn_shots(minute, sunrise)
     near_sunrise = sunrise is not None and abs(minute - sunrise) <= SUNSET_WINDOW_S
     if abs(minute - sunset) <= SUNSET_WINDOW_S or near_sunrise:
-        five = minute % 300 < 60
+        five = (minute - 60) % 300 < 60   # the minute after each regular capture
         shots = [Shot("ev-2", ev=-2), Shot("ev+0", ev=0, raw=five), Shot("ev+2", ev=2)]
         if five:
             shots += [Shot("meter-average", metering="average"),
@@ -234,7 +234,7 @@ def day_shots(minute, sunset, sunrise=None):
                       Shot("awb-cloudy", extra=("--awb", "cloudy"))]
         return shots + twilight
     shots = [Shot("rate")]
-    if sunset - SUN_LADDER_BEFORE_S <= minute < sunset - SUNSET_WINDOW_S and minute % 600 < 60:
+    if sunset - SUN_LADDER_BEFORE_S <= minute < sunset - SUNSET_WINDOW_S and (minute - 60) % 600 < 60:
         half = minute % 1800 < 60
         shots += [Shot("sun-100us", shutter_us=100, gain=1),
                   Shot("sun-500us", shutter_us=500, gain=1),

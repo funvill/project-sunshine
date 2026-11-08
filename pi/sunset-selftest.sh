@@ -154,7 +154,7 @@ else
        --metadata "$TMP_ROOT/shot.json" --metadata-format json -o "$TMP_ROOT/shot.jpg"; then
     S="${CAP_S%.*}"
     if (( S >= CAPTURE_TIMEOUT_S )); then fail "day shot took ${CAP_S}s, at the ${CAPTURE_TIMEOUT_S}s timeout"
-    elif (( S >= SLOW_CAPTURE_S )); then warn "day shot took ${CAP_S}s (estimate threshold ${SLOW_CAPTURE_S}s); fine at 15 min, but too slow for bursts"
+    elif (( S >= SLOW_CAPTURE_S )); then warn "day shot took ${CAP_S}s (estimate threshold ${SLOW_CAPTURE_S}s); fine at 5 min, but too slow for bursts"
     else pass "day shot took ${CAP_S}s"; fi
     if [[ "$CAP_MINMEM" != "?" ]] && (( CAP_MINMEM < LOW_MEM_MB )); then
       warn "MemAvailable fell to ${CAP_MINMEM} MB during capture (estimate threshold ${LOW_MEM_MB} MB): consider cma-128 / check swap"

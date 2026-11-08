@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline tests for the experiment runner's scheduling. No camera or Pi needed."""
 import importlib.util
+import os
 import pathlib
 import unittest
 
@@ -11,7 +12,16 @@ SPEC = importlib.util.spec_from_file_location(
 exp = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(exp)
 
-SLOT = 1793775600  # 2026-11-04T07:00:00Z, a real quarter-hour capture slot
+
+def timer_spacing_s():
+    """Minutes between regular captures, read from the production capture timer."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pi", "systemd", "sunset-capture.timer")
+    with open(path) as f:
+        spec = [l.split("=", 1)[1].strip() for l in f if l.startswith("OnCalendar=")][0]
+    return int(spec.split("/")[1]) * 60
+
+
+SLOT = 1793775600  # 2026-11-04T07:00:00Z, a real capture slot
 SUNSET = 1793839520  # 2026-11-05T00:45:20Z
 
 
@@ -19,13 +29,17 @@ class ClearToStart(unittest.TestCase):
     """A real capture must never lose the camera to an experiment."""
 
     def test_clear_in_the_middle_of_the_gap(self):
-        self.assertTrue(exp.clear_to_start(SLOT + 300, est_s=10))
+        self.assertTrue(exp.clear_to_start(SLOT + exp.SLOT_S // 2, est_s=10))
+
+    def test_slot_spacing_matches_the_capture_timer(self):
+        # A mismatch would let experiments take the camera in a real capture's minute.
+        self.assertEqual(exp.SLOT_S, timer_spacing_s())
 
     def test_refuses_a_shot_that_would_run_into_the_next_slot(self):
-        self.assertFalse(exp.clear_to_start(SLOT + 900 - 12, est_s=10))
+        self.assertFalse(exp.clear_to_start(SLOT + exp.SLOT_S - 12, est_s=10))
 
     def test_allows_a_shot_that_finishes_before_the_margin(self):
-        self.assertTrue(exp.clear_to_start(SLOT + 900 - 30, est_s=10))
+        self.assertTrue(exp.clear_to_start(SLOT + exp.SLOT_S - 30, est_s=10))
 
     def test_refuses_while_the_real_capture_may_still_be_running(self):
         self.assertFalse(exp.clear_to_start(SLOT + 20, est_s=5))
@@ -34,8 +48,8 @@ class ClearToStart(unittest.TestCase):
         self.assertTrue(exp.clear_to_start(SLOT + exp.AFTER_SLOT_S + 1, est_s=5))
 
     def test_long_exposure_needs_a_bigger_gap(self):
-        self.assertTrue(exp.clear_to_start(SLOT + 800, est_s=10))
-        self.assertFalse(exp.clear_to_start(SLOT + 800, est_s=120))
+        self.assertTrue(exp.clear_to_start(SLOT + exp.SLOT_S - 100, est_s=10))
+        self.assertFalse(exp.clear_to_start(SLOT + exp.SLOT_S - 100, est_s=120))
 
 
 class EstimatedTime(unittest.TestCase):
@@ -50,8 +64,8 @@ class DayPlan(unittest.TestCase):
     def labels(self, t):
         return [s.label for s in exp.day_shots(t, SUNSET)]
 
-    def test_skips_quarter_hours_because_the_real_capture_is_that_frame(self):
-        self.assertEqual(self.labels(SLOT + 11 * 3600 + 900), [])
+    def test_skips_slot_minutes_because_the_real_capture_is_that_frame(self):
+        self.assertEqual(self.labels(SLOT + 11 * 3600 + exp.SLOT_S), [])
 
     def test_ordinary_minute_is_one_auto_jpeg(self):
         shots = exp.day_shots(SLOT + 11 * 3600 + 60, SUNSET)
@@ -60,7 +74,7 @@ class DayPlan(unittest.TestCase):
 
     def test_sunset_window_brackets_each_minute(self):
         minute = SUNSET - (SUNSET % 60) - 600 + 60
-        if minute % 900 == 0:
+        if minute % exp.SLOT_S == 0:
             minute += 60
         self.assertEqual(self.labels(minute)[:3], ["ev-2", "ev+0", "ev+2"])
 
@@ -68,9 +82,7 @@ class DayPlan(unittest.TestCase):
         self.assertNotIn("ev-2", self.labels(SUNSET - 46 * 60))
 
     def test_sunset_window_adds_metering_and_raw_every_five_minutes(self):
-        minute = SUNSET - (SUNSET % 300) - 600
-        if minute % 900 == 0:
-            minute += 300
+        minute = SUNSET - (SUNSET % 300) - 600 + 60   # the minute after a regular capture
         shots = exp.day_shots(minute, SUNSET)
         labels = [s.label for s in shots]
         self.assertIn("meter-average", labels)
@@ -79,9 +91,7 @@ class DayPlan(unittest.TestCase):
 
     def test_sun_ladder_runs_every_ten_minutes_in_the_afternoon(self):
         minute = SUNSET - 3 * 3600
-        minute -= minute % 600
-        if minute % 900 == 0:
-            minute += 600
+        minute = minute - minute % 600 + 60   # the minute after a regular capture
         self.assertIn("sun-100us", self.labels(minute))
 
     def test_every_minute_of_the_sunset_window_fits_in_the_gap_budget(self):
@@ -161,7 +171,7 @@ class NightRatePlan(unittest.TestCase):
         self.assertEqual((shots[0].shutter_us, shots[0].gain), (4_000_000, 1))
 
     def test_skips_the_real_capture_minute(self):
-        self.assertEqual(exp.night_rate_shots(SLOT + 900), [])
+        self.assertEqual(exp.night_rate_shots(SLOT + exp.SLOT_S), [])
 
 
 class NightSweep(unittest.TestCase):
@@ -231,10 +241,10 @@ class DaySweep(unittest.TestCase):
     def test_runs_once_an_hour(self):
         labels = [s.label for s in exp.day_shots(self.minute_at(exp.DAY_SWEEP_MINUTE), SUNSET)]
         self.assertIn("sweep-ev-1", labels)
-        self.assertNotIn("sweep-ev-1", [s.label for s in exp.day_shots(self.minute_at(21), SUNSET)])
+        self.assertNotIn("sweep-ev-1", [s.label for s in exp.day_shots(self.minute_at(exp.DAY_SWEEP_MINUTE + 1), SUNSET)])
 
     def test_never_on_a_capture_minute(self):
-        self.assertNotEqual(exp.DAY_SWEEP_MINUTE % 15, 0)
+        self.assertNotEqual(exp.DAY_SWEEP_MINUTE * 60 % exp.SLOT_S, 0)
 
     def test_fits_the_gap_budget(self):
         total = sum(exp.estimate_s(s.shutter_us) for s in exp.day_sweep_shots())
@@ -245,9 +255,7 @@ class SunsetColour(unittest.TestCase):
     """Experiment 16: auto white balance may be taking the orange out of a sunset."""
 
     def test_every_five_minutes_tries_fixed_white_balance(self):
-        minute = SUNSET - (SUNSET % 300) - 600
-        if minute % 900 == 0:
-            minute += 300
+        minute = SUNSET - (SUNSET % 300) - 600 + 60   # the minute after a regular capture
         labels = [s.label for s in exp.day_shots(minute, SUNSET)]
         for label in ("ev-1", "awb-daylight", "awb-cloudy"):
             self.assertIn(label, labels)
@@ -267,19 +275,19 @@ class Sunrise(unittest.TestCase):
 
     def test_brackets_around_sunrise(self):
         t = self.minute(300)
-        if t % 900 < 60:
+        if t % exp.SLOT_S < 60:
             t += 60
         self.assertEqual(self.labels(t)[:3], ["ev-2", "ev+0", "ev+2"])
 
     def test_no_brackets_when_no_sunrise_is_given(self):
         t = self.minute(300)
-        if t % 900 < 60:
+        if t % exp.SLOT_S < 60:
             t += 60
         self.assertNotIn("ev-2", [s.label for s in exp.day_shots(t, SUNSET)])
 
     def test_dawn_ladder_before_sunrise(self):
         t = self.minute(-600)
-        if t % 900 < 60:
+        if t % exp.SLOT_S < 60:
             t += 60
         self.assertIn("dawn-1000ms", self.labels(t))
 

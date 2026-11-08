@@ -5,7 +5,7 @@
 > are in the repo's `pi/` folder unless a path says otherwise.
 
 One IMX477 camera (Pi HQ or Arducam UC-517) on a Raspberry Pi.
-Captures every 15 minutes to the SD card, then syncs to the NAS every 5 minutes. Around sunrise
+Captures every 5 minutes to the SD card, then syncs to the NAS every 5 minutes. Around sunrise
 and sunset it adds a frame every minute (see "Dense frames" below).
 Local-first, so a NAS or Wi-Fi outage never loses frames.
 
@@ -69,7 +69,7 @@ sun at -9° until 60 minutes after sunrise, and from 60 minutes before sunset un
 regular slot minutes, it exits without touching the camera or the log.
 - Same name, folder and auto exposure as the regular frame: `wide_<UTC>.jpg` + `.json`. No DNG and
   no night frame.
-- `Capture.schedule` in the JSON is `"dense"` for these and `"regular"` for the 15-minute frames.
+- `Capture.schedule` in the JSON is `"dense"` for these and `"regular"` for the 5-minute frames.
 - The regular frame always wins: it waits up to `LOCK_WAIT_S` (90 s) for a dense frame to finish,
   a dense frame never waits, and a hung camera is given up after `DENSE_TIMEOUT_S` (30 s).
 - Log lines start `dense window=sunrise` or `dense window=sunset`.
@@ -217,7 +217,7 @@ With the default settings, an alert comes 70 to 75 minutes after the last frame,
 6 hours until frames return or you acknowledge it.
 
 ## Zero-specific limits
-- 12 MP JPEG + DNG takes several seconds: fine at 15 min, too slow for bracketed
+- 12 MP JPEG + DNG takes several seconds: fine at 5 min, too slow for bracketed
   1-per-minute sunset bursts (move to a Pi 3 or newer for that).
 - Night: if reported lux < `NIGHT_LUX`, a second fixed long exposure is taken.
   Tune `NIGHT_*` during the pilot.
