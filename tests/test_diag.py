@@ -304,6 +304,20 @@ class StreamCommand(unittest.TestCase):
         self.assertEqual(c[c.index("--roi") + 1], "0.4,0.4,0.2,0.2")
         self.assertEqual(c[c.index("--mode") + 1], "4056:3040")
 
+    def test_focus_view_can_look_anywhere(self):
+        # Clicked on the downtown skyline, right of centre and a little low.
+        c = diag.stream_command("focus@0.85,0.65", 1280, 960)
+        self.assertEqual(c[c.index("--roi") + 1], "0.75,0.55,0.2,0.2")
+        self.assertEqual(c[c.index("--mode") + 1], "4056:3040")
+
+    def test_focus_spot_near_an_edge_keeps_the_crop_on_the_sensor(self):
+        self.assertEqual(self.roi("focus@0.02,0.99"), "0,0.8,0.2,0.2")
+        self.assertEqual(self.roi("focus@0.5,0.5"), "0.4,0.4,0.2,0.2")
+
+    def roi(self, view):
+        c = diag.stream_command(view, 1280, 960)
+        return c[c.index("--roi") + 1]
+
 
 class NextCapture(unittest.TestCase):
     # Format from `systemctl list-timers --output=json` on the pilot Pi (systemd 252), with a time
@@ -588,6 +602,18 @@ class Http(unittest.TestCase):
         self.assertEqual(self.cam.view(), "focus")
         self.assertEqual(self.status_of("/view?mode=focus"), 405)
         self.assertEqual(self.status_of("/view?mode=nope", "POST"), 400)
+
+    def test_focus_spot_is_validated(self):
+        self.assertEqual(self.status_of("/view?mode=focus&x=0.85&y=0.65", "POST"), 204)
+        self.assertEqual(self.cam.view(), "focus@0.850,0.650")
+        for bad in ("x=abc&y=0.5", "x=1.5&y=0.5", "x=0.5&y=-0.1", "x=nan&y=0.5", "x=0.5"):
+            self.assertEqual(self.status_of("/view?mode=focus&" + bad, "POST"), 400, bad)
+        self.assertEqual(self.status_of("/view?mode=full&x=0.5&y=0.5", "POST"), 400)
+
+    def test_page_has_the_focus_tools(self):
+        body = self.get("/").read().decode()
+        for needle in ('id="peaking"', 'id="peakLevel"', 'id="peakColour"', 'id="trend"', "focus&x="):
+            self.assertIn(needle, body)
 
     def test_unknown_path(self):
         self.assertEqual(self.status_of("/nope"), 404)

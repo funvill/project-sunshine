@@ -290,9 +290,14 @@ class FrameSplitter:
 def stream_command(view, width, height):
     """rpicam-vid writing MJPEG to stdout. No preview, and it runs until stopped."""
     cmd = ["rpicam-vid", "-t", "0", "-n", "--codec", "mjpeg", "--quality", "60", "--framerate", "5", "-o", "-"]
-    if view == "focus":
+    if view == "focus" or view.startswith("focus@"):
         # 20% of the sensor at its full resolution, so one screen pixel is one sensor pixel.
-        return cmd + ["--mode", "4056:3040", "--roi", "0.4,0.4,0.2,0.2", "--width", "810", "--height", "608"]
+        # "focus@X,Y" centres it on a spot picked on the full view (0-1 across and down).
+        x, y = (float(v) for v in view[6:].split(",")) if "@" in view else (0.5, 0.5)
+        left = min(max(x - 0.1, 0.0), 0.8)
+        top = min(max(y - 0.1, 0.0), 0.8)
+        roi = ",".join("%.4g" % v for v in (left, top, 0.2, 0.2))
+        return cmd + ["--mode", "4056:3040", "--roi", roi, "--width", "810", "--height", "608"]
     # A mode must be named: on its own the camera picks 1332x990, which crops to the centre 65%.
     return cmd + ["--mode", "2028:1520", "--width", str(width), "--height", str(height)]
 
@@ -527,14 +532,33 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self._route()
+        view = self._view_from_query()
         if path != "/view":
             self.send_error(404)
-        elif self.query.get("mode", [""])[0] not in ("full", "focus"):
+        elif view is None:
             self.send_error(400)
         else:
-            self.server.service.camera.set_view(self.query["mode"][0])
+            self.server.service.camera.set_view(view)
             self.send_response(204)
             self.end_headers()
+
+    def _view_from_query(self):
+        """"full", "focus", or "focus@X,Y" for a focus spot picked on the full view; None if invalid."""
+        mode = self.query.get("mode", [""])[0]
+        has_spot = "x" in self.query or "y" in self.query
+        if mode == "full" and not has_spot:
+            return "full"
+        if mode != "focus":
+            return None
+        if not has_spot:
+            return "focus"
+        try:
+            x, y = float(self.query["x"][0]), float(self.query["y"][0])
+        except (KeyError, ValueError):
+            return None
+        if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):   # also rejects nan
+            return None
+        return "focus@%.3f,%.3f" % (x, y)
 
     def _stream(self):
         svc = self.server.service
@@ -630,6 +654,10 @@ h2 { font-size: 14px; margin: 0 0 8px; }
 #warnings li { background: var(--warn-bg); color: var(--warn-text); padding: 8px 12px; border-radius: 6px; margin-bottom: 6px; }
 .view { position: relative; background: #000; border-radius: 8px; overflow: hidden; line-height: 0; min-height: 200px; }
 .view img { width: 100%; height: auto; display: block; }
+.view.pick img { cursor: crosshair; }
+#peak { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; image-rendering: pixelated; }
+select { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); }
+#trend { width: 100%; max-width: 420px; height: 64px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 #state { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,.7); color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 13px; line-height: 1.5; }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 10px 0 16px; }
 button { font: inherit; padding: 6px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; }
@@ -648,13 +676,28 @@ pre { margin: 8px 0 0; font-size: 12px; line-height: 1.4; white-space: pre-wrap;
 <main>
 <header><h1>Sunset diagnostics</h1><span id="left"></span></header>
 <ul id="warnings"></ul>
-<div class="view"><img id="cam" alt="Live camera view"><span id="state">connecting</span></div>
+<div class="view" id="view"><img id="cam" alt="Live camera view"><canvas id="peak"></canvas><span id="state">connecting</span></div>
 <div class="controls">
   <button id="full" type="button">Full frame</button>
   <button id="focus" type="button">Focus (centre, real pixels)</button>
+  <span class="muted" id="pickHint">In full frame, click the image to focus there instead.</span>
+</div>
+<div class="controls">
+  <button id="peaking" type="button" aria-pressed="false">Focus peaking</button>
+  <label>Sensitivity <select id="peakLevel">
+    <option value="400">Low</option><option value="250" selected>Medium</option><option value="150">High</option>
+  </select></label>
+  <label>Colour <select id="peakColour">
+    <option value="255,40,40" selected>Red</option><option value="255,230,0">Yellow</option>
+    <option value="255,255,255">White</option><option value="0,230,255">Cyan</option>
+  </select></label>
+  <span class="score">Peaking <b id="peakPct">-</b></span>
+</div>
+<div class="controls">
   <span class="score">Sharpness <b id="now">-</b> &middot; best <b id="best">-</b></span>
   <button id="reset" type="button">Reset best</button>
-  <span class="muted">Compare only within the same scene and light.</span>
+  <canvas id="trend" width="420" height="64" aria-label="Sharpness over the last minute"></canvas>
+  <span class="muted">Turn the ring slowly and stop at the peak. Higher numbers and more peaking mean sharper, but compare only within the same scene and light.</span>
 </div>
 <div class="grid">
   <section><h2>Capture</h2><dl id="capture"></dl><pre id="captureLog"></pre></section>
@@ -691,8 +734,12 @@ function showCamera(d) {
   var mins = Math.max(0, Math.ceil(d.seconds_left / 60));
   $("left").textContent = "Stops by itself in " + mins + " min";
   $("state").textContent = d.camera_error ? d.camera + ": " + d.camera_error : d.camera;
+  view = d.view;
   $("full").setAttribute("aria-pressed", d.view === "full");
-  $("focus").setAttribute("aria-pressed", d.view === "focus");
+  $("focus").setAttribute("aria-pressed", d.view.indexOf("focus") === 0);
+  $("view").classList.toggle("pick", d.view === "full");
+  $("pickHint").textContent = d.view === "full" ? "Click the image to focus there instead."
+    : (d.view === "focus" ? "Showing the centre." : "Showing the spot you picked.");
 }
 
 function show(s) {
@@ -749,13 +796,23 @@ pollStatus();
 setInterval(pollCamera, 2000);
 setInterval(pollStatus, 15000);
 
+var view = "full";
 function setView(mode) {
   best = 0;
+  trend = [];
   fetch("view?mode=" + mode, { method: "POST" }).then(pollCamera);
 }
+// In the full view, a click picks where the focus view looks, as a fraction across and down.
+cam.onclick = function (e) {
+  if (view !== "full") return;
+  var r = cam.getBoundingClientRect();
+  var x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+  var y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+  setView("focus&x=" + x.toFixed(3) + "&y=" + y.toFixed(3));
+};
 $("full").onclick = function () { setView("full"); };
 $("focus").onclick = function () { setView("focus"); };
-$("reset").onclick = function () { best = 0; };
+$("reset").onclick = function () { best = 0; trend = []; };
 
 // Same formula as sunset-focus.py, worked out here so the Pi does no extra work.
 var best = 0, canvas = document.createElement("canvas"), ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -780,13 +837,83 @@ function sharpness() {
   var mean = sum / (sw * sh);
   return mean < 1 ? 0 : 100000 * total / (2 * (sw - 1) * (sh - 1) * mean * mean);
 }
+// The last minute of sharpness, so turning the ring shows at once whether it is getting better.
+var trend = [];
+function drawTrend() {
+  var c = $("trend"), g = c.getContext("2d"), css = getComputedStyle(document.documentElement);
+  g.clearRect(0, 0, c.width, c.height);
+  if (!trend.length) return;
+  var top = Math.max(best, 1) * 1.1, step = c.width / 85, bestY = c.height - best / top * c.height;
+  g.strokeStyle = css.getPropertyValue("--muted");
+  g.lineWidth = 1;
+  g.setLineDash([4, 4]);
+  g.beginPath();
+  g.moveTo(0, bestY);
+  g.lineTo(c.width, bestY);
+  g.stroke();
+  g.setLineDash([]);
+  g.strokeStyle = css.getPropertyValue("--accent");
+  g.lineWidth = 2;
+  g.beginPath();
+  trend.forEach(function (v, i) {
+    var x = c.width - (trend.length - 1 - i) * step, y = c.height - v / top * c.height;
+    if (i) g.lineTo(x, y); else g.moveTo(x, y);
+  });
+  g.stroke();
+}
 setInterval(function () {
   var s = sharpness();
   if (s === null) return;
   best = Math.max(best, s);
+  trend.push(s);
+  if (trend.length > 86) trend.shift();
   $("now").textContent = Math.round(s);
   $("best").textContent = Math.round(best);
+  drawTrend();
 }, 700);
+
+// Focus peaking, as on a mirrorless camera: edges whose contrast is above the chosen level are
+// painted over the image. Sharper focus gives more and brighter outlines. Worked out in the
+// browser on the frame as received, so the Pi does no extra work.
+var peakOn = false, work = document.createElement("canvas"),
+    wctx = work.getContext("2d", { willReadFrequently: true }), peak = $("peak"), pctx = peak.getContext("2d");
+function peaking() {
+  var w = cam.naturalWidth, h = cam.naturalHeight;
+  if (!peakOn || !w) return;
+  work.width = w;
+  work.height = h;
+  wctx.drawImage(cam, 0, 0);
+  var src = wctx.getImageData(0, 0, w, h).data, luma = new Uint8Array(w * h);
+  for (var i = 0, j = 0; i < luma.length; i++, j += 4) luma[i] = (src[j] * 77 + src[j + 1] * 150 + src[j + 2] * 29) >> 8;
+  if (peak.width !== w || peak.height !== h) { peak.width = w; peak.height = h; }
+  var out = pctx.createImageData(w, h), o = out.data, level = +$("peakLevel").value,
+      rgb = $("peakColour").value.split(",").map(Number), count = 0;
+  for (var y = 1; y < h - 1; y++) {
+    for (var x = 1; x < w - 1; x++) {
+      var p = y * w + x;
+      var gx = luma[p - w + 1] + 2 * luma[p + 1] + luma[p + w + 1] - luma[p - w - 1] - 2 * luma[p - 1] - luma[p + w - 1];
+      var gy = luma[p + w - 1] + 2 * luma[p + w] + luma[p + w + 1] - luma[p - w - 1] - 2 * luma[p - w] - luma[p - w + 1];
+      if (Math.abs(gx) + Math.abs(gy) > level) {
+        var k = p * 4;
+        o[k] = rgb[0]; o[k + 1] = rgb[1]; o[k + 2] = rgb[2]; o[k + 3] = 255;
+        count++;
+      }
+    }
+  }
+  pctx.putImageData(out, 0, 0);
+  $("peakPct").textContent = (100 * count / (w * h)).toFixed(2) + "%";
+}
+$("peaking").onclick = function () {
+  peakOn = !peakOn;
+  this.setAttribute("aria-pressed", peakOn);
+  if (!peakOn) {
+    pctx.clearRect(0, 0, peak.width, peak.height);
+    $("peakPct").textContent = "-";
+  } else {
+    peaking();
+  }
+};
+setInterval(peaking, 500);
 </script>
 </body>
 </html>

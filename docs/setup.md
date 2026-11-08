@@ -158,9 +158,17 @@ python3 sunset-sun.py position          # sun now
 
 ### Diagnostics page and focus
 Over SSH, type `diag`. It prints a link to a temporary page with a live camera view and the Pi's
-health: capture and sync status, clock, disk, memory, temperature and power. **Focus** switches to
-the centre of the sensor at full resolution; turn the lens slowly and stop at the highest sharpness
-score. Aim at something distant with fine detail.
+health: capture and sync status, clock, disk, memory, temperature and power.
+
+Focusing tools, all worked out in the browser so the Pi does no extra work:
+- **Focus** shows the centre 20% of the sensor at full resolution, so one screen pixel is one sensor
+  pixel. To look somewhere else, such as the downtown skyline, click that spot on the full frame.
+- **Focus peaking** paints sharp edges in red (or yellow, white or cyan) over the image, as on a
+  mirrorless camera. Sensitivity Low shows only the sharpest edges. Turn the ring until the
+  outlines are thinnest and brightest. **Peaking %** is the share of the image that is outlined.
+- **Sharpness** and its graph of the last minute: turn the lens slowly and stop at the peak. The
+  dashed line is the best so far. Aim at something distant with fine detail, and compare only within
+  the same scene and light. Switching view resets it.
 ```
 diag          # on for 30 minutes; running it again restarts the clock
 diag status   # is it on, and what is the link
