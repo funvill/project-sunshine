@@ -1,6 +1,6 @@
 # Project Sunset
 
-A five-year time-lapse of the western sky from a 23rd-floor window in Burnaby, BC, looking toward
+A five-year time-lapse of the western sky from a tower window in Burnaby, BC, looking toward
 downtown Vancouver. **Sunset is the subject.** Real capture starts on the winter solstice,
 **2026-12-21**. Until then a pilot runs on a Raspberry Pi 3 B+ to tune the camera, the sync and the
 daily video.
@@ -105,8 +105,6 @@ Write a failing test first, then the change.
   real coordinates, and the NAS login lives only in a root-only file on the Pi.
 - **Frame files carry no site coordinates**, in case they are ever published. Captions carry no
   location details either.
-- **Neighbours' windows** are framed out or masked before anything is published. The project doesn't
-  track or analyse individual windows in the neighbouring towers.
 - **Filenames are UTC.** The frame layout doesn't change.
 - **Change `SETUP_ID` in `sunset.env`** whenever the camera, lens, focus, mount or hood changes.
 - **Add a `changelog.md` entry with every change**, including changes made only on the Pi.
