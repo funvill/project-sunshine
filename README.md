@@ -73,6 +73,7 @@ and the final mount and hood. The longer backlog is at the end of `CLAUDE.md`.
 | `pi/` | Everything that runs on the Pi: capture, sync, metadata, sun position, self-test, focus and diagnostics page, systemd units. Copied flat into `~/sunset` | [Pi setup guide](docs/setup.md) |
 | `nas/` | The daily sunset video job (Python + ffmpeg in Docker) | [nas/README.md](nas/README.md) |
 | `experiments/` | Pilot experiment runner and the hourly weather log. Not part of production capture | Issue #3 |
+| `tools/` | `issue_blur.py`: blurs and labels the nearby buildings in images posted to GitHub issues. Runs on a PC | |
 | `homeassistant/` | The stale-frame alert, copied into Home Assistant by hand | [Pi setup guide](docs/setup.md#home-assistant-alert) |
 | `tests/` | Offline tests with a stubbed camera and NAS | Below |
 | `docs/` | Pi setup guide and hardware notes | [hardware notes](docs/hardware/README.md) |

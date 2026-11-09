@@ -13,6 +13,8 @@ by date: add an entry with every change, including changes made only on the Pi.
 - `tests/`: offline tests with a stubbed camera and NAS. No Pi needed.
 - `experiments/`: pilot experiment runner (#3). Not part of the production capture.
 - `homeassistant/`: stale-frame alert, copied into Home Assistant by hand. Steps in `docs/setup.md`.
+- `tools/`: PC-side helpers. `issue_blur.py` blurs and labels the nearby buildings in images posted
+  to GitHub issues, and nothing else. Style 1 (light Gaussian) is the default, chosen by Steven 2026-11-09.
 - `docs/`: setup guide and hardware notes.
 
 Frames never go in this repo, and neither does `sunset.env`, which holds the real site coordinates.
