@@ -46,7 +46,7 @@ be retried by the next run, and 2 when a required setting is missing.
 |---|---|---|
 | `FRAMES_DIR` | required | The camera's folder, holding `YYYY/MM/DD/` |
 | `DAILY_DIR` | required | Where the job writes |
-| `CROP_FILE` | `$DAILY_DIR/crop.json` | Calibration and privacy mask; optional |
+| `CROP_FILE` | `$DAILY_DIR/crop.json` | Calibration and mask; optional |
 | `CROP_CENTER_X` | middle of the frame | Crop centre in full-frame pixels until a calibration exists |
 | `SITE_TZ` | `America/Vancouver` | Names the day and the time in the caption |
 | `START_DATE` | `2026-12-21` | Day 1. Earlier videos are dry runs with no day number |

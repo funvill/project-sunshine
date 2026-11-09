@@ -275,7 +275,6 @@ Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi
 | Bumps when watering plants | Keyed mount, post-alignment against the tower |
 | Sun damage on telephoto | Skip/short-expose frames when the sun is in the 16 mm FOV; ND filter |
 | Heat | PETG/ASA mount, temperature logging |
-| Privacy (tight camera into neighbours' windows) | Frame to avoid, or blur before publishing |
 
 ## Backlog for Claude Code
 1. ~~Disk-space guard~~ **Done** (`sunset-capture.sh`, tested in `tests/`).

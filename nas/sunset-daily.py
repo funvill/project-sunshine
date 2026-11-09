@@ -338,7 +338,7 @@ def probe_frame_size(cfg, path):
 
 def write_check_image(cfg, sunset_frame, crop, mask, out):
     """A small full frame with the crop and predicted sun drawn on it, to compare against
-    the real sun. The privacy mask is applied here too, since this is the whole view."""
+    the real sun. Any mask is applied here too, since this is the whole view."""
     frame_w = probe_frame_size(cfg, sunset_frame.jpg)[0]
     thick = max(2, frame_w // 200)
     chain = mask_filters(mask) + ["drawbox=x=%d:y=0:w=%d:h=%d:color=lime:t=%d"
