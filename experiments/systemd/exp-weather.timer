@@ -1,0 +1,9 @@
+[Unit]
+Description=Project Sunset experiment 17: hourly forecast, 7 minutes past, clear of the captures
+
+[Timer]
+OnCalendar=*:07
+Persistent=true
+
+[Install]
+WantedBy=timers.target

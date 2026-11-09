@@ -1,0 +1,11 @@
+[Unit]
+Description=Project Sunset experiment 17: log the weather forecast
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+ExecStart=/usr/bin/python3 /home/pi/sunset/experiments/sunset-weather.py
+TimeoutStartSec=600
+Nice=10

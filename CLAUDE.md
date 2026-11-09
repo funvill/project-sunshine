@@ -170,6 +170,15 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   balance drifted through the night. Nights 2 and 3 can still change this. Focus was adjusted on
   2026-11-08 (`pilot-3`), so sharpness-dependent results from before then don't carry over. The foam hood is about 3 weeks away, so
   reflections get rechecked after that too.
+- **Weather forecast (experiment 17, from 2026-11-09 00:22 UTC):** Steven asked about adapting
+  settings to the weather. Plan agreed: record the forecast for at least two weeks first, then check
+  whether it predicts which settings work, before it changes anything. `experiments/sunset-weather.py`
+  runs hourly at :07 from `exp-weather.timer` (a unit file, not a transient timer, so it survives a
+  reboot). It saves Open-Meteo forecast (best match and GEM) and air quality to
+  `project_sunshine_experiments/weather/` on the NAS, requested with the position rounded to 0.1°
+  and with no position saved. The likely end state: measured scene data sets exposure, and the
+  forecast only decides when to bracket and when to expect condensation. A `Weather` block in
+  frame files would be a production change (Steven's call).
 - **Camera position (decided 2026-11-05):** it sits loose on a shelf and can't be put back exactly, so
   testing continues from the new position until the new supply arrives.
 - **Camera will move again** when the bracket and supply arrive: redo anything tied to framing, and
