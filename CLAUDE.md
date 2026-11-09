@@ -100,7 +100,9 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   `tzdata` 2026c gives UTC-7 all year, shown as `MST`); filenames are UTC and nothing depends on the zone.
 - **Camera: Arducam UC-517** in the CAMERA port, `camera_auto_detect=0` + `dtoverlay=imx477`
   (auto-detect does not find it). Manually focused on the distant view.
-- 5-min captures, plus 1-a-minute dense frames around sunrise and sunset from 2026-11-09.
+- 5-min captures, plus 1-a-minute dense frames around sunrise and sunset from the sunset of
+  2026-11-09 (the scheduled 02:32 UTC start failed: a transient unit run as the normal user can't
+  enable a timer; run such jobs as root).
 - The Zero W path is no longer the target. The scripts have no Zero-specific code, but this camera
   has not been shown working on a Zero. See `docs/hardware/README.md`.
 - **OS (2026-11-03):** upgraded to kernel 6.12.109, rpicam-apps 1.9.0, libcamera 0.5. Desktop and
