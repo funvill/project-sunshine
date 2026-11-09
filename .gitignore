@@ -8,3 +8,6 @@ __pycache__/
 
 # Site config on the Pi: holds the real coordinates and NAS target
 sunset.env
+
+# Local working notes, not part of the project
+windowtracking/
