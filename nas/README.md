@@ -1,8 +1,10 @@
 # Daily sunset video
 
-`sunset-daily.py` runs on the NAS and turns each day's frames into a vertical video: 8 seconds
-for a day of 15-minute frames, about 28 seconds with the 1-minute frames at sunrise and sunset.
-Every frame is on screen for 1/12 s, sunset included. It only reads frames and writes to its own folder.
+`sunset-daily.py` runs on the NAS and turns each day's frames into a vertical video. Every frame is
+on screen for 1/12 s, sunset included, so the 1-minute frames at sunrise and sunset slow the video
+down there. A full day of 5-minute frames plus the 1-minute frames is roughly 288 + 230 frames, about
+40 to 45 seconds (estimated, not yet measured on a full day). It only reads frames and writes to its
+own folder.
 
 Each video runs from dark to dark. It ends on the first frame after sunset where the sun is at least
 9° below the horizon, and the next video starts on the frame after that, so every frame appears once.
@@ -49,7 +51,7 @@ be retried by the next run, and 2 when a required setting is missing.
 | `SITE_TZ` | `America/Vancouver` | Names the day and the time in the caption |
 | `START_DATE` | `2026-12-21` | Day 1. Earlier videos are dry runs with no day number |
 | `CAPTION_TAGS` | `#sunset #timelapse #raspberrypi` | The last line of the caption |
-| `EXPECTED_FRAMES` | `96` | Frames in a full 24 hours, which sets the capture interval |
+| `EXPECTED_FRAMES` | `288` | Regular frames in a full 24 hours (5-minute capture). The 1-minute frames only add to the count. Change it if the capture interval changes |
 | `MIN_FRAME_FRACTION` | `0.7` | Below this share of the frames expected between the video's start and end, the day is skipped. An estimate to tune |
 | `LOOKBACK_DAYS` | `2` | How far back a missed day is still caught up |
 | `FONT_FILE` | `/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf` | Font for the text on the video. The image installs this one |

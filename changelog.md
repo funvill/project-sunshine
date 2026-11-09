@@ -4,6 +4,13 @@ Changes to Project Sunset by date, newest first. Dates are Vancouver local time.
 
 ## 2026-11-08
 
+### Daily video
+- `EXPECTED_FRAMES` now defaults to 288, the regular frames in a day at 5-minute capture. At 96 the too-few-frames check would have passed a day that lost two thirds of its frames. Test added.
+- `nas/README.md` gives the video length for 5-minute plus 1-minute frames (about 40 to 45 s a day, estimated) instead of the 15-minute figures.
+
+### Docs
+- Rewrote `README.md` as a handoff: how the parts fit, current state, known problems, open issues, where to start and the rules.
+
 ### Experiments
 - The experiment runner now keeps taking the fixed 100 µs and 500 µs direct-sun shots (experiment 7) every 5 minutes inside the 45 minutes before sunset, until sunset. At the `pilot-3` framing the sun only enters the frame in that window. **Pi:** deployed, and `day-5` restarted on it into the same folder.
 - **Pi:** `stream-day-3` repeated the daylight diag handover test (experiment 8) on the 5-minute schedule.

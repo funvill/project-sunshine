@@ -94,7 +94,8 @@ class Tree:
 
     def config(self, **over):
         values = dict(frames_dir=self.frames, daily_dir=self.daily, crop_file=self.crop_file,
-                      tz=PST, start_date=datetime(2026, 12, 21).date(), font_file=TEST_FONT)
+                      tz=PST, start_date=datetime(2026, 12, 21).date(), font_file=TEST_FONT,
+                      expected_frames=96)   # the fake frames are 15 minutes apart
         values.update(over)
         return daily.Config(**values)
 
@@ -531,6 +532,18 @@ class RunWithoutEncoding(unittest.TestCase):
         self.assertEqual(rec["frames"], 94)
         self.assertEqual(rec["expected_frames"], 94)
 
+    def test_by_default_a_day_with_a_third_of_its_five_minute_frames_is_skipped(self):
+        # Capture is every 5 minutes (288 a day), so 96 frames means two thirds were lost.
+        self.tree.add_day(96)
+        cfg = dict(self.tree.config().__dict__)
+        del cfg["expected_frames"]
+        self.encoded = []
+        daily.run(daily.Config(**cfg), self.NOW, encode=lambda *a: self.fail("encoded"),
+                  frame_size=lambda path: (4056, 3040), check_image=lambda *a: None)
+        rec = self.tree.record("2026-12-21")
+        self.assertEqual(rec["status"], "skipped")
+        self.assertEqual(rec["expected_frames"], 288)
+
     def test_a_skipped_day_still_says_where_it_ended(self):
         self.tree.add_day(10)
         self.run_job()
@@ -866,7 +879,8 @@ class CommandLine(unittest.TestCase):
         sunset = (datetime.now(UTC) - timedelta(hours=1)).replace(microsecond=0)
         tree.add_day(68, sunset=sunset)
         env = dict(os.environ, FRAMES_DIR=tree.frames, DAILY_DIR=tree.daily, CROP_FILE=tree.crop_file,
-                   SITE_TZ="America/Vancouver", START_DATE="2026-12-21", FONT_FILE=TEST_FONT or "")
+                   SITE_TZ="America/Vancouver", START_DATE="2026-12-21", FONT_FILE=TEST_FONT or "",
+                   EXPECTED_FRAMES="96")
         got = subprocess.run([sys.executable, SCRIPT], env=env, capture_output=True, text=True)
         self.assertEqual(got.returncode, 0, got.stderr)
         self.assertEqual(len([n for n in os.listdir(tree.daily) if n.endswith(".mp4")]), 1)
