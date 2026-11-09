@@ -1,7 +1,8 @@
 # Daily sunset video
 
-`sunset-daily.py` runs on the NAS and turns each day's frames into a vertical video of about 9.5
-seconds. It only reads frames and writes to its own folder.
+`sunset-daily.py` runs on the NAS and turns each day's frames into a vertical video: 8 seconds
+for a day of 15-minute frames, about 28 seconds with the 1-minute frames at sunrise and sunset.
+Every frame is on screen for 1/12 s, sunset included. It only reads frames and writes to its own folder.
 
 Each video runs from dark to dark. It ends on the first frame after sunset where the sun is at least
 9° below the horizon, and the next video starts on the frame after that, so every frame appears once.

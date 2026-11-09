@@ -450,18 +450,18 @@ class OverlayTime(unittest.TestCase):
 
 
 class ConcatList(unittest.TestCase):
-    def test_shows_each_frame_a_twelfth_of_a_second_and_holds_sunset(self):
+    def test_shows_every_frame_a_twelfth_of_a_second_with_no_hold(self):
         frames = [daily.Frame(SUNSET, "/a/one.jpg", None), daily.Frame(SUNSET, "/a/two.jpg", None),
                   daily.Frame(SUNSET, "/a/three.jpg", None)]
-        lines = daily.concat_list(frames, frames[1]).splitlines()
+        lines = daily.concat_list(frames).splitlines()
         self.assertEqual(lines, ["file '/a/one.jpg'", "duration 0.083333",
-                                 "file '/a/two.jpg'", "duration 1.583333",
+                                 "file '/a/two.jpg'", "duration 0.083333",
                                  "file '/a/three.jpg'", "duration 0.083333",
                                  "file '/a/three.jpg'"])
 
     def test_quote_in_a_path_is_escaped(self):
         f = daily.Frame(SUNSET, "/a/it's.jpg", None)
-        self.assertIn(r"file '/a/it'\''s.jpg'", daily.concat_list([f], f))
+        self.assertIn(r"file '/a/it'\''s.jpg'", daily.concat_list([f]))
 
 
 class RunWithoutEncoding(unittest.TestCase):
@@ -473,8 +473,8 @@ class RunWithoutEncoding(unittest.TestCase):
         self.encoded = []
 
     def run_job(self, now=NOW, **over):
-        def fake_encode(cfg, frames, sunset_frame, crop, mask, out):
-            self.encoded.append((out, len(frames), [f.time for f in frames], sunset_frame))
+        def fake_encode(cfg, frames, crop, mask, out):
+            self.encoded.append((out, len(frames), [f.time for f in frames]))
             with open(out, "wb") as f:
                 f.write(b"video")
         return daily.run(self.tree.config(**over), now, encode=fake_encode,
@@ -505,10 +505,10 @@ class RunWithoutEncoding(unittest.TestCase):
             if m % 15:
                 self.tree.add(SUNSET + timedelta(minutes=m))
         self.assertEqual(self.run_job(), 0)
-        times, held = self.encoded[0][2], self.encoded[0][3]
+        times = self.encoded[0][2]
         self.assertEqual(len(times), 96 + 91 - 7)
         self.assertEqual(times, sorted(times))
-        self.assertEqual(held.time, SUNSET, "the hold is on the frame closest to sunset")
+        self.assertEqual(self.tree.record()["sunset_frame"], "wide_20261222T001400Z.jpg")
         self.assertEqual(times[-1], SUNSET + timedelta(minutes=30), "it still ends on the first dark frame")
 
     def test_first_day_with_no_video_before_it_covers_24_hours(self):
@@ -612,7 +612,7 @@ class RunWithoutEncoding(unittest.TestCase):
         def broken(*a):
             raise daily.EncodeError("no check image")
 
-        def fake_encode(cfg, frames, sunset_frame, crop, mask, out):
+        def fake_encode(cfg, frames, crop, mask, out):
             open(out, "wb").close()
         rc = daily.run(self.tree.config(), self.NOW, encode=fake_encode,
                        frame_size=lambda path: (4056, 3040), check_image=broken)
@@ -733,14 +733,14 @@ class RealEncoding(unittest.TestCase):
         v = video[0]
         self.assertEqual((v["codec_name"], v["pix_fmt"], v["width"], v["height"], v["r_frame_rate"]),
                          ("h264", "yuv420p", 1080, 1920, "24/1"))
-        # 96 frames at 12 per second is 8 s, plus the 1.5 s hold.
-        self.assertAlmostEqual(float(info["format"]["duration"]), 9.5, delta=0.2)
+        # 96 frames at 12 per second is 8 s, with no hold on sunset.
+        self.assertAlmostEqual(float(info["format"]["duration"]), 8.0, delta=0.2)
         with open(path, "rb") as f:
             data = f.read()
         self.assertLess(data.index(b"moov"), data.index(b"mdat"), "moov atom must come first")
 
-    def test_sunset_frame_keeps_its_brightness_when_dark_frames_follow(self):
-        # Real dusk: a deflicker filter pulled the held sunset frame from 101 down to 59.
+    def test_last_light_frame_keeps_its_brightness_when_dark_frames_follow(self):
+        # Real dusk: a deflicker filter pulled the sunset frame from 101 down to 59.
         gray, black = os.path.join(self.dir, "gray.jpg"), os.path.join(self.dir, "black.jpg")
         make_image(gray, color="gray")
         make_image(black, color="black")
@@ -750,12 +750,12 @@ class RealEncoding(unittest.TestCase):
         os.makedirs(tree.daily)
         out = os.path.join(tree.daily, "video.mp4")
         crop = {"x": 0, "width": 270, "height": 480}
-        daily.encode_video(tree.config(), frames, frames[9], crop, [], out)
+        daily.encode_video(tree.config(), frames, crop, [], out)
         before = gray_row(out, 960, seek=0)
-        held = gray_row(out, 960, seek=1.0)   # 9 frames in, inside the 1.5 s hold
-        self.assertAlmostEqual(sum(held) / len(held), sum(before) / len(before), delta=2)
+        last = gray_row(out, 960, seek=9.5 / 12)   # the 10th frame, the last gray one
+        self.assertAlmostEqual(sum(last) / len(last), sum(before) / len(before), delta=2)
 
-    def overlay_video(self, minutes, hold=-1):
+    def overlay_video(self, minutes):
         """Gray frames at these minutes after SUNSET, encoded with the overlay."""
         gray = os.path.join(self.dir, "gray.jpg")
         make_image(gray, color="gray")
@@ -763,7 +763,7 @@ class RealEncoding(unittest.TestCase):
         tree = Tree(self)
         os.makedirs(tree.daily)
         out = os.path.join(tree.daily, "video.mp4")
-        daily.encode_video(tree.config(), frames, frames[hold], {"x": 0, "width": 270, "height": 480}, [], out)
+        daily.encode_video(tree.config(), frames, {"x": 0, "width": 270, "height": 480}, [], out)
         return out
 
     def band(self, path, top, height, seek):
@@ -788,23 +788,22 @@ class RealEncoding(unittest.TestCase):
             self.assertLess(max(row) - min(row), 20, "row %d should be untouched" % y)
 
     def test_timestamp_follows_each_frame(self):
-        out = self.overlay_video([0, 15, 30])   # frame 1 starts at 1/12 s, frame 2 is held from 2/12 s
+        out = self.overlay_video([0, 15, 30, 30])   # each frame 1/12 s; the last two share a minute
         top, height = daily.TIME_Y, daily.TIME_SIZE
-        first, second = self.band(out, top, height, 0.02), self.band(out, top, height, 0.1)
-        held_early, held_late = self.band(out, top, height, 0.3), self.band(out, top, height, 1.5)
-        self.assertGreater(self.change(first, second), 3)
-        self.assertGreater(self.change(second, held_early), 3)
-        self.assertLess(self.change(held_early, held_late), 1, "the held frame keeps its own timestamp")
+        bands = [self.band(out, top, height, (i + 0.5) / 12) for i in range(4)]
+        self.assertGreater(self.change(bands[0], bands[1]), 3)
+        self.assertGreater(self.change(bands[1], bands[2]), 3)
+        self.assertLess(self.change(bands[2], bands[3]), 1, "the same minute gives the same text")
 
     def test_a_day_of_one_minute_frames_still_encodes(self):
         # One timestamp filter per frame: 1,440 of them would not fit on a command line.
-        out = self.overlay_video(range(1440), hold=0)
-        self.assertAlmostEqual(float(probe(out)["format"]["duration"]), 1440 / 12 + 1.5, delta=0.2)
+        out = self.overlay_video(range(1440))
+        self.assertAlmostEqual(float(probe(out)["format"]["duration"]), 1440 / 12, delta=0.2)
 
     def test_title_stays_the_same_from_frame_to_frame(self):
         out = self.overlay_video([0, 15, 30])
         top, height = daily.TITLE_Y, daily.TITLE_SIZE
-        self.assertLess(self.change(self.band(out, top, height, 0.02), self.band(out, top, height, 0.3)), 1)
+        self.assertLess(self.change(self.band(out, top, height, 0.02), self.band(out, top, height, 0.19)), 1)
 
     def test_no_temporary_files_are_left_behind(self):
         tree = self.frames(68)

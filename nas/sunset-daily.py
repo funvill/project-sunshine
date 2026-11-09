@@ -35,8 +35,7 @@ WINDOW = timedelta(hours=24)   # a first video, with none before it to continue 
 AZIMUTH_RATE_DEG_PER_MIN = 0.19   # sun's azimuth rate at sunset here; varies 0.188-0.191 over a year
 AZIMUTH_MAX_MINUTES = 60          # frames further from sunset than this say little about it
 AZIMUTH_STEP_LIMIT_DEG = 1.0      # the true seasonal change is at most about 0.61 deg/day
-FRAME_SECONDS = 1.0 / 12.0
-SUNSET_HOLD_SECONDS = 1.5
+FRAME_SECONDS = 1.0 / 12.0       # every frame, sunset included: the 1-minute frames slow sunset down
 LOCK_STALE_SECONDS = 6 * 3600     # longer than any real run; a crash must not stop the job for good
 DEFAULT_TAGS = "#sunset #timelapse #raspberrypi"
 
@@ -243,13 +242,12 @@ def build_caption(sunset, tz, start_date, tags=DEFAULT_TAGS):
     return "Sunset, %s\n%s\n\n%s" % (when, line, tags)
 
 
-def concat_list(frames, sunset_frame):
-    """An ffmpeg concat list: 12 frames a second, with a hold on the sunset frame."""
+def concat_list(frames):
+    """An ffmpeg concat list: 12 frames a second."""
     lines = []
     for frame in frames:
         path = frame.jpg.replace("\\", "/").replace("'", "'\\''")
-        seconds = FRAME_SECONDS + (SUNSET_HOLD_SECONDS if frame is sunset_frame else 0)
-        lines += ["file '%s'" % path, "duration %.6f" % seconds]
+        lines += ["file '%s'" % path, "duration %.6f" % FRAME_SECONDS]
     lines.append(lines[-2])   # concat ignores the last duration unless the file is repeated
     return "\n".join(lines) + "\n"
 
@@ -274,13 +272,13 @@ def drawtext(cfg, text, y, size, enable=None):
     return "drawtext=" + ":".join(args)
 
 
-def overlay_filters(cfg, frames, sunset_frame):
+def overlay_filters(cfg, frames):
     """The title line, and one timestamp per frame, each shown only while its frame is.
     Frames reach these filters one each, at the times concat_list gives them."""
     chain = [drawtext(cfg, "%s   %s" % (OVERLAY_TITLE, OVERLAY_HANDLE), TITLE_Y, TITLE_SIZE)]
     start = 0.0
     for i, frame in enumerate(frames):
-        end = start + FRAME_SECONDS + (SUNSET_HOLD_SECONDS if frame is sunset_frame else 0)
+        end = start + FRAME_SECONDS
         # Half a frame of slack each side; the last one also covers concat's repeated last file.
         enable = "gte(t,%.4f)" % (start - FRAME_SECONDS / 2)
         if i < len(frames) - 1:
@@ -302,20 +300,20 @@ def run_tool(args):
         raise EncodeError("%s failed: %s" % (args[0], detail.strip()[-500:]))
 
 
-def encode_video(cfg, frames, sunset_frame, crop, mask, out):
+def encode_video(cfg, frames, crop, mask, out):
     """Encode to the Reel format in the issue. The mask goes on before the crop, in
     full-frame coordinates, so it stays on the same part of the scene as the crop moves.
     The filters go in a file: one timestamp per frame is too long for a command line."""
     work = os.path.dirname(out)
     fd, list_path = tempfile.mkstemp(prefix=".concat-", suffix=".txt", dir=work)
     with os.fdopen(fd, "w") as f:
-        f.write(concat_list(frames, sunset_frame))
+        f.write(concat_list(frames))
     fd, filter_path = tempfile.mkstemp(prefix=".filters-", suffix=".txt", dir=work)
     try:
         chain = mask_filters(mask) + [
             "crop=%d:%d:%d:0" % (crop["width"], crop["height"], crop["x"]),
             "scale=1080:1920:flags=lanczos:out_range=tv"]   # JPEGs are full range; yuv420p is not
-        chain += overlay_filters(cfg, frames, sunset_frame) + [
+        chain += overlay_filters(cfg, frames) + [
             "fps=24",
             "format=yuv420p"]
         with os.fdopen(fd, "w") as f:
@@ -405,7 +403,7 @@ def process_sunset(cfg, sunset, frames, crop_config, encode, get_size, check_ima
     video = day.isoformat() + ".mp4"
     tmp_video = os.path.join(cfg.daily_dir, ".%s.tmp" % video)
     try:
-        encode(cfg, window, sunset_frame, crop, mask, tmp_video)
+        encode(cfg, window, crop, mask, tmp_video)
         os.replace(tmp_video, os.path.join(cfg.daily_dir, video))
     finally:
         if os.path.exists(tmp_video):
