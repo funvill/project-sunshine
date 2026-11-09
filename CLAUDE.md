@@ -163,8 +163,16 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   out of frame on the left from about Nov 21 to Jan 19 (Dec solstice 233.7° is ~6° past the edge)
   and on the right from about May 7 to Aug 4 (June solstice 308.8° is ~11° past). The near towers
   hide it for about a week each around Feb 23-Mar 3 / Oct 10-18, Mar 9-18 / Sep 24-Oct 3 and
-  Apr 28-May 6 / Aug 5-14. This lens cannot cover the 75° swing at any heading. Not yet checked
-  against a real sunset: every afternoon since the pilot began has been overcast.
+  Apr 28-May 6 / Aug 5-14. This lens cannot cover the 75° swing at any heading.
+  **Measured on the first clear sunset (Nov 8):** the left edge is at about 238.4°, not 239.5°.
+  The lens has some barrel distortion: near the edge the sun moves ~60 px per degree, where a
+  rectilinear lens would give ~80. So the left gap is Nov 24-Jan 16 (Dec 21 still ~4.7° out). The
+  right edge is not measured; if it gains the same, it is ~299°, with the gap ~May 12-Jul 30.
+- **First clear sunset (Nov 8, experiment 5):** auto exposure blows 7-12% of the sky through the
+  sunset, ev-2 keeps it (only the disc and its halo clip), and ev+2 adds nothing. Auto white
+  balance pulls the glow towards blue (R/B 0.7 vs 1.4 for daylight). Proposed for Steven, not
+  done: bracket {ev+0, ev-2} and fixed daylight white balance in the sunset window. Wants another
+  clear sunset and an overcast one first.
 - **Settings search (decided 2026-11-05):** Steven asked for wide experiments over a few days and for
   me to choose the best settings for night, day, sunset and sunrise, posting the evidence on #3.
   Night is 4 s gain 1 (confirmed by the first night sweep, 2026-11-06), with fixed colour gains
