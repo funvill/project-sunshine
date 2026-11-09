@@ -179,6 +179,12 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   and with no position saved. The likely end state: measured scene data sets exposure, and the
   forecast only decides when to bracket and when to expect condensation. A `Weather` block in
   frame files would be a production change (Steven's call).
+- **Moon (experiment 18, estimate 2026-11-08):** at `pilot-3` the moon is in frame on about 41% of
+  nights over the five years; 57% of moonsets fall inside the frame's bearings (low-precision moon
+  calculation, not measured). `moon-1` to `moon-9` (transient timers, Nov 16-25) shoot a short-exposure
+  ladder and a 1-a-minute track, for exposure, double-glazing ghosts (repeat after the hood), a
+  night-time check of the field-of-view fit, and focus. Ideas left for Steven: a per-frame `Moon` block
+  and 1-a-minute frames during full-moon sets (both production changes).
 - **Camera position (decided 2026-11-05):** it sits loose on a shelf and can't be put back exactly, so
   testing continues from the new position until the new supply arrives.
 - **Camera will move again** when the bracket and supply arrive: redo anything tied to framing, and

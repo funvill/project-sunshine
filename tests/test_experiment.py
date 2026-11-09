@@ -189,6 +189,34 @@ class NightRatePlan(unittest.TestCase):
         self.assertEqual(exp.night_rate_shots(SLOT + exp.SLOT_S), [])
 
 
+class MoonPlan(unittest.TestCase):
+    """Experiment 18: the moon in frame."""
+
+    def test_minute_after_a_slot_is_the_full_ladder(self):
+        shots = exp.moon_shots(SLOT + 60)
+        self.assertEqual([s.shutter_us for s in shots], [50, 100, 250, 500, 1000, 2000, 4000])
+        self.assertTrue(all(s.gain == 1 for s in shots))
+        self.assertTrue(all(s.extra == ("--awb", "daylight") for s in shots))
+        self.assertEqual([s.shutter_us for s in shots if s.raw], [250, 1000])
+
+    def test_ladder_fits_in_the_gap_between_captures(self):
+        total = sum(exp.estimate_s(s.shutter_us) for s in exp.moon_shots(SLOT + 60))
+        self.assertLess(total, exp.SLOT_S - 60 - exp.AFTER_SLOT_S - exp.BEFORE_SLOT_S)
+
+    def test_other_minutes_are_one_track_shot(self):
+        for minute in (SLOT + 120, SLOT + 180, SLOT + 240):
+            shots = exp.moon_shots(minute)
+            self.assertEqual([(s.label, s.shutter_us, s.raw) for s in shots], [("moon-track", 1000, False)])
+
+    def test_skips_the_real_capture_minute(self):
+        self.assertEqual(exp.moon_shots(SLOT), [])
+        self.assertEqual(exp.moon_shots(SLOT + exp.SLOT_S), [])
+
+    def test_labels_are_unique_within_a_minute(self):
+        labels = [s.label for s in exp.moon_shots(SLOT + 60)]
+        self.assertEqual(len(labels), len(set(labels)))
+
+
 class NightSweep(unittest.TestCase):
     """Experiment 14: every exposure and setting worth trying at night."""
 
