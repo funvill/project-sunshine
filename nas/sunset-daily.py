@@ -35,6 +35,7 @@ WINDOW = timedelta(hours=24)   # a first video, with none before it to continue 
 AZIMUTH_RATE_DEG_PER_MIN = 0.19   # sun's azimuth rate at sunset here; varies 0.188-0.191 over a year
 AZIMUTH_MAX_MINUTES = 60          # frames further from sunset than this say little about it
 AZIMUTH_STEP_LIMIT_DEG = 1.0      # the true seasonal change is at most about 0.61 deg/day
+EXPECTED_FRAMES = 288            # regular frames in 24 hours: capture is every 5 minutes
 FRAME_SECONDS = 1.0 / 12.0       # every frame, sunset included: the 1-minute frames slow sunset down
 LOCK_STALE_SECONDS = 6 * 3600     # longer than any real run; a crash must not stop the job for good
 DEFAULT_TAGS = "#sunset #timelapse #raspberrypi"
@@ -65,7 +66,7 @@ class Config:
     start_date: date
     crop_center_x: object = None
     tags: str = DEFAULT_TAGS
-    expected_frames: int = 96
+    expected_frames: int = EXPECTED_FRAMES
     min_fraction: float = 0.7
     lookback_days: int = 2
     font_file: str = DEFAULT_FONT_FILE
@@ -378,7 +379,7 @@ def process_sunset(cfg, sunset, frames, crop_config, encode, get_size, check_ima
     end = day_end(frames, sunset)
     start = parse_utc(previous.get("end_utc")) or end - WINDOW
     window = select_window(frames, start, end)
-    expected = round((end - start) / (WINDOW / cfg.expected_frames))   # dusk drifts, so 96 give or take
+    expected = round((end - start) / (WINDOW / cfg.expected_frames))   # dusk drifts, so 288 give or take
     record = {"local_date": day.isoformat(), "sunset_utc": sunset.strftime(TIME_FORMAT),
               "start_utc": start.strftime(TIME_FORMAT), "end_utc": end.strftime(TIME_FORMAT),
               "frames": len(window), "expected_frames": expected, "posted": False}
@@ -481,7 +482,7 @@ def main():
                  start_date=date.fromisoformat(env.get("START_DATE", "2026-12-21")),
                  crop_center_x=int(center) if center else None,
                  tags=env.get("CAPTION_TAGS", DEFAULT_TAGS),
-                 expected_frames=int(env.get("EXPECTED_FRAMES", "96")),
+                 expected_frames=int(env.get("EXPECTED_FRAMES", str(EXPECTED_FRAMES))),
                  min_fraction=float(env.get("MIN_FRAME_FRACTION", "0.7")),
                  lookback_days=int(env.get("LOOKBACK_DAYS", "2")),
                  font_file=env.get("FONT_FILE") or DEFAULT_FONT_FILE)
