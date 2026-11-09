@@ -12,6 +12,7 @@ the runner waits while diag or a real capture has the camera.
     sunset-experiment.py rate-night --run rate-night-1 --until <epoch>
     sunset-experiment.py night-sweep --run sweep-1 --until <epoch>
     sunset-experiment.py moon --run moon-1 --until <epoch>
+    sunset-experiment.py sunset --run sunset-1 --sunset <epoch> --until <epoch>
 """
 import argparse
 import csv
@@ -264,6 +265,22 @@ def night_rate_shots(minute):
     return [Shot("rate-night", shutter_us=4_000_000, gain=1, awbgains=NIGHT_AWB)]
 
 
+def sunset_shots(minute, sunset):
+    """Experiment 19: the real inputs for the options Steven ranked best on Nov 8: E (ev+0 and
+    ev-2 with daylight white balance, merged later), B (ev-2, auto) and D (merged, auto). A is
+    production's own frame. Every minute in the window, plus ev-3 and the sun shots every 5."""
+    if minute % SLOT_S < 60 or abs(minute - sunset) > SUNSET_WINDOW_S:
+        return []
+    daylight = ("--awb", "daylight")
+    shots = [Shot("ev-2-daylight", ev=-2, extra=daylight), Shot("ev+0-daylight", ev=0, extra=daylight),
+             Shot("ev-2", ev=-2)]
+    if (minute - 60) % SLOT_S < 60:
+        shots.append(Shot("ev-3-daylight", ev=-3, extra=daylight))
+        if minute < sunset:
+            shots += [Shot("sun-100us", shutter_us=100, gain=1), Shot("sun-500us", shutter_us=500, gain=1)]
+    return shots
+
+
 MOON_LADDER_US = (50, 100, 250, 500, 1000, 2000, 4000)
 MOON_RAW_US = (250, 1000)
 
@@ -431,6 +448,18 @@ def run_moon(run, until):
         time.sleep(max(0, min(until, minute + 60) - time.time()))
 
 
+def run_sunset(run, sunset, until):
+    while time.time() < until:
+        minute = int(time.time()) // 60 * 60
+        for shot in sunset_shots(minute, sunset):
+            if time.time() >= until:
+                break
+            run.take(shot, max_wait_s=30)
+        if time.time() - run.last_upload > UPLOAD_EVERY_S:
+            run.upload()
+        time.sleep(max(0, min(until, minute + 60) - time.time()))
+
+
 def run_night_sweep(run, until):
     last = None
     while time.time() < until:
@@ -466,7 +495,7 @@ def run_day(run, sunset, until, settle_at, sunrise=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("program", choices=["night", "settle", "day", "rate-night", "night-sweep", "moon"])
+    parser.add_argument("program", choices=["night", "settle", "day", "rate-night", "night-sweep", "moon", "sunset"])
     parser.add_argument("--run", required=True)
     parser.add_argument("--sunset", type=int)
     parser.add_argument("--sunrise", type=int)
@@ -489,6 +518,8 @@ def main():
             run_night_sweep(run, args.until)
         elif args.program == "moon":
             run_moon(run, args.until)
+        elif args.program == "sunset":
+            run_sunset(run, args.sunset, args.until)
         else:
             for shot in night_shots() if args.program == "night" else settle_shots():
                 run.take(shot, max_wait_s=900)

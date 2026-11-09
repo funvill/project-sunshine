@@ -78,6 +78,60 @@ class DenseFrameGuard(unittest.TestCase):
             self.assertLessEqual(exp.estimate_s(ms * 1000), exp.MINUTE_GUARD_MAX_S, ms)
 
 
+class SunsetPlan(unittest.TestCase):
+    """Experiment 19: real inputs for the options Steven preferred (E, B, D)."""
+
+    def minute(self, offset_s):
+        m = SUNSET + offset_s
+        return m - m % 60
+
+    def five(self, offset_s):
+        m = self.minute(offset_s)
+        return m - m % exp.SLOT_S + 60  # the minute after a regular slot
+
+    def plain(self, offset_s):
+        m = self.five(offset_s)
+        return m + 60
+
+    def labels(self, minute):
+        return [s.label for s in exp.sunset_shots(minute, SUNSET)]
+
+    def test_every_minute_shoots_both_halves_of_e_and_b(self):
+        self.assertEqual(self.labels(self.plain(-1200)), ["ev-2-daylight", "ev+0-daylight", "ev-2"])
+
+    def test_daylight_shots_use_the_daylight_preset(self):
+        for s in exp.sunset_shots(self.plain(600), SUNSET):
+            if s.label.endswith("-daylight"):
+                self.assertEqual(s.extra, ("--awb", "daylight"))
+            else:
+                self.assertEqual(s.extra, ())
+        evs = {s.label: s.ev for s in exp.sunset_shots(self.plain(600), SUNSET)}
+        self.assertEqual(evs, {"ev-2-daylight": -2, "ev+0-daylight": 0, "ev-2": -2})
+
+    def test_five_minute_extras_before_sunset(self):
+        self.assertEqual(self.labels(self.five(-1200))[3:], ["ev-3-daylight", "sun-100us", "sun-500us"])
+
+    def test_no_sun_shots_after_sunset(self):
+        self.assertEqual(self.labels(self.five(1200))[3:], ["ev-3-daylight"])
+
+    def test_skips_the_regular_capture_minute(self):
+        m = self.minute(-1200)
+        self.assertEqual(exp.sunset_shots(m - m % exp.SLOT_S, SUNSET), [])
+
+    def test_nothing_outside_the_window(self):
+        self.assertEqual(exp.sunset_shots(self.plain(-exp.SUNSET_WINDOW_S - 600), SUNSET), [])
+        self.assertEqual(exp.sunset_shots(self.plain(exp.SUNSET_WINDOW_S + 600), SUNSET), [])
+
+    def test_a_busy_minute_fits_between_dense_frames(self):
+        # Shots run back to back from the guard's start; each took about 2.5 s on Nov 8.
+        minute = self.five(-1200)
+        t = minute + exp.DENSE_AFTER_S
+        for s in exp.sunset_shots(minute, SUNSET):
+            self.assertTrue(exp.clear_to_start(t, exp.estimate_s(s.shutter_us)), s.label)
+            t += 2.5
+        self.assertLess(t, minute + 60)
+
+
 class EstimatedTime(unittest.TestCase):
     def test_long_exposures_take_several_frames(self):
         self.assertGreaterEqual(exp.estimate_s(8_000_000), 24)

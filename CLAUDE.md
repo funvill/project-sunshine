@@ -173,6 +173,12 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   balance pulls the glow towards blue (R/B 0.7 vs 1.4 for daylight). Proposed for Steven, not
   done: bracket {ev+0, ev-2} and fixed daylight white balance in the sunset window. Wants another
   clear sunset and an overcast one first.
+- **Steven's ranking of the sunset options (2026-11-09, from the comparison page):** best E (ev+0 +
+  ev-2 merged, daylight white balance), then B (ev-2 alone), then D (the merge, auto WB); worst F
+  (daylight alone), A (today's frame), C (ev-1 alone). He prefers a held-back sky over a bright city.
+  E was simulated, so experiment 19 (`sunset` program, `sunset-1` to `-6`, Nov 9-14) shoots the real
+  inputs. No production change yet. The runner now keeps out of the first 12 s and last 3 s of every
+  minute, so it can't take the camera from a dense frame.
 - **Settings search (decided 2026-11-05):** Steven asked for wide experiments over a few days and for
   me to choose the best settings for night, day, sunset and sunrise, posting the evidence on #3.
   Night is 4 s gain 1 (confirmed by the first night sweep, 2026-11-06), with fixed colour gains
