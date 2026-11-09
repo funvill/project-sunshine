@@ -52,6 +52,32 @@ class ClearToStart(unittest.TestCase):
         self.assertFalse(exp.clear_to_start(SLOT + exp.SLOT_S - 100, est_s=120))
 
 
+class DenseFrameGuard(unittest.TestCase):
+    """The production dense frame starts at :00 every minute and skips itself if the camera is busy."""
+
+    MID_GAP = SLOT + 120  # a minute well clear of the regular slot
+
+    def test_no_shot_starts_in_the_first_seconds_of_a_minute(self):
+        for s in range(exp.DENSE_AFTER_S):
+            self.assertFalse(exp.clear_to_start(self.MID_GAP + s, est_s=3), s)
+
+    def test_short_shot_starts_after_the_dense_frame(self):
+        self.assertTrue(exp.clear_to_start(self.MID_GAP + exp.DENSE_AFTER_S, est_s=3))
+
+    def test_no_shot_runs_into_the_next_minute(self):
+        self.assertFalse(exp.clear_to_start(self.MID_GAP + 55, est_s=3))
+        self.assertFalse(exp.clear_to_start(self.MID_GAP + 30, est_s=30))
+
+    def test_night_exposures_too_long_for_a_minute_are_not_held_to_it(self):
+        # Only scheduled at night, outside the dense windows (sun below -9 degrees).
+        self.assertTrue(exp.clear_to_start(self.MID_GAP + 30, est_s=exp.estimate_s(16_000_000)))
+
+    def test_twilight_ladders_fit_the_minute_guard(self):
+        # The dusk and dawn ladders run inside the dense windows, so they must not be exempt.
+        for ms in exp.DUSK_MS:
+            self.assertLessEqual(exp.estimate_s(ms * 1000), exp.MINUTE_GUARD_MAX_S, ms)
+
+
 class EstimatedTime(unittest.TestCase):
     def test_long_exposures_take_several_frames(self):
         self.assertGreaterEqual(exp.estimate_s(8_000_000), 24)

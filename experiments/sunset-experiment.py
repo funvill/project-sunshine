@@ -48,6 +48,9 @@ MIN_NAS_FREE_GB = 50
 UPLOAD_EVERY_S = 1800
 MAX_FAILURES = 3  # failed shots in a row before the runner leaves the camera alone
 HOLD_OFF_S = 1800
+DENSE_AFTER_S = 12  # the production dense frame starts at :00 each minute in its windows
+DENSE_BEFORE_S = 3  # and skips itself if the camera is busy, so stay clear of both ends
+MINUTE_GUARD_MAX_S = 45  # longer shots are night exposures, only run outside the dense windows
 
 
 def clear_to_start(now, est_s):
@@ -55,6 +58,10 @@ def clear_to_start(now, est_s):
     phase = now % SLOT_S
     if phase < AFTER_SLOT_S:
         return False
+    if est_s <= MINUTE_GUARD_MAX_S:
+        second = now % 60
+        if second < DENSE_AFTER_S or second + est_s + DENSE_BEFORE_S >= 60:
+            return False
     return phase + est_s + BEFORE_SLOT_S < SLOT_S
 
 
@@ -286,7 +293,8 @@ def camera_busy():
             return True
     if read_text(["systemctl", "is-active", "sunset-diag.service"]) == "active":
         return True  # someone may be looking at the page; the stream comes first
-    return read_text(["systemctl", "is-active", "sunset-capture.service"]) in ("active", "activating")
+    return any(read_text(["systemctl", "is-active", unit]) in ("active", "activating")
+               for unit in ("sunset-capture.service", "sunset-dense.service"))
 
 
 def load_site_env():
