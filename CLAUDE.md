@@ -193,6 +193,10 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   11% of the sky in A. But daylight white balance turns the sky brown from ~15 min after sunset,
   when the city lights the cloud (R/B up to 4.6). So E would hand over to auto, or to `NIGHT_AWB`, at
   about +10 min. Still needs a clear sunset (runs 3-6, Nov 11-14).
+- **CM4 experiments (2026-11-12, plan on #3):** 20, a night sweep (`cm4-sweep-1`, Nov 12 04:00-14:00 UTC); 21, the sunset
+  options alongside experiment 19 (`cm4-sunset-1` to `-3`, Nov 12-14); 22, the lens geometry from the sun on clear
+  evenings; 23, vignetting and sharpness; 24, Wi-Fi sync health; 25, the room-light glow (needs Steven). The runner
+  reads `ROTATION`. These are transient timers on the CM4, so a reboot clears them.
 - **Settings search (decided 2026-11-05):** Steven asked for wide experiments over a few days and for
   me to choose the best settings for night, day, sunset and sunrise, posting the evidence on #3.
   Night is 4 s gain 1 (confirmed by the first night sweep, 2026-11-06), with fixed colour gains

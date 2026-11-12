@@ -37,6 +37,13 @@ Changes to Project Sunset by date, newest first. Dates are Vancouver local time.
   - The 03:00 UTC CM4 night frame has **none of the green and red spots**, with the dongle's LEDs still lit. So the spots were the CM4 board's own LEDs, and the dongle isn't visible in the glass. The amber room-light glow on the left is unchanged.
   - `timelaps` was not rebooted, because that would clear its scheduled experiment timers. The rule applies at its next boot anyway.
 
+### Experiments
+- Experiment 19, run `sunset-3` (Nov 11): overcast again. A clipped at most 1.1% of the sky; B, D and E at most about 0.35%. E's sky went brown after sunset again, R/B 1.5 at +32 minutes to 3.9 at +43, a little later than on Nov 9 and 10. Posted on #3.
+- Confirmed the LED fix on `timelaps`: the left sky's extra redness dropped from about 3 (R minus B, against the neighbouring sky) to about 0.5 when the LEDs went off at 02:50 UTC.
+- **Runner:** `sunset-experiment.py` reads `ROTATION` from `sunset.env` and adds `--rotation 180` to every shot, so experiments on the upside-down CM4 come out upright. Tests in `tests/test_experiment.py`. Copied to both Pis.
+- **CM4 experiments 20 to 25**, at Steven's request; the plan is posted on #3. 20: night sweep; 21: sunset options alongside experiment 19; 22: lens geometry from the sun; 23: vignetting and sharpness; 24: Wi-Fi sync health; 25: the room-light glow, which needs Steven.
+  - **Pi:** on the CM4, the runner is installed in `~/sunset/experiments/` with transient timers, run as root with `User=sunshine`. `exp-cm4-sweep-1` runs Nov 12 04:00 to 14:00 UTC (ending before the morning dense frames). `exp-cm4-sunset-1` to `-3` are set for the same windows as `sunset-4` to `-6`. Results go to `project_sunshine_experiments/cm4-*`.
+
 ## 2026-11-11
 
 ### Hardware
