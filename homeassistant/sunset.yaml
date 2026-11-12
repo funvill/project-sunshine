@@ -9,6 +9,14 @@ command_line:
       unit_of_measurement: min
       scan_interval: 300
       command_timeout: 30
+  # The CM4 (hostname sunshine), saving as cm4wide.
+  - sensor:
+      name: Sunset CM4 newest frame age
+      unique_id: sunset_cm4_newest_frame_age
+      command: "sh /config/sunset/sunset_frame_age.sh cm4wide"
+      unit_of_measurement: min
+      scan_interval: 300
+      command_timeout: 30
 
 input_number:
   sunset_max_frame_age:
@@ -32,6 +40,13 @@ template:
         state: >
           {% set age = states('sensor.sunset_newest_frame_age') %}
           {{ not is_number(age) or age | float > states('input_number.sunset_max_frame_age') | float(60) }}
+      - name: Sunset CM4 frames stale
+        unique_id: sunset_cm4_frames_stale
+        device_class: problem
+        delay_on: "00:10:00"
+        state: >
+          {% set age = states('sensor.sunset_cm4_newest_frame_age') %}
+          {{ not is_number(age) or age | float > states('input_number.sunset_max_frame_age') | float(60) }}
 
 alert:
   sunset_frames_stale:
@@ -49,4 +64,21 @@ alert:
     notifiers:
       - persistent_notification
       # Add your phone here so an alert reaches you overnight, for example:
+      # - mobile_app_your_phone
+
+  sunset_cm4_frames_stale:
+    name: Project Sunset CM4 has no new frames
+    entity_id: binary_sensor.sunset_cm4_frames_stale
+    state: "on"
+    repeat: 360
+    can_acknowledge: true
+    message: >
+      {% set age = states('sensor.sunset_cm4_newest_frame_age') %}
+      {% if is_number(age) %}The CM4's newest frame on the NAS is {{ age }} minutes old.
+      {% else %}Home Assistant can't find a recent CM4 frame on the NAS: no frames in two days, or the share is unreadable.{% endif %}
+      Open the diag page on sunshine to see why.
+    done_message: Project Sunset CM4 frames are reaching the NAS again.
+    notifiers:
+      - persistent_notification
+      # Same phone as above, for example:
       # - mobile_app_your_phone

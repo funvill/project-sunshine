@@ -52,3 +52,23 @@ check "runs the age script" grep -q 'sunset_frame_age.sh' "$PKG"
 check "unknown age counts as stale" grep -q 'not is_number(age)' "$PKG"
 check "alert watches the stale sensor" grep -q 'entity_id: binary_sensor.sunset_frames_stale' "$PKG"
 check "threshold starts at an hour" grep -q 'initial: 60' "$PKG"
+
+section "frame age: another camera by name"
+W="$(mktemp -d)"
+NOW=$(date -u -d "2026-11-05 18:00:00" +%s)
+mkdir -p "$W/cm4wide/2026/11/05"
+: > "$W/cm4wide/2026/11/05/cm4wide_20261105T175000Z.jpg"
+: > "$W/cm4wide/2026/11/05/wide_20261105T175900Z.jpg"
+check "reads that camera's folder and names" \
+  test "$(FRAME_BASE="$W" FRAME_AGE_NOW="$NOW" sh "$HA/sunset_frame_age.sh" cm4wide)" = 10
+frame 2026/11/05 wide_20261105T173000Z.jpg
+check "no name still means wide" \
+  test "$(FRAME_BASE="$W" FRAME_AGE_NOW="$NOW" sh "$HA/sunset_frame_age.sh")" = 30
+FRAME_BASE="$W" FRAME_AGE_NOW="$NOW" sh "$HA/sunset_frame_age.sh" 'wide/../x' >/dev/null 2>&1; rc=$?
+check "a name with a path in it is refused" test "$rc" != 0
+
+section "Home Assistant package: the CM4"
+check "CM4 age sensor runs the script for cm4wide" grep -q 'sunset_frame_age.sh cm4wide' "$PKG"
+check "CM4 stale sensor" grep -q 'unique_id: sunset_cm4_frames_stale' "$PKG"
+check "CM4 alert watches it" grep -q 'entity_id: binary_sensor.sunset_cm4_frames_stale' "$PKG"
+check "CM4 unknown age counts as stale" test "$(grep -c 'not is_number(age)' "$PKG")" = 2
