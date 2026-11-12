@@ -20,3 +20,10 @@ check "install.sh enables the dense timer" grep -q 'enable --now sunset-capture.
 section "capture every 5 minutes"
 check "capture timer fires every 5 minutes" grep -qx 'OnCalendar=\*:00/5' "$SRC/systemd/sunset-capture.timer"
 check "dense mode skips the same slot minutes" grep -q 'SLOT_EVERY_MIN="${SLOT_EVERY_MIN:-5}"' "$SRC/sunset-capture.sh"
+
+section "LEDs off (reflections in the window)"
+R="$SRC/90-sunset-leds.rules"
+check "rule turns off every LED as it appears" \
+  grep -qx 'ACTION=="add", SUBSYSTEM=="leds", ATTR{trigger}="none", ATTR{brightness}="0"' "$R"
+check "install.sh installs the LED rule" grep -q '90-sunset-leds.rules" /etc/udev/rules.d/' "$SRC/install.sh"
+check "install.sh applies it without a reboot" grep -q 'udevadm trigger --subsystem-match=leds' "$SRC/install.sh"

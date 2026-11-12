@@ -25,6 +25,10 @@ for u in sunset-capture.service sunset-capture.timer sunset-sync.service sunset-
   sed -e "s|^User=.*|User=$RUN_USER|" -e "s|/home/pi/|$HOME_DIR/|g" "$HERE/systemd/$u" > "/etc/systemd/system/$u"
 done
 install -m 755 "$HERE/diag" /usr/local/bin/diag
+# LEDs off: they reflect in the window. Applies now and at every boot.
+install -m 644 "$HERE/90-sunset-leds.rules" /etc/udev/rules.d/90-sunset-leds.rules
+udevadm control --reload
+udevadm trigger --subsystem-match=leds --action=add
 # Keeps a frozen Pi from staying frozen. Applies from the next reboot or systemctl daemon-reexec.
 install -D -m 644 "$HERE/systemd/sunset-watchdog.conf" /etc/systemd/system.conf.d/sunset-watchdog.conf
 systemctl daemon-reload
