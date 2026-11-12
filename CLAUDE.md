@@ -55,6 +55,10 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   folder and names, JPEG + JSON only, same auto exposure, `Capture.schedule: "dense"`. The regular
   slot always wins the camera. `sunset-dense.timer`; details in `docs/setup.md`. About 230 extra
   frames a day in November, roughly 1 GB a day more on the NAS. The ×3 bracket is not done.
+- **Post only the good sunsets to Instagram (decided 2026-11-11):** the daily video is still made
+  every day, but only a day whose sky scores above a set value is posted. Most grey, overcast
+  sunsets aren't worth showing. The score is deterministic image maths on the sunset frames (no AI,
+  no tokens); see backlog #11. Until it exists and is tuned, nothing posts anyway (`POST_ENABLED=0`).
 - **Two cameras eventually**: one wide (all sunsets), one tight (downtown or another subject).
 - Hidden, compact setup. DSLR/mirrorless considered and set aside for size/visibility,
   though a used Sony a6300/a6400 tethered via gphoto2 remains the image-quality upgrade path.
@@ -159,6 +163,10 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   Laplacian variance on the city band (about 48 before, 155 after), and lit windows that were blobs
   now show their frames. The camera also turned: the skyline moved about 650 px left and 200 px up
   (about 10° to the right, same scale), measured by matching skyline patches across the refocus.
+- **Nudged (2026-11-12, 00:11-00:18 UTC):** Steven moved both cameras, putting the CM4 at the window. The
+  `timelaps` view shifted about 37 px left (≈ 0.6° to the right) by 00:18, with smaller nudges from
+  00:11. `SETUP_ID` is now `pilot-4` (set at 00:33 UTC, so frames from 00:18 to 00:30 still say
+  `pilot-3`). Experiment run `sunset-3` was running at the time.
 - **Framing vs the sunset swing (estimate, 2026-11-08):** fitting skyline landmarks (downtown
   Vancouver, Oakridge) with known bearings gives a rectilinear lens of about 5.6 mm (f ≈ 3,630 px,
   ~58° horizontal). At `pilot-3` the frame spans about 239° to 298° true. Predicted: the sunset is
@@ -181,6 +189,10 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   E was simulated, so experiment 19 (`sunset` program, `sunset-1` to `-6`, Nov 9-14) shoots the real
   inputs. No production change yet. The runner now keeps out of the first 12 s and last 3 s of every
   minute, so it can't take the camera from a dense frame.
+  **Runs 1-2 (Nov 9-10, both overcast):** the real E, B and D held a bright cloud gap that clipped
+  11% of the sky in A. But daylight white balance turns the sky brown from ~15 min after sunset,
+  when the city lights the cloud (R/B up to 4.6). So E would hand over to auto, or to `NIGHT_AWB`, at
+  about +10 min. Still needs a clear sunset (runs 3-6, Nov 11-14).
 - **Settings search (decided 2026-11-05):** Steven asked for wide experiments over a few days and for
   me to choose the best settings for night, day, sunset and sunrise, posting the evidence on #3.
   Night is 4 s gain 1 (confirmed by the first night sweep, 2026-11-06), with fixed colour gains
@@ -203,6 +215,13 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   ladder and a 1-a-minute track, for exposure, double-glazing ghosts (repeat after the hood), a
   night-time check of the field-of-view fit, and focus. Ideas left for Steven: a per-frame `Moon` block
   and 1-a-minute frames during full-moon sets (both production changes).
+- **Reflections (checked 2026-11-12, LEDs on/off A/B at night):** on the CM4, the board's and the
+  Wi-Fi dongle's LEDs show as green and red spots (doubled by the double glazing) in every frame, and
+  a light in the room shows as a large amber glow on the left; the LED spots go with the LEDs off,
+  the glow doesn't. On `timelaps`, the red power LED adds a faint red wash to the left sky.
+  **Decided 2026-11-12: all LEDs off** with `pi/90-sunset-leds.rules` (udev, installed by
+  `install.sh`), on both Pis. The CM4's spots are gone; they were the board's LEDs. The dongle's driver
+  relights its own LEDs, but they don't show in the glass. The room-light glow needs the hood.
 - **Camera position (decided 2026-11-05):** it sits loose on a shelf and can't be put back exactly, so
   testing continues from the new position until the new supply arrives.
 - **Camera will move again** when the bracket and supply arrive: redo anything tied to framing, and
@@ -234,6 +253,62 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
 - **Raspberry Pi 3 Model B v1.2** ×1 (HDMI + one USB port marked "X" — may be dead; fine headless).
   Planned for the sunset camera later (Ethernet, enough CPU for bursts).
 - **Raspberry Pi 2 Model B** (on DIN bracket) — not recommended.
+- **Raspberry Pi CM4 with 32 GB eMMC** (`lsblk` 29.1 GB, 2026-11-11; boot EEPROM dated 2023-01-11,
+  newer than the 2021-07-06 the board vendor asks for) on an **Embedded Micro Technology MyPi Industrial IoT Integrator Board XT**
+  (2026-11-09). Board: two 22-pin camera connectors, 9-28 V DC input, battery-backed DS1338 RTC
+  (I2C 0x68, `dtoverlay=i2c-rtc,ds1307,addr=0x68`), 60 s external watchdog on GPIO16/17 (jumpers
+  LK5-LK7), EMC2301 fan controller, Gigabit + 10/100 Ethernet, 2x USB 2.0, a microSD slot wired
+  over USB, a mini PCIe slot wired over USB only (for a 4G modem), TPM, 28 GPIO on the IO slot,
+  125 x 142 mm, -20 to +80 °C. No M.2 and no NVMe: PCIe is not used. The vendor's dual-camera
+  notes use the legacy `dt-blob.bin` stack, but libcamera works without it (below). Moving the
+  pilot to it is Steven's call.
+  **Set up 2026-11-11 (on a desk, not at the window):** hostname `sunshine`, user `sunshine`, 8 GB
+  RAM. Reflashed with Raspberry Pi OS Lite Bookworm 32-bit (armhf userland), which boots the 64-bit
+  kernel 6.12.109-v8, so the self-test warns about the Zero path. rpicam-apps 1.9.0, libcamera 0.5.
+  **No Wi-Fi: this CM4 is a model without wireless** (no antenna or U.FL socket on the module; LK2
+  is open; the kernel reports `mmc1: Failed to initialize`). Ethernet only, unless a USB Wi-Fi
+  adapter is added (a buying decision). `~/sunset` installed with `CAM_NAME=cm4wide` and `SETUP_ID=cm4-desk-1`, so its
+  frames can't mix with `wide`. **Timers off, no NAS mount yet** (Steven makes `/etc/sunset-nas.cred`).
+  The new Arducam IMX477 with the 3.2 mm lens is on **CAM0**: `dtoverlay=imx477,cam0`. Nothing
+  answered on CAM1. The RTC works with `dtoverlay=i2c-rtc,ds1307,addr=0x68`, set from NTP once.
+  Self-test 14 pass, 1 warn (64-bit kernel): day shot 4.3 s and night shot 6.2 s, each with DNG,
+  against ~7 s and ~12 s on `timelaps`. Focus: the camera's C-to-CS adapter ring had to come off, and
+  focus is set with the camera's (very stiff) back-focus ring, since the lens has no focus ring of its
+  own. Rough focus done at the desk; final focus is at the window. The external watchdog isn't
+  resetting the board (up >20 min), so LK5-LK7 don't need changing.
+  Packages trimmed to the keep list (615 to 383), keeping the v7l/v8 kernels and USB Wi-Fi firmware
+  (see `docs/setup.md`). `sunset-lowwear.sh` applied. NAS mounted as on `timelaps`, using a copy of its
+  login file (copied Pi to Pi on 2026-11-11, never displayed). Frames sync to `project_sunshine/cm4wide/`;
+  `timelaps` and the CM4 have separate HA alerts, so CM4 frames can't hide a `timelaps` outage.
+  The RTC sets the clock at boot and the kernel writes NTP time back to it every 11 min, but **there
+  is no coin cell in the RTC holder yet** (Steven will add one later), so it only keeps time through a
+  reboot, not a power cut. Don't depend on it: capture keeps waiting for NTP (`REQUIRE_TIME_SYNC=1`). One test
+  capture through `sunset-capture.service` (2026-11-11 23:44 UTC) went through cleanly and synced to
+  `project_sunshine/cm4wide/`.
+  **At the window from 2026-11-12 ~00:30 UTC** (`SETUP_ID=cm4-window-1`), on Wi-Fi through an old
+  Buffalo 2.4 GHz USB dongle (192.168.3.60, about 2.4 Mbit/s to the NAS). **Capturing since
+  2026-11-12 00:35 UTC** (Steven's go-ahead): the 5-minute, dense and sync timers, same schedule as
+  `timelaps`. HA has a separate CM4 alert (`cm4wide`) from 2026-11-12, same 60-minute limit, also
+  sent to the phone.
+  **The camera is mounted upside down.** `ROTATION=180` in its `sunset.env` (new setting, 2026-11-12)
+  makes rpicam flip the readout, so frames from **01:08 UTC** on are upright, DNG included, and say
+  `rotation: 180` in `Capture.settings`. Frames from 00:35 to 01:07 UTC are upside down. `timelaps`
+  still runs the previous capture script (no change for it: the setting defaults to 0). It points down more than `timelaps`: the horizon is about 44% from the top, with the
+  street and the deck railing (lower left, out of focus) below. Focus is good: sharp in the centre and
+  even left to right (no tilt), a little softer towards the edges.
+  **Field of view, estimated by matching features against the 6 mm frame (not measured on the sun):**
+  scale 0.534 in the centre, so f ≈ 1,940 px (≈ 3.0 mm). The CM4's centre is about 7° left of
+  `timelaps`' centre, so roughly 262° true. A rectilinear lens with that f would span about 93°
+  (≈ 216° to 308°); this lens is sold as 120° and has barrel distortion, so the real span is likely
+  wider. That should cover the 233.6° to 308.8° sunset swing, but the right (June) end is tight on
+  this estimate: measure it on clear sunsets.
+- **Ordered 2026-11-09, due Nov 12 (Amazon.ca):** a second IMX477 camera, **Arducam B0240E**
+  (sold by UCTRONICS, CAD 68.57; C/CS mount, 15-15 and 15-22 pin cables included; some buyers got
+  a board marked UC-517, so check the marking and whether its IR filter is fixed or switches), and
+  an **Arducam LN05101 3.2 mm CS lens** (CAD 62.62; F2.0 fixed iris, 1/1.7" format, Arducam says
+  120° H on the IMX477, not measured; reviews say the focus ring is stiff until the locking post is
+  loosened). Steven chose these over the official HQ camera, the Camera Module 3 Wide and a
+  SainSmart 152° IMX708 module.
 - **Arducam UC-517 Rev.D3** — IMX477 (same sensor as Pi HQ) with a switchable **IR-cut filter**.
   Keep IR-cut in day mode always; verify its state after power loss. Per Arducam's product
   page the filter is switched automatically by a photoresistor on the camera PCB, so there is no
@@ -255,7 +330,11 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
 
 ## Hardware plan for the real run (not yet bought)
 Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi 3/Zero:
-- **Sunset (wide) camera:** IMX477 + ~3–4 mm lens on the **Pi 3**, or Camera Module 3 Wide (~102°).
+- **Two-camera plan (decided 2026-11-09):** both cameras on the CM4 + MyPi XT board, both IMX477 so
+  they share one set of settings. **Wide (sunset):** the new Arducam B0240E + 3.2 mm lens.
+  **Tight (downtown):** the current camera + the 16 mm lens. Both 6 mm lenses become spares.
+  Moving the pilot to the CM4 board, and when, is still Steven's call; it means a new `SETUP_ID`.
+- **Sunset (wide) camera, earlier options:** IMX477 + ~3–4 mm lens on the **Pi 3**, or Camera Module 3 Wide (~102°).
   Upgrade path: used **Sony a6300** (has true silent/electronic shutter; must verify silent works
   over USB PC Remote with gphoto2) + wide lens (e.g. Sony 10–18 mm).
 - **Tight (downtown) camera:** IMX477 + 16 mm lens on a **Pi Zero W** (~180 px/degree — best
@@ -292,6 +371,17 @@ Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi
 9. Mount design: start from Printables model 250692 or design a keyed plate + foam hood.
 10. Post-processing pipeline: deflicker, stabilisation, "sunset along the horizon" sequence
     (frame nearest each sunset), time slices, sky calendar.
+
+11. **Sky score to pick sunsets worth posting. TODO once there are more good sunsets (needs
+    more than the one clear sunset so far, Nov 8, to set thresholds).** A deterministic score per day,
+    no AI: take the best frame in the window from 35 min before to 25 min after sunset, look at the sky
+    above the skyline, and compute the warm-sky fraction (bright pixels with red clearly above blue),
+    plus the luminance spread, maybe a cloud-texture measure. Saturation is useless (blue overcast is
+    also saturated). First try on Nov 4-10 frames: warm fraction 0.041 on the clear Nov 8 sunset vs
+    0.001-0.013 on every other day. Plan: a tested helper in `nas/` that writes a `sky` block (score
+    and label: clear and colourful / partly cloudy / overcast) into each daily record; the publisher
+    posts only days above a threshold set by Steven. Needs a fixed mask for the near towers, and a
+    recheck after any lens or camera change.
 
 ## Creative outputs (later)
 - Long time-lapse video (deflicker + stabilise).

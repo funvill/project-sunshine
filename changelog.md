@@ -2,7 +2,82 @@
 
 Changes to Project Sunset by date, newest first. Dates are Vancouver local time. Entries marked **Pi** were made on the pilot Pi (`timelaps`) and may have no commit of their own. Decisions and their reasons are in `CLAUDE.md`.
 
+## 2026-11-12
+
+### Hardware
+- Steven moved both cameras, putting the CM4 at the window.
+- **`timelaps`:**
+  - Feature matching against the 20:00 UTC frame shows small nudges from 00:11 UTC and a shift of about 37 px (≈ 0.6°) at 00:18 UTC, during experiment run `sunset-3`.
+  - Set `SETUP_ID=pilot-4` and added the nudge to `SETUP_NOTE` at 00:33 UTC (old file kept as `sunset.env.bak-pilot3`). Frames from 00:18 to 00:30 UTC still say `pilot-3`.
+- **CM4:**
+  - Set `SETUP_ID=cm4-window-1`. Its camera is mounted upside down.
+  - Focus checked on 100% crops: sharp in the centre, even left to right, slightly softer at the edges.
+  - Estimated its field of view by matching it against the 6 mm frame: centre ≈ 262° true, focal length ≈ 1,940 px, at least ~93° wide, probably more with the lens's barrel distortion. Not yet measured on the sun.
+  - Started capturing at Steven's go-ahead: enabled `sunset-capture.timer`, `sunset-sync.timer` and `sunset-dense.timer` at 00:34 UTC. The first frame was 00:35 UTC; frames sync to `project_sunshine/cm4wide/`.
+
+### Capture
+- New `ROTATION` setting (0 or 180) for a camera mounted upside down.
+  - `sunset-capture.sh` passes `--rotation 180` to every `rpicam-still` call, so the JPEG and DNG come out upright. It records `rotation: 180` in `Capture.settings`. Any other value logs a warning and takes the frame unrotated.
+  - `sunset-diag.py` rotates its live view the same way. On the CM4, rpicam took the focus crop (`--roi`) in the rotated picture's coordinates, so the crop needs no change.
+  - Documented in `sunset.env.example`. Tests: `tests/cases/16_rotation.sh`, plus two in `tests/test_diag.py`.
+- Fixed a test that searched for the site latitude `49.25` as a regular expression. The capture script's new checksum contains `49725`, so it failed by chance; it now matches the literal text.
+- Deployed `sunset-capture.sh` and `sunset-diag.py` to the CM4 and set `ROTATION=180` there. Frames are upright from 01:08 UTC; those from 00:35 to 01:07 UTC are upside down. `timelaps` keeps its current scripts, and the new setting defaults to 0 there anyway.
+
+### Monitoring
+- The Home Assistant alert can watch the CM4 too. `sunset_frame_age.sh` takes an optional camera name (default `wide`) and reads `project_sunshine/<name>/`, matching only that camera's file names. `sunset.yaml` adds `sensor.sunset_cm4_newest_frame_age` (`cm4wide`), `binary_sensor.sunset_cm4_frames_stale` and `alert.sunset_cm4_frames_stale`, sharing the 60-minute limit. Tests in `tests/cases/80_frame_age.sh`. Installed in Home Assistant at about 03:25 UTC (20:25 Vancouver) through the File editor app. The old files are kept as `/config/sunset/*.bak-2026-11-12`, and the phone notifier was kept and added to the CM4 alert as well. Config check valid; after a restart both age sensors read 7 minutes and both alerts are idle.
+
+### Reflections (both cameras, 01:41 UTC / 18:41 Vancouver)
+- Checked the night frames of both cameras for reflections in the window. To tell LEDs from the city, I took one 4 s night shot with each Pi's LEDs as they were and one with every software-controlled LED off, then put them back. The shots went to `/tmp`, not the outbox; no production frame was affected.
+- **CM4:** two green spots and a group of red ones, each doubled by the two panes of the double glazing, sit over the buildings in the lower half of the frame. They are in every frame, day exposure included, and **all disappear with the LEDs off**: they are the board's and the Wi-Fi dongle's LEDs reflected in the glass. A large amber glow with a curved dark edge on the left side does **not** change with the LEDs off: it is a light in the room reflected in the glass (or something lit near the camera), and needs the hood or a black cover.
+- **`timelaps`:** a faint red wash in the left sky disappears with the LEDs off: the Pi 3's red power LED. Much weaker than on the CM4.
+- **Pi:** while restoring, the ACT LED's trigger came back as `none`; set back to `mmc0` on both Pis straight away. Nothing else changed on either Pi.
+- **LEDs off (Steven's go-ahead):** new `pi/90-sunset-leds.rules`, a udev rule that sets every LED's trigger to `none` and brightness to 0 as it appears. `install.sh` installs it and applies it at once. Test in `tests/cases/60_units.sh`.
+  - **Pi:** installed on both Pis at about 02:50 UTC (19:50 Vancouver), with the new `install.sh` copied to `~/sunset`. PWR, ACT and the board's `default-on` LED are off on both.
+  - Rebooted the CM4 at 02:56 UTC to check the boot path; it was back on Wi-Fi by 02:57 and missed no 5-minute slot. The board's LEDs stayed off. The Wi-Fi dongle's driver turns its LEDs back on within seconds of connecting, so software can't keep those off.
+  - The 03:00 UTC CM4 night frame has **none of the green and red spots**, with the dongle's LEDs still lit. So the spots were the CM4 board's own LEDs, and the dongle isn't visible in the glass. The amber room-light glow on the left is unchanged.
+  - `timelaps` was not rebooted, because that would clear its scheduled experiment timers. The rule applies at its next boot anyway.
+
+## 2026-11-11
+
+### Hardware
+- Checked the CM4 on its old OS: the eMMC is 32 GB (29.1 GB in `lsblk`), not ~4 GB, and the boot EEPROM is dated 2023-01-11, so it needs no update for the board's USB and cameras. Corrected `CLAUDE.md`. The CM4 is not set up for the project yet.
+- Steven reflashed the CM4 with Raspberry Pi OS Lite Bookworm 32-bit (hostname `sunshine`). On it, from about 23:05 UTC (16:05 Vancouver):
+  - Installed `~/sunset` from `pi/` with `install.sh --uc517`, timers not enabled.
+  - Its `sunset.env` is a copy of `timelaps`' with `CAM_NAME=cm4wide`, `SETUP_ID=cm4-desk-1` and a new `SETUP_NOTE`.
+  - Added `dtoverlay=i2c-rtc,ds1307,addr=0x68` for the board's clock, and set the clock from NTP.
+  - The camera is on CAM0, so the overlay is `dtoverlay=imx477,cam0`. With the default (CAM1), the driver found no sensor.
+  - Self-test (no NAS): 14 pass, 1 warn (64-bit kernel). Day shot 4.3 s, night shot 6.2 s, each with DNG.
+  - The first frame is fully out of focus. Started the diag page for focusing.
+  - Later: Steven removed the C-to-CS adapter ring, and the lens now focuses. It isn't fixed in place yet.
+  - The CM4 has no Wi-Fi: the module has no antenna, LK2 is open, and the kernel reports `mmc1: Failed to initialize`. It is on Ethernet only.
+  - Installed `i2c-tools` and `lsof`, both on the keep list.
+  - Trimmed the packages to the keep list, 615 to 383. Kept `linux-image-rpi-v7l` and `-v8`, because the keep list would have removed the kernel the CM4 boots. Also kept the USB Wi-Fi firmware and `usb-modeswitch`, for a USB Wi-Fi adapter. `docs/setup.md` now has the extra `apt-mark` line for a CM4.
+  - Ran `sunset-lowwear.sh`. Added the same NAS line to `/etc/fstab` as on `timelaps`; it can't mount until Steven creates `/etc/sunset-nas.cred`.
+  - Rebooted at 23:43 UTC. The RTC set the clock before NTP, and the kernel writes NTP time back to it. The RTC has no coin cell yet, so it doesn't keep time through a power cut; capture still waits for NTP.
+  - Checked the first USB dongle from Steven's box: a Rocketfish RF-FLBTAD Bluetooth adapter (USB 0461:4d75, Broadcom BCM2046). Not Wi-Fi.
+  - The second is Wi-Fi: a Buffalo WLI-UC-GNM (USB 0411:01a2, Ralink RT8070), 2.4 GHz only, driver `rt2800usb`. Its firmware is from `firmware-mediatek`, which the trim kept.
+    - It joined the saved network once, at -69 dBm and 1-7 Mbit/s, but got only an IPv6 address and no DHCPv4 lease in 45 s.
+    - Every reconnect after that failed the WPA handshake (`CONN_FAILED`).
+    - For comparison, `timelaps` is on 5 GHz at -40 dBm and 200 Mbit/s.
+    - Not usable as it is. A dual-band (5 GHz) adapter is the better candidate.
+    - Steven then turned on 2.4 GHz for the network in UniFi (about 00:02 UTC Nov 12). The CM4 sees it on channel 6 at -67 to -69 dBm and joins it, but traffic goes only one way: router announcements arrive, but DHCPv4 gets no lease and IPv6 pings out over Wi-Fi lose 4 of 4. The AP probably doesn't hear the dongle through two walls.
+    - After Steven moved the CM4 closer to the AP (Ethernet unplugged), it got 192.168.3.60 over Wi-Fi at about 00:17 UTC. The CM4 reads -45 dBm at 57.8 Mbit/s; UniFi shows -62 dBm, "AP/Client Signal Balance: Poor" and a 2 Mbit/s Tx rate. Pings to the router lost 0 of 20. Copying a 27 MB file to the NAS took 91 s, about 2.4 Mbit/s. That keeps up with the capture (8-15 GB a day needs about 0.8-1.4 Mbit/s), but catching up after a NAS outage would be slow.
+    - Set the saved Wi-Fi profile to reconnect forever (`connection.autoconnect-retries 0`) and turned off Wi-Fi power saving (`802-11-wireless.powersave 2`).
+  - Copied `/etc/sunset-nas.cred` from `timelaps` to the CM4 at Steven's request, Pi to Pi, without displaying it (root, 600, same checksum). The share mounts: 230 GB free of 11 TB.
+  - A sync at 23:47 UTC copied the test frame to `project_sunshine/cm4wide/2026/11/11/` on the NAS and removed it from the CM4.
+  - A test capture with `sunset-capture.service` at 23:44 UTC wrote JPEG, DNG and JSON to `outbox/cm4wide/` in 4.5 s. Quick self-test: 10 pass, 1 warn (64-bit kernel). The timers are still off.
+
+### Docs
+- Recorded Steven's decision to post only good sunsets to Instagram, not every day, in `CLAUDE.md` and `README.md`. Added backlog #11 in `CLAUDE.md`: a deterministic sky score (warm-sky fraction, luminance spread, no AI) written into each daily record, with the publisher posting only days above a threshold. It's a todo until there are more clear sunsets. A first try on the Nov 4-10 frames gave a warm-sky fraction of 0.041 on the clear Nov 8 sunset and 0.001-0.013 on every other day. No code added.
+
+### Experiments
+- Analysed experiment 19 runs `sunset-1` and `sunset-2` (Nov 9 and 10, both overcast), with results on #3 and on the sunset comparison page. B, D and E all held a bright gap in the cloud that blew out up to 11% of the sky in the production frame. Daylight white balance turns the sky brown from about 15 minutes after sunset, when the cloud is lit by the city: R/B up to 4.6, against 0.5-1.0 with auto. So E only works up to about 10 minutes after sunset. Nothing changed in production. Runs 3 to 6 (Nov 11-14) still to come.
+
 ## 2026-11-09
+
+### Hardware
+- Recorded Steven's CM4 (eMMC) and MyPi Industrial IoT Integrator Board XT in `CLAUDE.md`'s inventory, with the board's features from its manual. Not in use yet.
+- Steven ordered a second IMX477 camera (Arducam B0240E) and a 3.2 mm wide lens (Arducam LN05101), due Nov 12. Recorded the two-camera plan in `CLAUDE.md`: the new camera with the 3.2 mm lens as the wide sunset camera, and the current camera with the 16 mm lens on downtown, both on the CM4 board.
 
 ### Images posted to issues
 - Removed the tower blur from the analysis images and the sunset comparison page, and the scratch script that made it. Removed the privacy notes about neighbours' windows from `README.md` and `CLAUDE.md`, and the word "privacy" from the NAS job's mask (the mask option itself is unchanged and unused).

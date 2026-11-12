@@ -88,6 +88,10 @@ OPTS="-o APT::AutoRemove::RecommendsImportant=false -o APT::AutoRemove::Suggests
 sudo apt-get -s $OPTS autoremove --purge    # read this, then drop -s to run it
 ```
 Do not remove `raspi-utils-eeprom`: on the pilot, that took `raspi-config` and `vcgencmd` with it.
+On a CM4 (or any Pi 4), also run this before the dry-run. `keep-packages.txt` keeps only the Pi 3 and
+Zero kernels, and the CM4 boots `kernel8.img`. The firmware and `usb-modeswitch` packages are for a
+USB Wi-Fi adapter, because the CM4 in this project has no Wi-Fi of its own:
+`sudo apt-mark manual linux-image-rpi-v7l linux-image-rpi-v8 firmware-realtek firmware-mediatek firmware-atheros usb-modeswitch usb-modeswitch-data`
 This leaves `rpicam-apps-core` only, so there is no on-screen camera preview.
 
 Then, once, and reboot: `sudo ./sunset-lowwear.sh`. System logs move to RAM (lost on reboot;
@@ -209,6 +213,11 @@ the Pi, so it also catches a dead Pi, a dead camera or a stuck sync. Written for
    name is under Developer Tools > Actions: search for `notify.mobile_app`.
 5. **Restart.** Developer Tools > YAML > Check configuration, then restart Home Assistant.
 6. **Check the age.** `sensor.sunset_newest_frame_age` should show under 20 minutes within 5 minutes.
+   The package also watches the CM4 (`cm4wide`) as `sensor.sunset_cm4_newest_frame_age`, with its
+   own alert. For another camera, copy those three blocks and pass its `CAM_NAME` to the script.
+   **Updating an installed copy:** HA's `sunset.yaml` holds your phone notifier, so don't overwrite
+   it. Copy the new `sunset_frame_age.sh` over the old one, and paste the new CM4 blocks into HA's
+   `sunset.yaml` (and your phone under the new alert's `notifiers`), then check and restart.
 7. **Test that it fires and clears.** Capture keeps running. Set `input_number.sunset_max_frame_age`
    to 1 and wait up to 15 minutes for the notification, then set it back to 60: the "again" message
    should arrive straight away.

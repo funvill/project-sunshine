@@ -19,7 +19,9 @@ more likely to be current.
    only once the copy is confirmed, so a NAS or network outage loses nothing.
 3. **Alert (Home Assistant):** warns when the newest frame on the NAS is more than about an hour old.
 4. **Daily video (NAS):** after dark, a job turns the day's frames into a vertical video for
-   Instagram. It posts nothing yet.
+   Instagram. It posts nothing yet. Only good sunsets will be posted: a deterministic sky score
+   (no AI) will rate each day, and grey, overcast days are made but not posted. The score is a todo
+   until there are more clear sunsets to set the threshold.
 
 Frame layout on the NAS, with UTC names:
 
