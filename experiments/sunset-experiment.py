@@ -87,6 +87,8 @@ class Shot:
 
     def command(self, base):
         cmd = ["rpicam-still", "-n", "-t", str(self.settle_ms)]
+        if os.environ.get("ROTATION", "").strip() == "180":  # camera mounted upside down
+            cmd += ["--rotation", "180"]
         if self.immediate:
             cmd += ["--immediate"]
         if self.shutter_us:
@@ -315,14 +317,14 @@ def camera_busy():
 
 
 def load_site_env():
-    """Coordinates for the sun data. They stay in the Pi's sunset.env, never in results."""
+    """Coordinates for the sun data, and ROTATION. Coordinates stay in sunset.env, never in results."""
     try:
         lines = ENV_FILE.read_text().splitlines()
     except OSError:
         return
     for line in lines:
         line = line.split("#", 1)[0].strip()
-        if line.startswith(("SITE_LAT=", "SITE_LON=")):
+        if line.startswith(("SITE_LAT=", "SITE_LON=", "ROTATION=")):
             key, value = line.split("=", 1)
             os.environ[key] = value.strip().strip("\"'")
 

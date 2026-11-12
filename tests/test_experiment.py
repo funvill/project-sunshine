@@ -489,3 +489,39 @@ class ShotCommand(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Rotation(unittest.TestCase):
+    """An upside-down camera (ROTATION=180 in sunset.env) gets upright experiment shots too."""
+
+    def setUp(self):
+        self.saved = os.environ.pop("ROTATION", None)
+
+    def tearDown(self):
+        os.environ.pop("ROTATION", None)
+        if self.saved is not None:
+            os.environ["ROTATION"] = self.saved
+
+    def test_no_rotation_unless_set(self):
+        self.assertNotIn("--rotation", exp.Shot("x", ev=0).command("/tmp/x"))
+
+    def test_rotation_180_rotates_every_shot(self):
+        os.environ["ROTATION"] = "180"
+        cmd = exp.Shot("x", shutter_us=4_000_000, gain=1).command("/tmp/x")
+        self.assertEqual(cmd[cmd.index("--rotation") + 1], "180")
+
+    def test_other_values_are_ignored(self):
+        os.environ["ROTATION"] = "90"
+        self.assertNotIn("--rotation", exp.Shot("x").command("/tmp/x"))
+
+    def test_read_from_sunset_env(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            env = pathlib.Path(d) / "sunset.env"
+            env.write_text("CAM_NAME=cm4wide\nROTATION=180  # upside down\n")
+            saved, exp.ENV_FILE = exp.ENV_FILE, env
+            try:
+                exp.load_site_env()
+            finally:
+                exp.ENV_FILE = saved
+        self.assertEqual(os.environ.get("ROTATION"), "180")
