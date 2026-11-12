@@ -33,9 +33,19 @@ SLOT_EVERY_MIN="${SLOT_EVERY_MIN:-5}"             # regular slot spacing; dense 
 LOCK_WAIT_S="${LOCK_WAIT_S:-90}"                  # a regular capture waits this long for a dense one to finish
 DENSE_TIMEOUT_S="${DENSE_TIMEOUT_S:-30}"          # per rpicam-still call in dense mode, so a hang ends early
 SUN_PY="${SUN_PY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sunset-sun.py}"
+ROTATION="${ROTATION:-0}"                         # 180 = camera mounted upside down (only 0 or 180)
 
 TAG=""
 log() { echo "$(date -u +%FT%TZ) cam=$CAM_NAME ${TAG}$*" >> "$LOG_FILE" 2>/dev/null || true; }
+
+# rpicam's --rotation flips the sensor readout, so the JPEG and the DNG both come out upright.
+# A bad value must not cost the frame: warn and take it unrotated.
+ROT_ARGS=(); ROT_SET=()
+case "$ROTATION" in
+  0) ;;
+  180) ROT_ARGS=(--rotation 180); ROT_SET=(rotation=180) ;;
+  *) log "WARN ROTATION=$ROTATION is not 0 or 180: not rotating"; ROTATION=0 ;;
+esac
 
 mkdir -p "$(dirname "$LOG_FILE")" "$OUT_ROOT"
 
@@ -124,7 +134,7 @@ fi
 # run_cam <rpicam-still args...>: bounded, stderr kept for the log.
 run_cam() {
   local rc=0
-  timeout "$CAPTURE_TIMEOUT_S" rpicam-still "$@" 2>"$ERR_FILE" || rc=$?
+  timeout "$CAPTURE_TIMEOUT_S" rpicam-still ${ROT_ARGS[@]+"${ROT_ARGS[@]}"} "$@" 2>"$ERR_FILE" || rc=$?
   return "$rc"
 }
 
@@ -186,7 +196,8 @@ SHOT_END="$(date +%s.%N)"
 [[ "$RC" == 0 ]] || fail "capture" "$RC"
 [[ -s "$BASE.jpg" ]] || fail "capture(empty jpg)" 0
 add_sun "$BASE.json"
-add_meta "$BASE.json" auto "$SHOT_START" "$SHOT_END" "" settle_ms=3000 "raw=$RAW" "night_lux=$NIGHT_LUX"
+add_meta "$BASE.json" auto "$SHOT_START" "$SHOT_END" "" settle_ms=3000 "raw=$RAW" "night_lux=$NIGHT_LUX" \
+  ${ROT_SET[@]+"${ROT_SET[@]}"}
 publish "$BASE"
 RAW_DAY="$RAW"
 
@@ -225,7 +236,8 @@ elif (( DARK )); then
   if [[ "$RC" == 0 && -s "${BASE}_night.jpg" ]]; then
     add_sun "${BASE}_night.json"
     add_meta "${BASE}_night.json" night "$SHOT_START" "$SHOT_END" "$LUX" settle_ms=1000 "raw=$RAW" \
-      "shutter_us=$NIGHT_SHUTTER_US" "gain=$NIGHT_GAIN" "awbgains=$NIGHT_AWB" "night_lux=$NIGHT_LUX"
+      "shutter_us=$NIGHT_SHUTTER_US" "gain=$NIGHT_GAIN" "awbgains=$NIGHT_AWB" "night_lux=$NIGHT_LUX" \
+      ${ROT_SET[@]+"${ROT_SET[@]}"}
     publish "${BASE}_night"
     NIGHT=1
   else

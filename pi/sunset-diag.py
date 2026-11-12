@@ -291,6 +291,10 @@ class FrameSplitter:
 def stream_command(view, width, height):
     """rpicam-vid writing MJPEG to stdout. No preview, and it runs until stopped."""
     cmd = ["rpicam-vid", "-t", "0", "-n", "--codec", "mjpeg", "--quality", "60", "--framerate", "5", "-o", "-"]
+    # A camera mounted upside down (ROTATION=180 in sunset.env, as in sunset-capture.sh). rpicam
+    # takes --roi in the rotated picture's coordinates, so the focus crop below needs no change.
+    if os.environ.get("ROTATION", "0").strip() == "180":
+        cmd += ["--rotation", "180"]
     if view == "focus" or view.startswith("focus@"):
         # 20% of the sensor at its full resolution, so one screen pixel is one sensor pixel.
         # "focus@X,Y" centres it on a spot picked on the full view (0-1 across and down).

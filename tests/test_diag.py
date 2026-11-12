@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 import urllib.error
 import urllib.request
 
@@ -326,6 +327,23 @@ class StreamCommand(unittest.TestCase):
     def roi(self, view):
         c = diag.stream_command(view, 1280, 960)
         return c[c.index("--roi") + 1]
+
+    def test_upside_down_camera_is_shown_upright(self):
+        # ROTATION=180 in sunset.env, as on the CM4. rpicam takes --roi in the rotated picture's
+        # coordinates (checked on the CM4: a top-left crop shows the sky), so the crop is unchanged.
+        with mock.patch.dict(os.environ, {"ROTATION": "180"}):
+            for view in ("full", "focus@0.85,0.65"):
+                c = diag.stream_command(view, 1280, 960)
+                self.assertEqual(c[c.index("--rotation") + 1], "180")
+            self.assertEqual(self.roi("focus@0.85,0.65"), "0.75,0.55,0.2,0.2")
+
+    def test_no_rotation_unless_set(self):
+        for value in (None, "0", "90"):
+            env = {k: v for k, v in os.environ.items() if k != "ROTATION"}
+            if value is not None:
+                env["ROTATION"] = value
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertNotIn("--rotation", diag.stream_command("full", 1280, 960))
 
 
 class NextCapture(unittest.TestCase):

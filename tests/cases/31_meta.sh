@@ -15,7 +15,7 @@ check "night records the lux that triggered it" test "$(field "$night" "d['Captu
 check "image checksums" grep -Eq '"sha256": "[0-9a-f]{64}"' "$json"
 check "dng recorded" test "$(field "$json" "d['Capture']['files']['dng']['bytes']")" = 7
 check "setup id" test "$(field "$json" "d['Capture']['setup_id']")" = pilot-1
-check "no site coordinates" bash -c "! grep -q '49.25' '$json'"
+check "no site coordinates" bash -c "! grep -qF '49.25' '$json'"
 daily="$(dirname "$json")/system.json"
 check "daily system.json next to the frames" test -s "$daily"
 check "one record for both frames" test "$(grep -c '"system_id"' "$daily")" = 1
@@ -23,7 +23,7 @@ check "frame points at the daily record" test "$(field "$json" "d['Capture']['sy
 check "night frame points at it too" test "$(field "$night" "d['Capture']['system_id']")" = "$(field "$daily" "d['records'][0]['system_id']")"
 check "setup note is in the daily file" test "$(field "$daily" "d['records'][0]['setup_note']")" = "test rig"
 check "setup note is not on the frame" test "$(field "$json" "'setup_note' in d['Capture']")" = False
-check "no coordinates in the daily file" bash -c "! grep -q '49.25' '$daily'"
+check "no coordinates in the daily file" bash -c "! grep -qF '49.25' '$daily'"
 check "meta=ok logged" grep -q ' meta=ok ' "$LOG_FILE"
 check "log line still ends in ok" grep -Eq 'sun=az=[0-9.]+,el=-?[0-9.]+ ok$' "$LOG_FILE"
 check "no temp files published" test -z "$(find "$OUT_ROOT" -name '*tmp*' -not -path '*/.partial/*')"
