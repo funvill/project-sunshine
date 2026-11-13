@@ -3,6 +3,7 @@
 import importlib.util
 import os
 import pathlib
+import time
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -487,8 +488,6 @@ class ShotCommand(unittest.TestCase):
         self.assertNotIn("project_sunshine/", exp.NAS_EXP_ROOT)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class Rotation(unittest.TestCase):
@@ -525,3 +524,93 @@ class Rotation(unittest.TestCase):
             finally:
                 exp.ENV_FILE = saved
         self.assertEqual(os.environ.get("ROTATION"), "180")
+
+
+class BackgroundUpload(unittest.TestCase):
+    """The upload must not stop the camera: on the CM4's slow Wi-Fi it blocked the run for about
+    7 minutes every half hour, so cm4-sunset-1 (Nov 12) lost 15 to 9 minutes before sunset."""
+
+    def setUp(self):
+        import tempfile, threading
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved = (exp.EXP_ROOT, exp.subprocess.run, exp.Run._nas_ready if hasattr(exp.Run, "_nas_ready") else None,
+                      exp.NAS_EXP_ROOT)
+        exp.EXP_ROOT = pathlib.Path(self.tmp.name) / "runs"
+        exp.NAS_EXP_ROOT = str(pathlib.Path(self.tmp.name) / "nas")
+        self.release = threading.Event()
+        self.entered = threading.Event()
+        self.calls = []
+
+        def fake_run(args, **kw):
+            sent = None
+            if any(str(a).startswith("--files-from") for a in args):
+                ff = [a for a in args if str(a).startswith("--files-from")][0].split("=", 1)[1]
+                sent = pathlib.Path(ff).read_text().split("\0")
+            self.calls.append((list(map(str, args)), sent))
+            if "--remove-source-files" in args:
+                self.entered.set()
+                self.release.wait(5)
+            return exp.subprocess.CompletedProcess(args, 0, b"", b"")
+
+        exp.subprocess.run = fake_run
+        exp.Run._nas_ready = lambda self_: True
+        self.run_ = exp.Run("t")
+        (self.run_.dir / "a.jpg").write_bytes(b"a")
+        self.run_.record(utc="x", label="a", status="ok")
+
+    def tearDown(self):
+        self.release.set()
+        self.run_.finish_upload()
+        exp.EXP_ROOT, exp.subprocess.run, exp.NAS_EXP_ROOT = self.saved[0], self.saved[1], self.saved[3]
+        if self.saved[2] is None:
+            del exp.Run._nas_ready
+        else:
+            exp.Run._nas_ready = self.saved[2]
+        self.tmp.cleanup()
+
+    def frames_sent(self):
+        return [sent for args, sent in self.calls if "--remove-source-files" in args]
+
+    def test_returns_while_the_copy_is_still_running(self):
+        t0 = time.time()
+        self.run_.upload()
+        self.assertLess(time.time() - t0, 1)
+        self.assertTrue(self.run_.uploading())
+
+    def test_sends_only_the_files_there_when_it_was_called(self):
+        self.run_.upload()
+        (self.run_.dir / "b.jpg").write_bytes(b"half-written")
+        self.release.set()
+        self.run_.finish_upload()
+        sent = [s for s in self.frames_sent()[0] if s]
+        self.assertEqual(sent, ["a.jpg"])
+
+    def test_manifest_goes_separately_and_is_never_removed(self):
+        self.release.set()
+        self.run_.upload(wait=True)
+        self.assertNotIn("manifest.csv", self.frames_sent()[0])
+        self.assertTrue(any(args[-2].endswith("manifest.csv") and "--remove-source-files" not in args
+                            for args, _ in self.calls))
+
+    def test_skips_while_one_is_already_running(self):
+        self.run_.upload()
+        self.assertTrue(self.entered.wait(5))
+        self.run_.upload()
+        self.assertEqual(len(self.frames_sent()), 1)
+
+    def test_final_upload_waits_for_everything(self):
+        self.run_.upload()
+        (self.run_.dir / "b.jpg").write_bytes(b"b")
+        self.release.set()
+        self.run_.upload(wait=True)
+        self.assertFalse(self.run_.uploading())
+        self.assertIn("b.jpg", self.frames_sent()[-1])
+
+    def test_last_upload_time_is_set_when_it_starts(self):
+        before = time.time()
+        self.run_.upload()
+        self.assertGreaterEqual(self.run_.last_upload, before)
+
+
+if __name__ == "__main__":
+    unittest.main()

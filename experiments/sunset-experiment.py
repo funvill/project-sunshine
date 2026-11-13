@@ -23,6 +23,8 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -353,6 +355,7 @@ class Run:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.manifest = self.dir / "manifest.csv"
         self.last_upload = time.time()
+        self._upload_thread = None
         self.guard = FailureGuard()
 
     def record(self, **row):
@@ -407,25 +410,63 @@ class Run:
                     throttled=read_text(["vcgencmd", "get_throttled"]).split("=")[-1],
                     temp=read_text(["vcgencmd", "measure_temp"]).split("=")[-1])
 
-    def upload(self):
-        """Copy to the NAS, removing each frame only after rsync confirms it. Never fatal."""
+    def _nas_ready(self):
+        """True if the experiments share is mounted and has room. Raises OSError otherwise."""
+        os.listdir("/mnt/nas-camera")  # wake the automount
+        if os.stat("/mnt/nas-camera").st_dev == os.stat(self.dir).st_dev:
+            raise OSError("share not mounted")
+        if shutil.disk_usage("/mnt/nas-camera").free < MIN_NAS_FREE_GB * 1024 ** 3:
+            raise OSError("NAS below the free-space floor, keeping results on the SD card")
+        return True
+
+    def uploading(self):
+        return self._upload_thread is not None and self._upload_thread.is_alive()
+
+    def finish_upload(self):
+        if self._upload_thread is not None:
+            self._upload_thread.join()
+            self._upload_thread = None
+
+    def upload(self, wait=False):
+        """Copy to the NAS, removing each frame only after rsync confirms it. Never fatal.
+
+        Runs in the background so the camera keeps shooting: on the CM4's slow Wi-Fi a copy took
+        about 7 minutes. Only the files already here when it is called are sent. It is called
+        between shots, so none of them can be half-written. With wait=True (the end of a run) it
+        first lets a running copy finish, then copies the rest and returns when done."""
+        if wait:
+            self.finish_upload()
+        elif self.uploading():
+            return
         self.last_upload = time.time()
-        root = pathlib.Path(NAS_EXP_ROOT)
+        files = sorted(p.name for p in self.dir.iterdir() if p.is_file() and p.name != "manifest.csv")
+        self._upload_thread = threading.Thread(target=self._transfer, args=(files,), daemon=True)
+        self._upload_thread.start()
+        if wait:
+            self.finish_upload()
+
+    def _transfer(self, files):
+        target = pathlib.Path(NAS_EXP_ROOT) / self.name
+        listing = None
         try:
-            os.listdir("/mnt/nas-camera")  # wake the automount
-            if os.stat("/mnt/nas-camera").st_dev == os.stat(self.dir).st_dev:
-                raise OSError("share not mounted")
-            if shutil.disk_usage("/mnt/nas-camera").free < MIN_NAS_FREE_GB * 1024 ** 3:
-                raise OSError("NAS below the free-space floor, keeping results on the SD card")
-            target = root / self.name
+            self._nas_ready()
             target.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["rsync", "-rt", "--remove-source-files", "--exclude", "manifest.csv",
-                            f"{self.dir}/", f"{target}/"], check=True, capture_output=True,
-                           timeout=1800)
+            if files:
+                fd, listing = tempfile.mkstemp(prefix=".upload-", suffix=".lst")
+                with os.fdopen(fd, "w") as f:
+                    f.write("\0".join(files))
+                subprocess.run(["rsync", "-rt", "--from0", f"--files-from={listing}", "--remove-source-files",
+                                f"{self.dir}/", f"{target}/"], check=True, capture_output=True, timeout=3600)
             subprocess.run(["rsync", "-t", str(self.manifest), f"{target}/"], check=True,
                            capture_output=True, timeout=120)
         except (OSError, subprocess.SubprocessError) as e:
             print(f"upload failed, results stay on the SD card: {e}", file=sys.stderr)
+        finally:
+            if listing:
+                try:
+                    os.unlink(listing)
+                except OSError:
+                    pass
 
 
 def run_rate_night(run, until):
@@ -525,7 +566,7 @@ def main():
         else:
             for shot in night_shots() if args.program == "night" else settle_shots():
                 run.take(shot, max_wait_s=900)
-        run.upload()
+        run.upload(wait=True)
 
 
 if __name__ == "__main__":
