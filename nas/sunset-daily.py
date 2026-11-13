@@ -40,17 +40,33 @@ FRAME_SECONDS = 1.0 / 12.0       # every frame, sunset included: the 1-minute fr
 LOCK_STALE_SECONDS = 6 * 3600     # longer than any real run; a crash must not stop the job for good
 DEFAULT_TAGS = "#sunset #timelapse #raspberrypi"
 
+# Sky score: how much of the sky is lit warm, at its best from 35 min before to 25 min after sunset.
+# Provisional: tuned on the pilot so far (wide camera, Nov 4-12: grey evenings 0.5-1.3% warm, the
+# two good ones, Nov 8 and Nov 12, 6.9% and 6.7%). The scale and the bands are estimates to tune
+# with more good and grey sunsets. A camera needs its own scale: on the same Nov 12 sunset the
+# CM4 camera read 11.9% to the wide camera's 6.7%, so crop.json can set "sky_full_warm".
+SKY_BEFORE_MIN, SKY_AFTER_MIN = 35, 25
+SKY_ROWS = 0.40                 # the top share of the frame is sky, above the skyline (crop.json "sky_rows")
+SKY_FULL_SCORE_WARM = 0.10      # this share of warm sky scores 100 (crop.json "sky_full_warm")
+SKY_WARM_RATIO = 1.2            # red over blue
+SKY_WARM_MIN_BRIGHT = 77        # of 255: a dim brown is not a sunset
+SKY_SIZE = (160, 120)           # frames are shrunk to this for the count
+
 # Text drawn on the video, in 1080x1920 pixels, 140 px above the bottom edge. Instagram's
 # caption may cover it in the Reels feed; that was accepted (2026-11-07).
 OVERLAY_TITLE = "Project Sunshine"
-OVERLAY_HANDLE = "@FUNVILL"
+OVERLAY_HANDLE = "@funvill"
+DEFAULT_LOCATION = "Burnaby, BC, Canada"   # small text under the date; OVERLAY_LOCATION="" turns it off
 DEFAULT_FONT_FILE = "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"   # Alpine's font-dejavu
 TEXT_X = 60
-TITLE_Y, TITLE_SIZE = 1650, 46
-TIME_Y, TIME_SIZE = 1716, 64
+TITLE_Y, TITLE_SIZE = 1604, 46
+TIME_Y, TIME_SIZE = 1670, 64
+LOC_Y, LOC_SIZE = 1746, 34      # the last line still ends 140 px above the bottom edge
+COMPASS = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
+BLUR_SIGMA = 5                  # pixels of the full frame; windows go, the outline and decks stay
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
-Frame = collections.namedtuple("Frame", "time jpg sun")
+Frame = collections.namedtuple("Frame", "time jpg sun source", defaults=(None,))   # source: the original, if jpg is a fused copy
 
 
 class EncodeError(Exception):
@@ -70,6 +86,9 @@ class Config:
     min_fraction: float = 0.7
     lookback_days: int = 2
     font_file: str = DEFAULT_FONT_FILE
+    start_local: object = None      # "HH:MM" local: start each video then, not after the last one
+    location: str = DEFAULT_LOCATION
+    fused_dir: object = None        # frames here replace the same-named ones (see tools/fuse_sunset.py)
     ffmpeg: str = "ffmpeg"
     ffprobe: str = "ffprobe"
 
@@ -119,6 +138,72 @@ def list_frames(frames_dir, start, end):
                 frames.append(Frame(t, path, read_sun(path)))
         day += timedelta(days=1)
     return sorted(frames, key=lambda f: f.time)
+
+
+def use_fused(frames, fused_dir):
+    """Swap in the picture from `fused_dir` for any frame with a file of the same name there.
+    The frame's time and Sun data are the original's."""
+    if not fused_dir:
+        return frames
+    swapped = []
+    for frame in frames:
+        path = os.path.join(fused_dir, os.path.basename(frame.jpg))
+        swapped.append(frame._replace(jpg=path, source=frame.jpg) if os.path.exists(path) else frame)
+    return swapped
+
+
+def warm_fraction(rgb, width, rows):
+    """Share of the top `rows` (0-1) of an rgb24 picture that is bright and warm: red over blue."""
+    height = len(rgb) // (3 * width)
+    count = warm = 0
+    for i in range(0, max(1, int(height * rows)) * width * 3, 3):
+        r, b = rgb[i], rgb[i + 2]
+        count += 1
+        if max(r, rgb[i + 1], b) >= SKY_WARM_MIN_BRIGHT and r > SKY_WARM_RATIO * b:
+            warm += 1
+    return warm / count if count else 0.0
+
+
+def sky_score_value(fraction, full=SKY_FULL_SCORE_WARM):
+    return int(round(100 * min(1.0, fraction / full)))
+
+
+def sky_label(score):
+    return "colourful" if score >= 60 else "some colour" if score >= 20 else "grey"
+
+
+def sky_pixels(cfg, path):
+    width, height = SKY_SIZE
+    out = subprocess.run([cfg.ffmpeg, "-loglevel", "error", "-i", path, "-vf", "scale=%d:%d:flags=area" % SKY_SIZE,
+                          "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                         check=True, capture_output=True).stdout
+    if len(out) != width * height * 3:
+        raise ValueError("unexpected picture size")
+    return out
+
+
+def sky_score(cfg, window, sunset, rows=SKY_ROWS, full=SKY_FULL_SCORE_WARM):
+    """The day's sky score, no AI: the best frame in the sunset window by warm-sky share.
+    Uses the original frames, not fused copies, so the number doesn't depend on the exposure fix.
+    None if no frame in the window could be read."""
+    best, scored = None, 0
+    for frame in window:
+        minutes = (frame.time - sunset).total_seconds() / 60.0
+        if not -SKY_BEFORE_MIN <= minutes <= SKY_AFTER_MIN:
+            continue
+        path = frame.source or frame.jpg
+        try:
+            fraction = warm_fraction(sky_pixels(cfg, path), SKY_SIZE[0], rows)
+        except (OSError, subprocess.CalledProcessError, ValueError):
+            continue
+        scored += 1
+        if best is None or fraction > best[0]:
+            best = (fraction, os.path.basename(path))
+    if best is None:
+        return None
+    score = sky_score_value(best[0], full)
+    return {"score": score, "out_of": 100, "label": sky_label(score), "warm_sky_percent": round(best[0] * 100, 2),
+            "best_frame": best[1], "frames_scored": scored, "provisional": True}
 
 
 def frame_sunset(frame):
@@ -208,9 +293,16 @@ def active_calibration(crop_config, day):
             "fits_used": len(fits)}
 
 
-def crop_for_day(frame_w, frame_h, azimuth, calibration, fixed_center, offset_px=0, previous_center=None):
-    """Where the 9:16 window goes: one position for the whole video, at full height."""
-    width = int(frame_h * 9 / 16) // 2 * 2
+def crop_for_day(frame_w, frame_h, azimuth, calibration, fixed_center, offset_px=0, previous_center=None,
+                 view=None):
+    """Where the 9:16 window goes: one position for the whole video. At full height unless
+    `view` ({"top", "height"} in full-frame pixels) asks for a tighter window, which is
+    scaled up to the same 1080x1920."""
+    height, top = frame_h, 0
+    if view:
+        height = max(2, min(frame_h, int(view["height"]) // 2 * 2))
+        top = max(0, min(frame_h - height, int(view["top"])))
+    width = int(height * 9 / 16) // 2 * 2
     sun_x = None
     if calibration is None:
         center, source = (frame_w // 2 if fixed_center is None else fixed_center), "fixed"
@@ -224,13 +316,41 @@ def crop_for_day(frame_w, frame_h, azimuth, calibration, fixed_center, offset_px
         center, source = (frame_w // 2 if fixed_center is None else fixed_center), "fixed"
     wanted = int(center) - width // 2
     x = max(0, min(frame_w - width, wanted))
-    return {"x": x, "width": width, "height": frame_h, "center_x": x + width // 2,
+    return {"x": x, "y": top, "width": width, "height": height, "center_x": x + width // 2,
             "source": source, "clamped": x != wanted, "sun_x": sun_x}
 
 
 def local_date(sunset, tz):
     """The date a viewer would give this sunset. Its UTC date is always one day later here."""
     return sunset.astimezone(tz).date()
+
+
+def local_start(day, text, tz):
+    """The UTC time of `text` (HH:MM, local) on local date `day`. ValueError if it isn't a time."""
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", text or "")
+    if not match or int(match.group(1)) > 23 or int(match.group(2)) > 59:
+        raise ValueError("%r is not a time like 07:30" % (text,))
+    local = datetime(day.year, day.month, day.day, int(match.group(1)), int(match.group(2)), tzinfo=tz)
+    return local.astimezone(UTC)
+
+
+def compass_name(azimuth):
+    return COMPASS[int(((azimuth % 360) + 11.25) // 22.5) % 16]
+
+
+def view_label(azimuth):
+    """Where the camera looks, as the video says it: 'WSW 243°'."""
+    degrees = int(round(azimuth)) % 360
+    return "%s %d\u00b0" % (compass_name(degrees), degrees)
+
+
+def center_azimuth(crop, calibration, sunset_azimuth):
+    """The bearing at the middle of the crop. With a calibration, the lens model says;
+    without one the best guess is the sunset, which the crop is aimed at."""
+    if calibration is not None:
+        return calibration["az0_deg"] + math.degrees(
+            math.atan((crop["center_x"] - calibration["cx"]) / calibration["f_px"]))
+    return sunset_azimuth
 
 
 def build_caption(sunset, tz, start_date, tags=DEFAULT_TAGS):
@@ -273,10 +393,14 @@ def drawtext(cfg, text, y, size, enable=None):
     return "drawtext=" + ":".join(args)
 
 
-def overlay_filters(cfg, frames):
-    """The title line, and one timestamp per frame, each shown only while its frame is.
-    Frames reach these filters one each, at the times concat_list gives them."""
+def overlay_filters(cfg, frames, azimuth=None):
+    """The title line, the location (small, with the view direction) and one timestamp per
+    frame, each shown only while its frame is. Frames reach these filters one each, at the
+    times concat_list gives them."""
     chain = [drawtext(cfg, "%s   %s" % (OVERLAY_TITLE, OVERLAY_HANDLE), TITLE_Y, TITLE_SIZE)]
+    if cfg.location:
+        place = cfg.location if azimuth is None else "%s   %s" % (cfg.location, view_label(azimuth))
+        chain.append(drawtext(cfg, place, LOC_Y, LOC_SIZE))
     start = 0.0
     for i, frame in enumerate(frames):
         end = start + FRAME_SECONDS
@@ -287,6 +411,17 @@ def overlay_filters(cfg, frames):
         chain.append(drawtext(cfg, overlay_time(frame.time, cfg.tz), TIME_Y, TIME_SIZE, enable))
         start = end
     return chain
+
+
+def blur_filters(crop):
+    """Light blurs over the boxes in crop["blur"], in full-frame pixels, before the crop. Each
+    box is cut out, blurred and put back, so the rest of the frame is untouched."""
+    sigma = crop.get("blur_sigma", BLUR_SIGMA)
+    parts = []
+    for i, (x, y, w, h) in enumerate(crop.get("blur") or []):
+        parts.append("split[a%d][b%d];[b%d]crop=%d:%d:%d:%d,gblur=sigma=%g[c%d];[a%d][c%d]overlay=%d:%d"
+                     % (i, i, i, w, h, x, y, sigma, i, i, i, x, y))
+    return parts
 
 
 def mask_filters(mask):
@@ -307,17 +442,17 @@ def encode_video(cfg, frames, crop, mask, out):
     The filters go in a file: one timestamp per frame is too long for a command line."""
     work = os.path.dirname(out)
     fd, list_path = tempfile.mkstemp(prefix=".concat-", suffix=".txt", dir=work)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(concat_list(frames))
     fd, filter_path = tempfile.mkstemp(prefix=".filters-", suffix=".txt", dir=work)
     try:
-        chain = mask_filters(mask) + [
-            "crop=%d:%d:%d:0" % (crop["width"], crop["height"], crop["x"]),
+        chain = mask_filters(mask) + blur_filters(crop) + [
+            "crop=%d:%d:%d:%d" % (crop["width"], crop["height"], crop["x"], crop.get("y", 0)),
             "scale=1080:1920:flags=lanczos:out_range=tv"]   # JPEGs are full range; yuv420p is not
-        chain += overlay_filters(cfg, frames) + [
+        chain += overlay_filters(cfg, frames, crop.get("center_azimuth_deg")) + [
             "fps=24",
             "format=yuv420p"]
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:   # ffmpeg reads UTF-8: the degree sign
             f.write(",\n".join(chain))
         run_tool([cfg.ffmpeg, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", list_path,
                   "-filter_script:v", filter_path, "-an", "-sn", "-map_metadata", "-1",
@@ -341,8 +476,8 @@ def write_check_image(cfg, sunset_frame, crop, mask, out):
     the real sun. Any mask is applied here too, since this is the whole view."""
     frame_w = probe_frame_size(cfg, sunset_frame.jpg)[0]
     thick = max(2, frame_w // 200)
-    chain = mask_filters(mask) + ["drawbox=x=%d:y=0:w=%d:h=%d:color=lime:t=%d"
-                                  % (crop["x"], crop["width"], crop["height"], thick)]
+    chain = mask_filters(mask) + blur_filters(crop) + ["drawbox=x=%d:y=%d:w=%d:h=%d:color=lime:t=%d"
+                                  % (crop["x"], crop.get("y", 0), crop["width"], crop["height"], thick)]
     if crop["sun_x"] is not None:
         chain.append("drawbox=x=%d:y=0:w=%d:h=ih:color=red:t=fill" % (crop["sun_x"], thick))
     chain.append("scale=1000:-2")
@@ -377,8 +512,11 @@ def process_sunset(cfg, sunset, frames, crop_config, encode, get_size, check_ima
     day = local_date(sunset, cfg.tz)
     previous = read_record(cfg, day - timedelta(days=1)) or {}
     end = day_end(frames, sunset)
-    start = parse_utc(previous.get("end_utc")) or end - WINDOW
-    window = select_window(frames, start, end)
+    if cfg.start_local:   # a fixed time of day: videos are not chained, so a frame can be in two
+        start = local_start(day, cfg.start_local, cfg.tz)
+    else:
+        start = parse_utc(previous.get("end_utc")) or end - WINDOW
+    window = select_window(frames, start - timedelta(seconds=1) if cfg.start_local else start, end)
     expected = round((end - start) / (WINDOW / cfg.expected_frames))   # dusk drifts, so 288 give or take
     record = {"local_date": day.isoformat(), "sunset_utc": sunset.strftime(TIME_FORMAT),
               "start_utc": start.strftime(TIME_FORMAT), "end_utc": end.strftime(TIME_FORMAT),
@@ -395,10 +533,16 @@ def process_sunset(cfg, sunset, frames, crop_config, encode, get_size, check_ima
     azimuth, method = sunset_azimuth(frames, sunset)
     sunset_frame = nearest_frame(window, sunset)
     frame_w, frame_h = get_size(sunset_frame.jpg)
-    crop = crop_for_day(frame_w, frame_h, azimuth, active_calibration(crop_config, day),
-                        cfg.crop_center_x, crop_config.get("offset_px", 0), previous_crop.get("center_x"))
+    calibration = active_calibration(crop_config, day)
+    crop = crop_for_day(frame_w, frame_h, azimuth, calibration,
+                        cfg.crop_center_x, crop_config.get("offset_px", 0), previous_crop.get("center_x"),
+                        crop_config.get("view"))
+    view = center_azimuth(crop, calibration, azimuth)
     crop.update(azimuth_deg=None if azimuth is None else round(azimuth, 2), azimuth_method=method,
-                azimuth_step_flag=azimuth_step_flagged(azimuth, previous_crop.get("azimuth_deg")))
+                azimuth_step_flag=azimuth_step_flagged(azimuth, previous_crop.get("azimuth_deg")),
+                center_azimuth_deg=None if view is None else round(view, 2))
+    if crop_config.get("blur"):
+        crop.update(blur=crop_config["blur"], blur_sigma=crop_config.get("blur_sigma", BLUR_SIGMA))
     mask = crop_config.get("mask", [])
 
     video = day.isoformat() + ".mp4"
@@ -418,7 +562,8 @@ def process_sunset(cfg, sunset, frames, crop_config, encode, get_size, check_ima
         log("%s WARN no check image: %s" % (day, e))
 
     record.update(status="encoded", video=video, caption=caption, sunset_frame=os.path.basename(sunset_frame.jpg),
-                  crop=crop)
+                  crop=crop, sky=sky_score(cfg, window, sunset, crop_config.get("sky_rows", SKY_ROWS),
+                                crop_config.get("sky_full_warm", SKY_FULL_SCORE_WARM)))
     write_atomic(json_path, json.dumps(record, indent=2) + "\n")   # last: this marks the day done
     log("%s encoded: %d frames, crop x=%d (%s)" % (day, len(window), crop["x"], crop["source"]))
 
@@ -452,7 +597,7 @@ def run(cfg, now, encode=encode_video, frame_size=None, check_image=write_check_
             log("FAILED: %s is not valid JSON: %s" % (cfg.crop_file, e))
             return 1
         oldest = now - timedelta(days=cfg.lookback_days)
-        frames = list_frames(cfg.frames_dir, oldest - WINDOW - timedelta(hours=1), now)
+        frames = use_fused(list_frames(cfg.frames_dir, oldest - WINDOW - timedelta(hours=1), now), cfg.fused_dir)
         rc = 0
         for sunset in due_sunsets(frames):
             if sunset < oldest or read_record(cfg, local_date(sunset, cfg.tz)) is not None:
@@ -485,7 +630,10 @@ def main():
                  expected_frames=int(env.get("EXPECTED_FRAMES", str(EXPECTED_FRAMES))),
                  min_fraction=float(env.get("MIN_FRAME_FRACTION", "0.7")),
                  lookback_days=int(env.get("LOOKBACK_DAYS", "2")),
-                 font_file=env.get("FONT_FILE") or DEFAULT_FONT_FILE)
+                 font_file=env.get("FONT_FILE") or DEFAULT_FONT_FILE,
+                 start_local=env.get("VIDEO_START_LOCAL") or None,
+                 location=env.get("OVERLAY_LOCATION", DEFAULT_LOCATION),
+                 fused_dir=env.get("FUSED_DIR") or None)
     return run(cfg, datetime.now(UTC))
 
 

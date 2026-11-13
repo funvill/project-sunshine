@@ -1,0 +1,71 @@
+{
+  "offset_px": 0,
+  "mask": [],
+  "view": {
+    "top": 100,
+    "height": 2440
+  },
+  "sky_full_warm": 0.178,
+  "blur_sigma": 5,
+  "blur": [
+    [
+      0,
+      290,
+      270,
+      2010
+    ],
+    [
+      300,
+      1180,
+      300,
+      810
+    ],
+    [
+      1780,
+      780,
+      210,
+      790
+    ],
+    [
+      2070,
+      560,
+      245,
+      1090
+    ],
+    [
+      3140,
+      840,
+      280,
+      780
+    ],
+    [
+      3415,
+      890,
+      205,
+      680
+    ],
+    [
+      3665,
+      1010,
+      265,
+      550
+    ]
+  ],
+  "calibrations": [
+    {
+      "start": "2026-11-11",
+      "cx": 2028,
+      "fits": [
+        {
+          "date": "2026-11-12",
+          "f_px": 1880.0,
+          "az0_deg": 261.7,
+          "marks": 5,
+          "az_min": 257.5,
+          "az_max": 294.6,
+          "note": "cm4wide + 3.2 mm lens. Fitted to 5 skyline landmarks (two near towers, a third tower, two downtown spikes) whose bearings come from the wide camera's pilot-3 fit; residuals 8 px or less. Sunset at 243 deg is an extrapolation 14 deg past the nearest landmark. Check against a clear sunset."
+        }
+      ]
+    }
+  ]
+}

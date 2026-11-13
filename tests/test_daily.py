@@ -398,6 +398,107 @@ class CropWindow(unittest.TestCase):
         self.assertEqual((got["x"], got["clamped"]), (2346, True))
 
 
+class SkyScoreMaths(unittest.TestCase):
+    WARM, GREY, DARK = (200, 100, 50), (120, 120, 120), (30, 15, 5)
+
+    def rows(self, *pixels):
+        """A picture two pixels wide, one row per colour given."""
+        return b"".join(bytes(p) * 2 for p in pixels)
+
+    def test_warm_fraction_counts_bright_pixels_with_red_well_above_blue(self):
+        data = self.rows(self.WARM, self.GREY, self.DARK, self.WARM)
+        self.assertEqual(daily.warm_fraction(data, 2, 1.0), 0.5, "grey and near-black are not warm")
+
+    def test_only_the_top_rows_count_as_sky(self):
+        data = self.rows(self.WARM, self.WARM, self.GREY, self.GREY)
+        self.assertEqual(daily.warm_fraction(data, 2, 0.5), 1.0)
+        self.assertEqual(daily.warm_fraction(data, 2, 1.0), 0.5)
+
+    def test_score_is_percent_of_the_full_score_warm_share_and_stops_at_100(self):
+        full = daily.SKY_FULL_SCORE_WARM
+        self.assertEqual(daily.sky_score_value(0.0), 0)
+        self.assertEqual(daily.sky_score_value(full / 2), 50)
+        self.assertEqual(daily.sky_score_value(full), 100)
+        self.assertEqual(daily.sky_score_value(0.9), 100)
+
+    def test_a_camera_can_have_its_own_full_score_share(self):
+        self.assertEqual(daily.sky_score_value(0.05, 0.2), 25)
+
+    def test_labels_are_three_bands(self):
+        self.assertEqual([daily.sky_label(v) for v in (0, 19, 20, 59, 60, 100)],
+                         ["grey", "grey", "some colour", "some colour", "colourful", "colourful"])
+
+
+class CropView(unittest.TestCase):
+    CAL = {"cx": 2028, "f_px": 1000.0, "az0_deg": 270.0}
+    VIEW = {"top": 100, "height": 1600}
+
+    def crop(self, view, w=4056, h=3040):
+        return daily.crop_for_day(w, h, 270.0, self.CAL, None, 0, None, view=view)
+
+    def test_no_view_is_the_full_height_from_the_top(self):
+        got = self.crop(None)
+        self.assertEqual((got["y"], got["height"], got["width"]), (0, 3040, 1710))
+
+    def test_a_view_is_a_shorter_window_of_the_same_9_by_16_shape(self):
+        got = self.crop(self.VIEW)
+        self.assertEqual((got["y"], got["height"], got["width"]), (100, 1600, 900))
+        self.assertEqual(got["x"], 2028 - 450, "still centred on the sun")
+
+    def test_a_view_is_kept_inside_the_frame(self):
+        self.assertEqual(self.crop({"top": 2800, "height": 1600})["y"], 1440)
+        self.assertEqual(self.crop({"top": -50, "height": 1600})["y"], 0)
+
+    def test_a_view_taller_than_the_frame_is_the_full_height(self):
+        self.assertEqual(self.crop({"top": 0, "height": 5000})["height"], 3040)
+
+    def test_the_window_stays_even_for_yuv420p(self):
+        self.assertEqual(self.crop({"top": 0, "height": 1601})["width"] % 2, 0)
+
+
+class ViewLabel(unittest.TestCase):
+    def test_compass_names_cover_the_circle_in_16_points(self):
+        got = [daily.compass_name(a) for a in (0, 22.5, 90, 180, 233.7, 243, 270, 292.5, 308.8, 359.9)]
+        self.assertEqual(got, ["N", "NNE", "E", "S", "SW", "WSW", "W", "WNW", "NW", "N"])
+
+    def test_label_is_the_name_and_whole_degrees(self):
+        self.assertEqual(daily.view_label(242.97), "WSW 243°")
+        self.assertEqual(daily.view_label(270.0), "W 270°")
+
+    def test_negative_and_over_360_wrap(self):
+        self.assertEqual(daily.view_label(-90), "W 270°")
+        self.assertEqual(daily.view_label(360.2), "N 0°")
+
+
+class CenterAzimuth(unittest.TestCase):
+    CAL = {"cx": 2028, "f_px": 2000.0, "az0_deg": 250.0}
+
+    def test_crop_centred_on_the_axis_looks_at_az0(self):
+        self.assertEqual(daily.center_azimuth({"center_x": 2028}, self.CAL, 243.0), 250.0)
+
+    def test_crop_off_the_axis_uses_the_lens_model(self):
+        # tan(az - 250) = 2000 / 2000 -> 45 degrees either side of the axis
+        self.assertAlmostEqual(daily.center_azimuth({"center_x": 4028}, self.CAL, 243.0), 295.0, places=4)
+        self.assertAlmostEqual(daily.center_azimuth({"center_x": 28}, self.CAL, 243.0), 205.0, places=4)
+
+    def test_with_no_calibration_it_is_the_sunset_azimuth(self):
+        self.assertEqual(daily.center_azimuth({"center_x": 1450}, None, 243.0), 243.0)
+
+    def test_with_nothing_it_is_unknown(self):
+        self.assertIsNone(daily.center_azimuth({"center_x": 1450}, None, None))
+
+
+class StartTime(unittest.TestCase):
+    def test_local_clock_time_becomes_utc(self):
+        self.assertEqual(daily.local_start(datetime(2026, 12, 21).date(), "07:30", PST),
+                         datetime(2026, 12, 21, 15, 30, tzinfo=UTC))
+
+    def test_bad_values_are_refused(self):
+        for bad in ("7", "25:00", "07:61", "morning"):
+            with self.assertRaises(ValueError):
+                daily.local_start(datetime(2026, 12, 21).date(), bad, PST)
+
+
 class Dates(unittest.TestCase):
     def test_winter_sunset_belongs_to_the_previous_utc_date(self):
         self.assertEqual(daily.local_date(SUNSET, PST).isoformat(), "2026-12-21")
@@ -639,6 +740,51 @@ class RunWithoutEncoding(unittest.TestCase):
         self.assertEqual(self.run_job(), 0)
         self.assertEqual(self.encoded, [])
 
+    def test_a_start_time_begins_the_video_at_that_local_time_and_ignores_the_day_before(self):
+        # 07:30 PST on the 21st is 15:30 UTC. The day before ended at 01:14, which no longer matters.
+        os.makedirs(self.tree.daily)
+        with open(os.path.join(self.tree.daily, "2026-12-20.json"), "w") as f:
+            json.dump({"status": "encoded", "end_utc": "2026-12-21T01:14:00Z"}, f)
+        self.tree.add_day()
+        self.tree.add(datetime(2026, 12, 21, 15, 30, tzinfo=UTC))
+        self.run_job(start_local="07:30")
+        rec = self.tree.record("2026-12-21")
+        self.assertEqual(rec["start_utc"], "2026-12-21T15:30:00Z")
+        self.assertEqual(self.encoded[0][2][0], datetime(2026, 12, 21, 15, 30, tzinfo=UTC), "07:30 itself is in")
+        self.assertEqual(self.encoded[0][2][-1], SUNSET + timedelta(minutes=30), "it still ends on the first dark frame")
+
+    def test_a_start_time_does_not_trip_the_too_few_frames_check_on_a_shorter_video(self):
+        self.tree.add_day()
+        self.run_job(start_local="07:30")
+        self.assertEqual(self.tree.record("2026-12-21")["status"], "encoded")
+
+    def test_a_fused_frame_replaces_the_frame_of_the_same_name_and_keeps_its_sun_data(self):
+        self.tree.add_day()
+        fused_dir = os.path.join(self.tree.dir, "fused")
+        os.makedirs(fused_dir)
+        name = "wide_%s.jpg" % (SUNSET - timedelta(minutes=15)).strftime("%Y%m%dT%H%M%SZ")
+        open(os.path.join(fused_dir, name), "wb").close()
+        seen = []
+
+        def fake_encode(cfg, frames, crop, mask, out):
+            seen.extend((f.jpg, f.sun is not None) for f in frames)
+            with open(out, "wb") as f:
+                f.write(b"video")
+        daily.run(self.tree.config(fused_dir=fused_dir), self.NOW, encode=fake_encode,
+                  frame_size=lambda path: (4056, 3040), check_image=lambda *a: None)
+        swapped = [x for x in seen if x[0].startswith(fused_dir)]
+        self.assertEqual([os.path.basename(p) for p, _ in swapped], [name])
+        self.assertTrue(swapped[0][1], "the original's Sun block is still read")
+        self.assertEqual(len(seen), 96)
+
+    def test_the_record_keeps_the_view_direction(self):
+        with open(self.tree.crop_file, "w") as f:
+            json.dump({"calibrations": [{"start": "2026-12-01", "cx": 2028, "fits": [
+                {"date": "2026-12-10", "f_px": 2000.0, "az0_deg": 250.0}]}]}, f)
+        self.tree.add_day()
+        self.run_job()
+        self.assertEqual(self.tree.record("2026-12-21")["crop"]["center_azimuth_deg"], 250.0)
+
     def test_lock_left_by_a_crashed_run_expires(self):
         self.tree.add_day()
         os.makedirs(self.tree.daily)
@@ -768,7 +914,7 @@ class RealEncoding(unittest.TestCase):
         last = gray_row(out, 960, seek=9.5 / 12)   # the 10th frame, the last gray one
         self.assertAlmostEqual(sum(last) / len(last), sum(before) / len(before), delta=2)
 
-    def overlay_video(self, minutes):
+    def overlay_video(self, minutes, center_azimuth_deg=None, **config):
         """Gray frames at these minutes after SUNSET, encoded with the overlay."""
         gray = os.path.join(self.dir, "gray.jpg")
         make_image(gray, color="gray")
@@ -776,7 +922,10 @@ class RealEncoding(unittest.TestCase):
         tree = Tree(self)
         os.makedirs(tree.daily)
         out = os.path.join(tree.daily, "video.mp4")
-        daily.encode_video(tree.config(), frames, {"x": 0, "width": 270, "height": 480}, [], out)
+        crop = {"x": 0, "width": 270, "height": 480}
+        if center_azimuth_deg is not None:
+            crop["center_azimuth_deg"] = center_azimuth_deg
+        daily.encode_video(tree.config(**config), frames, crop, [], out)
         return out
 
     def band(self, path, top, height, seek):
@@ -795,10 +944,96 @@ class RealEncoding(unittest.TestCase):
             self.assertGreater(max(row[:540]) - min(row[:540]), 100, "text should be drawn on the left")
         self.assertGreater(max(title[540:800]) - min(title[540:800]), 100, "the handle follows the title")
         self.assertLess(max(time_row[700:]) - min(time_row[700:]), 20, "the timestamp stays on the left")
-        self.assertEqual(1920 - (daily.TIME_Y + daily.TIME_SIZE), 140, "140 px above the bottom edge")
+        self.assertEqual(1920 - (daily.LOC_Y + daily.LOC_SIZE), 140, "the last line is 140 px above the bottom edge")
+        self.assertLess(daily.TIME_Y + daily.TIME_SIZE, daily.LOC_Y, "the location is under the date")
         for y in (100, 960, 1400):   # top, middle and the rest of the bottom half stay clear
             row = gray_row(out, y, seek=0)
             self.assertLess(max(row) - min(row), 20, "row %d should be untouched" % y)
+
+    def test_location_and_direction_are_small_and_under_the_date(self):
+        out = self.overlay_video([0, 15, 30], center_azimuth_deg=242.97)
+        self.assertLess(daily.LOC_SIZE, daily.TIME_SIZE // 1.5, "small text")
+        row = gray_row(out, daily.LOC_Y + daily.LOC_SIZE // 2, seek=0)
+        self.assertGreater(max(row[:540]) - min(row[:540]), 100, "the location line is drawn on the left")
+        self.assertLess(max(row[900:]) - min(row[900:]), 20, "and stays on the left")
+
+    def test_no_location_means_no_third_line(self):
+        out = self.overlay_video([0, 15, 30], location="")
+        band = self.band(out, daily.LOC_Y, daily.LOC_SIZE, 0)
+        self.assertLess(max(band) - min(band), 20)
+
+    def test_degree_sign_survives_the_filter_file(self):
+        # The filter script has to be written as UTF-8 for ffmpeg, whatever the machine's locale.
+        out = self.overlay_video([0, 15, 30], center_azimuth_deg=270.0)
+        self.assertTrue(os.path.getsize(out) > 0)
+
+    def blur_row(self, blur):
+        """A white/black edge at full-frame x=320, with a blur box across it; the row at the edge."""
+        edge = os.path.join(self.dir, "edge.jpg")
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                        "color=c=white:s=640x480:d=1,drawbox=x=320:y=0:w=320:h=480:color=black:t=fill",
+                        "-frames:v", "1", "-q:v", "2", edge], check=True)
+        frames = [daily.Frame(SUNSET + timedelta(minutes=m), edge, None) for m in (0, 15, 30)]
+        tree = Tree(self)
+        os.makedirs(tree.daily)
+        out = os.path.join(tree.daily, "video.mp4")
+        crop = {"x": 185, "width": 270, "height": 480}   # the edge lands at video x = 540
+        if blur:
+            crop.update(blur=blur, blur_sigma=5)
+        daily.encode_video(tree.config(), frames, crop, [], out)
+        return gray_row(out, 960, seek=0.05)
+
+    def soft_pixels(self, row):
+        return len([v for v in row[400:700] if 60 < v < 190])
+
+    def test_blur_box_softens_what_is_inside_it(self):
+        sharp = self.soft_pixels(self.blur_row(None))
+        soft = self.soft_pixels(self.blur_row([[300, 0, 40, 480]]))
+        self.assertLess(sharp, 8, "an unblurred edge is a step")
+        self.assertGreater(soft, 12, "a blurred edge is a ramp")
+
+    def sky_record(self, color):
+        path = os.path.join(self.dir, "%s.jpg" % color)
+        make_image(path, color=color)
+        tree = Tree(self, path)
+        tree.add_day()
+        self.assertEqual(self.run_real(tree), 0)
+        return tree.record()
+
+    def test_record_has_a_sky_score_from_the_frames_around_sunset(self):
+        sky = self.sky_record("orange")
+        self.assertEqual((sky["sky"]["score"], sky["sky"]["label"]), (100, "colourful"))
+        self.assertEqual(sky["sky"]["frames_scored"], 4, "-30, -15, 0 and +15 minutes of the 15-minute frames")
+        self.assertTrue(sky["sky"]["provisional"])
+
+    def test_a_grey_sky_scores_zero(self):
+        sky = self.sky_record("gray")["sky"]
+        self.assertEqual((sky["score"], sky["label"]), (0, "grey"))
+
+    def half_and_half(self):
+        path = os.path.join(self.dir, "halves.jpg")
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                        "color=c=white:s=640x480:d=1,drawbox=x=0:y=240:w=640:h=240:color=black:t=fill",
+                        "-frames:v", "1", "-q:v", "2", path], check=True)
+        return path
+
+    def view_mean(self, y):
+        frames = [daily.Frame(SUNSET + timedelta(minutes=m), self.half_and_half(), None) for m in (0, 15, 30)]
+        tree = Tree(self)
+        os.makedirs(tree.daily)
+        out = os.path.join(tree.daily, "video.mp4")
+        daily.encode_video(tree.config(), frames, {"x": 100, "y": y, "width": 134, "height": 240}, [], out)
+        row = gray_row(out, 700, seek=0.05)
+        return sum(row) / len(row)
+
+    def test_a_view_crops_rows_as_well_as_columns(self):
+        self.assertGreater(self.view_mean(0), 200, "the top half is white")
+        self.assertLess(self.view_mean(240), 50, "the bottom half is black")
+
+    def test_blur_box_leaves_the_rest_of_the_frame_alone(self):
+        row = self.blur_row([[300, 0, 40, 480]])
+        self.assertGreater(min(row[100:300]), 200)
+        self.assertLess(max(row[800:1000]), 40)
 
     def test_timestamp_follows_each_frame(self):
         out = self.overlay_video([0, 15, 30, 30])   # each frame 1/12 s; the last two share a minute

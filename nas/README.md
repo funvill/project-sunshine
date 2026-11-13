@@ -14,10 +14,20 @@ Lux readings (2026-11-04) and is the `DARK_ELEVATION_DEG` constant, so check it 
 The record's `start_utc` and `end_utc` give the range. With no record for the day before, the video
 covers the 24 hours before its end.
 
-Each frame carries its local time, as `2026-Nov-06 16:45`, at the bottom left, with
-"Project Sunshine   @FUNVILL" on the line above it, 140 px above the bottom edge. Instagram's caption
-may cover it in the Reels feed. Its position, size and wording are constants at the top of the
-script.
+Each frame carries three lines of text at the bottom left, the last 140 px above the bottom edge:
+"Project Sunshine   @funvill", its local time as `2026-Nov-06 16:45`, and in small text
+"Burnaby, BC, Canada   WSW 243°": the place and the compass bearing at the middle of the crop, which
+is the sunset's bearing when the crop is aimed at it (from the calibration, or the sunset azimuth
+without one). Instagram's caption may cover it in the Reels feed. Position, size and wording are
+constants at the top of the script; `OVERLAY_LOCATION=""` drops the third line.
+
+**Starting at a fixed time.** `VIDEO_START_LOCAL=07:30` starts each video at that local time on the
+day of the sunset instead of after the previous video, and the day before is ignored. A frame can then
+be in two videos. Without it the videos run dark to dark as above.
+
+**Building one by hand, with no AI:** `python tools/build_video.py --camera cm4wide --date 2026-11-12
+--start 07:30 --redo --crop nas/crop.cm4wide.json`. It runs this same job on a PC for a chosen
+day, reads the NAS share and writes to `~/Documents/sunset-daily-out/<camera>`.
 
 **It posts nothing.** Publishing to Instagram is a later step. See
 [issue #2](https://github.com/funvill/project-sunshine/issues/2) for the plan and decisions.
@@ -54,7 +64,38 @@ be retried by the next run, and 2 when a required setting is missing.
 | `EXPECTED_FRAMES` | `288` | Regular frames in a full 24 hours (5-minute capture). The 1-minute frames only add to the count. Change it if the capture interval changes |
 | `MIN_FRAME_FRACTION` | `0.7` | Below this share of the frames expected between the video's start and end, the day is skipped. An estimate to tune |
 | `LOOKBACK_DAYS` | `2` | How far back a missed day is still caught up |
+| `VIDEO_START_LOCAL` | unset | Local `HH:MM` to start each video at (see above). Unset means dark to dark |
+| `FUSED_DIR` | unset | A folder of fused frames (from `tools/fuse_sunset.py`). A file with the same name as a frame replaces its picture; the frame's time and Sun data stay |
+| `OVERLAY_LOCATION` | `Burnaby, BC, Canada` | Small text under the date. Empty for none |
 | `FONT_FILE` | `/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf` | Font for the text on the video. The image installs this one |
+
+## Sky score
+
+Each record has a `sky` block: how good the sunset was, deterministically, with no AI. The job reads the
+frames from 35 minutes before to 25 minutes after sunset (the originals, not fused copies), shrinks each
+to 160x120 with ffmpeg, and counts the share of the top 40% that is bright (at least 77 of 255) with red
+more than 1.2 times blue. The best frame wins. **Score = that share divided by 10%, as a percent, capped
+at 100.** Bands: under 20 grey, 20 to 59 some colour, 60 and up colourful. `sky.provisional` is `true`
+until it's tuned on more sunsets: so far grey evenings score 5 to 13 and the two good ones, Nov 8 and
+Nov 12, about 67 to 69 (wide camera). Blue overcast is also saturated, so saturation isn't used. A camera
+sets its own scale with `sky_full_warm` in `crop.json` (the CM4 camera has 0.178). Posting only days above
+a threshold is not built yet: that needs Steven's number.
+
+## Sunset exposure (`tools/fuse_sunset.py`)
+
+The camera's auto exposure blows out the sunset. The `sunset` experiment shoots ev+0 and ev-2 pairs, both
+with daylight white balance, every minute around sunset. `tools/fuse_sunset.py` merges each pair
+(exposure fusion), blends it with the production frame, and writes it under the production frame's name
+into a folder, which `FUSED_DIR` points the job at. The blend fades in over the first 5 minutes of the
+run, is full to 5 minutes after sunset, and fades out by 12 minutes (daylight white balance turns the sky
+brown once the city lights the cloud). The runner skips the first minute of each 5-minute slot, and
+sometimes loses longer stretches (7 minutes at the Nov 12 sunset), so some frames have no pair. Such a
+frame keeps its own picture and takes the fusion's change in exposure and colour (a smooth gain) from the
+pairs within 8 minutes either side. Copying or blending the neighbours' pictures instead froze the video,
+then jumped. The bracket's auto exposure also hunted by several brightness levels a minute, so the
+brightness of the fused frames is steadied against the frames around it (3 either side, at most 25%).
+Flicker that is left comes from the sun going in and out of thin cloud. It needs numpy and OpenCV, so it runs on a PC, not in the
+NAS image, until a production bracket exists.
 
 ## What it writes
 
@@ -96,6 +137,15 @@ The values above are examples. All positions are in full-frame pixels.
 
 - **`mask`:** black rectangles `[x, y, width, height]`, drawn before the crop, so they stay on the
   same part of the view as the crop moves. Masks are applied to the video and the check image.
+- **`view`:** `{"top": 100, "height": 1600}` makes the window shorter than the full frame, still 9:16 and
+  centred on the sun, then scales it up to 1080x1920. It crops the foreground roofs out. Without it the
+  window is the full height. Positions are in full-frame pixels.
+- **`sky_rows`, `sky_full_warm`:** the sky score's top share of the frame (default 0.40) and the share of
+  warm sky that scores 100 (default 0.10). See below.
+- **`blur`:** boxes `[x, y, width, height]` that get a light Gaussian blur (`blur_sigma`, default 5 px
+  of the full frame), also before the crop, so they stay on the towers. The blur is a box, so keep the
+  boxes tight to the buildings. Redo them when the camera moves. The video and the check image both
+  have it.
 - **`calibrations`:** the sun's position is `x = cx + f_px · tan(azimuth − az0_deg)`. The job
   averages the fits dated up to that day.
 - **After a bump:** add a new calibration with its own `start` date. Fits are never averaged across
