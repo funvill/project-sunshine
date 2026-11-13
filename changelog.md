@@ -2,7 +2,64 @@
 
 Changes to Project Sunset by date, newest first. Dates are Vancouver local time. Entries marked **Pi** were made on the pilot Pi (`timelaps`) and may have no commit of their own. Decisions and their reasons are in `CLAUDE.md`.
 
+## 2026-11-13
+
+### Same setup on both cameras
+- **Pi (`timelaps`):** updated `sunset-capture.sh` and `sunset-diag.py` to the repo versions at 07:37 UTC (00:37 Vancouver), so both Pis run the same code. The only difference was the `ROTATION` setting, which defaults to 0. The 07:40 capture ran cleanly. Old files kept as `*.bak-2026-11-13`.
+- **Pi (CM4):** scheduled the moon runs `cm4-moon-1` to `-9` (Nov 17-25 UTC) at the same times and with the same arguments as `moon-1` to `-9` on `timelaps`.
+- Remaining differences between the two `sunset.env` files are deliberate: the CM4 night settings matched to its lens (`NIGHT_SHUTTER_US`, `NIGHT_AWB`, `NIGHT_LUX`), `ROTATION`, `SETUP_ID`/`SETUP_NOTE` and `NETWATCH`.
+- `timelaps` has had no Ethernet link since about Nov 5 and is on its built-in Wi-Fi.
+
+### Experiment runner: upload in the background
+- The runner's half-hourly NAS upload blocked the camera. On the CM4's slow Wi-Fi each upload took about 7 minutes, so `cm4-sunset-1` lost 00:19-00:25 and 00:49-00:55 UTC, the first 15 to 9 minutes before sunset.
+- `Run.upload` now copies in a background thread, sending only the files present when it is called (between shots, so none is half-written). The end of a run waits for everything. Tests in `tests/test_experiment.py` (`BackgroundUpload`).
+- Last night's sunset analysed on both cameras (`sunset-4`, `cm4-sunset-1`), partly cloudy with a clear band at the horizon: E holds the glow before sunset on both, and daylight white balance turns the sky grey-brown by 30 minutes after, as on the overcast nights.
+
 ## 2026-11-12
+
+### Handoff update (Nov 13)
+- Brought `README.md` up to date as the handoff: current state, the sunset flicker as the blocker, next steps, uncommitted work, the two cameras. `CLAUDE.md` has the detailed next-session notes.
+
+### Notes for tomorrow (Nov 13)
+- Steven said the Nov 12 video is not good enough to post because of flicker around sunset. Wrote the state, the questions to answer and the ideas into `CLAUDE.md` ("Next session"). No code changed.
+
+### Instagram video, third round (00:10 Vancouver, Nov 13)
+- **Crop:** the `view` in `nas/crop.cm4wide.json` is now top 100, height 2440 (was 1600): the whole scene with just the lower balcony cut off. 2,560 still showed a sliver of rail at the bottom left.
+- **Exposure:** Steven said the merged sunset exposure looks better. Kept.
+- **Jitter at sunset:** frame times were fine (a frame every minute, no camera shift). The cause was in `tools/fuse_sunset.py`: the bracket has gaps (one minute in five, and 7 minutes from 00:19 to 00:25 UTC), and gaps were filled by repeating a neighbour's picture, so the video froze for several frames and then jumped by 21 levels. Now an unpaired frame keeps its own picture and takes the fusion's gain (exposure and colour, worked out at 1/16 size) from the pairs within 8 minutes either side. The bracket's own auto exposure also hunted by up to 7 levels a minute, so the brightness of the full-strength fused frames is smoothed over 3 frames either side, at most 25%. Tests added first (14 in `tests/test_fuse_sunset.py`). Some flicker is left that is in the unprocessed frames too: the sun going in and out of thin cloud.
+
+### Instagram video, second round (23:50 Vancouver)
+- **Tighter crop:** `crop.json` `view` (`top`, `height`) makes the 9:16 window shorter than the full frame, scaled up to 1080x1920. `nas/crop.cm4wide.json` uses top 100, height 1600, which drops the foreground roofs and puts the horizon about 70% of the way down.
+- **Sky score, no AI:** each record now has a `sky` block (score out of 100, label, warm-sky percent, best frame, `provisional`), and `tools/build_video.py` prints it. It is the best frame from 35 min before to 25 min after sunset, by the share of the top 40% that is bright and warm. Score = that share over 10%, capped at 100, so grey evenings read 5 to 13 and the Nov 8 and Nov 12 sunsets 67 to 69 on the wide camera. The CM4 camera read 11.9% to the wide camera's 6.7% on Nov 12, so `crop.cm4wide.json` has `sky_full_warm` 0.178. The Nov 12 CM4 video scores 67, colourful. Stdlib plus ffmpeg, so it runs in the NAS image. Posting only above a threshold is not built.
+- **Exposure:** new `tools/fuse_sunset.py` merges the ev+0 and ev-2 daylight-white-balance pairs from experiment `cm4-sunset-1` (Steven's top-ranked option E) and blends them with the production frames (in over 5 min, full to 5 min after sunset, out by 12 min). Frames with no pair, one in five, are filled from the pairs either side so the video doesn't flash. The job takes the result through `FUSED_DIR` (`Frame.source` keeps the original for the sky score). Clipped pixels at the sunset frame fell from 2.5% to 1.4%, and the sun disc shows now. After +12 min the frames are the production ones again, with the auto white balance's blue sky.
+- **Docs:** README and CLAUDE.md now describe `tools/build_video.py` and `tools/fuse_sunset.py`; `nas/README.md` has the sky score and exposure sections.
+- Tests: 131 in `tests/test_daily.py`, 11 in the new `tests/test_fuse_sunset.py`, all pass.
+
+### Instagram video from the CM4 camera (`cm4wide`), Steven's requests (23:20 Vancouver)
+- **Calibration:** fitted the `cm4wide` lens (3.2 mm) to five skyline landmarks: two near towers, a third tower and two downtown spikes, with bearings taken from the `wide` camera's pilot-3 fit. Result: f = 1,880 px, 261.7° at the frame centre, residuals 8 px or less. It puts the Nov 12 sunset (243°) at x = 1,391, which matches the glow in the frames. Saved as `nas/crop.cm4wide.json`. The nearest landmark is 14° from the sunset, so check it against a clear sunset. The earlier video used a fixed guess for the centre.
+- **Daily video job:** `VIDEO_START_LOCAL` (e.g. `07:30`) starts a video at a local time instead of after the last one. The handle is now `@funvill`. A small third line under the date gives the place and the bearing at the middle of the crop, e.g. `Burnaby, BC, Canada   WSW 243°` (`OVERLAY_LOCATION` changes or drops it). `crop.json` can have `blur` boxes, a light Gaussian over the near towers, applied before the crop to the video and the check image. The record keeps `crop.center_azimuth_deg`. The filter file is now written as UTF-8, because of the degree sign. Tests added first (117 pass).
+- **`tools/build_video.py`:** builds one day's video on a PC with no AI: `python tools/build_video.py --camera cm4wide --date 2026-11-12 --start 07:30 --redo --crop nas/crop.cm4wide.json`.
+- Built the Nov 12 video (07:30 to dark, 311 frames, 26 s). Not posted. The README rule about location now says the video, not the caption, shows the city.
+- **Raw vs JPEG, checked on the 17:35 sunset frame:** the DNG is 12-bit, and its clipped share (0.2%) matches the JPEG's, so raw gives no highlight headroom when the exposure clips. Dense frames have no DNG, so a raw video would lose the 1-a-minute slowdown. Decode takes 0.4 s at half size with `rawpy`. Not adopted; see `CLAUDE.md`.
+
+### Network watchdog (CM4, 05:09 UTC Nov 13 / 22:09 Vancouver)
+- New `sunset-netwatch.sh` with `sunset-netwatch.service` and `.timer` (every 2 min, as root), off unless `NETWATCH=1`. It resets the USB Wi-Fi dongle after 10 min without the gateway, and reboots after 30 min, at most once every 6 h. `install.sh` installs and enables the timer; tests in `tests/cases/66_netwatch.sh`, with new `ping`, `ip` and `systemctl` stubs.
+- **Pi (CM4):** installed and enabled, `NETWATCH=1` in `sunset.env` (old file kept as `sunset.env.bak-2026-11-13-netwatch`). Live test with an unreachable target: the dongle was reset at 05:09:53 UTC and rejoined 6 s later on the same address.
+- Found while checking: the backlog sync after the outage was stopped by its 30-minute `TimeoutStartSec` at 05:07 UTC and wrote nothing to `sync.log`. Copied files were already removed from the Pi, so nothing was lost; the next run carries on.
+
+### Experiment 20 results (CM4 night sweep, posted on #3 at 21:55 UTC / 14:55 Vancouver)
+- 878 shots from 04:00 to 13:56 UTC, no failures. The CM4 needs about 1.3 stops more exposure than `timelaps` at night.
+- **Pi (CM4):** set `NIGHT_SHUTTER_US=8000000` and `NIGHT_AWB=2.20,2.80` at 22:15 UTC (15:15 Vancouver) at Steven's go-ahead, old file kept as `sunset.env.bak-2026-11-12-night`. `timelaps` is unchanged (4 s, 2.25/2.40).
+- **Pi:** `timelaps` logged three undervoltage warnings at 00:16-00:19 UTC, during the camera move. None since.
+- **Pi (CM4):** the first 8 s night frame (01:05 UTC) came in bright twilight: its lux reads about 2.2x lower than `timelaps`' in the same light. Set `NIGHT_LUX=2.3` at 04:37 UTC Nov 13 (21:37 Vancouver) at Steven's go-ahead, old file kept as `sunset.env.bak-2026-11-13-lux`.
+- Sunset temperature log, 00:19-01:45 UTC: `timelaps` 55.3-60.1 °C, at its soft limit for about 3.5 min; the CM4 39.4-43.3 °C. All 82 captures on each were on time.
+
+### CM4 Wi-Fi outage (02:48-04:35 UTC Nov 13 / 19:48-21:35 Vancouver)
+- The access point dropped the CM4 at 02:48:11 UTC. It reconnected, then disconnected itself 10 s later (`DEAUTH_LEAVING`) and made no further attempt for 1 h 45 min. The rsync of the 02:45 DNG broke off and the share went away.
+- Capture kept going to local storage: no frames lost. The HA CM4 alert reached Steven's phone at about 03:52 UTC, as designed.
+- Steven power-cycled the CM4 at about 04:35 UTC. On boot the dongle's driver logged register-access errors, then joined. Sync resumed with a 1.2 GB backlog.
+- The reboot cleared the transient `exp-cm4-sunset-2` and `-3` timers; recreated them with the same times and arguments.
+- Cause unproven: the journal was in RAM and lost. NetworkManager retries forever on this connection and Wi-Fi power saving is off, so a dongle or driver hang is the leading suspect.
 
 ### Hardware
 - Steven moved both cameras, putting the CM4 at the window.

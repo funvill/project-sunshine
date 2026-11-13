@@ -13,7 +13,10 @@ by date: add an entry with every change, including changes made only on the Pi.
 - `tests/`: offline tests with a stubbed camera and NAS. No Pi needed.
 - `experiments/`: pilot experiment runner (#3). Not part of the production capture.
 - `homeassistant/`: stale-frame alert, copied into Home Assistant by hand. Steps in `docs/setup.md`.
-- `tools/`: PC-side helpers. `issue_blur.py` blurs and labels the nearby buildings in images posted
+- `tools/`: PC-side helpers. **`build_video.py` builds one day's Instagram video with no AI** (it runs the
+  NAS job for a chosen date, prints the sky score, posts nothing; command in `README.md`).
+  `fuse_sunset.py` merges the sunset bracket (ev+0 and ev-2) into the frames the video uses.
+  `issue_blur.py` blurs and labels the nearby buildings in images posted
   to GitHub issues, and nothing else. Style 1 (light Gaussian) is the default, chosen by Steven 2026-11-09.
 - `docs/`: setup guide and hardware notes.
 
@@ -59,6 +62,19 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   every day, but only a day whose sky scores above a set value is posted. Most grey, overcast
   sunsets aren't worth showing. The score is deterministic image maths on the sunset frames (no AI,
   no tokens); see backlog #11. Until it exists and is tuned, nothing posts anyway (`POST_ENABLED=0`).
+- **Instagram video from the CM4 camera (2026-11-12, Steven's requests):** starts at 07:30 local
+  (`VIDEO_START_LOCAL`), handle `@funvill`, and a small third line `Burnaby, BC, Canada   WSW 243°`
+  (place and the bearing at the middle of the crop). The near towers get a light blur (`blur` boxes in
+  `crop.json`). The caption still has no location. `cm4wide` is calibrated from skyline landmarks
+  (f 1,880 px, 261.7° at the centre; `nas/crop.cm4wide.json`), not yet checked on a clear sunset. Build
+  a day with `tools/build_video.py`, no AI. The crop `view` is top 100, height 2440 (2026-11-13): as
+  tall as it can be without the lower balcony in the corner (2,560 showed a sliver of rail). Steven
+  said the merged sunset exposure (`fuse_sunset.py`, option E) looks better, so it is the way the
+  sunset video is made. Jitter at the sunset was from fused frames held or lost where the bracket had
+  gaps, plus the bracket's exposure hunting; both fixed. What is left is real cloud flicker. **Raw frames:** looked at and not adopted for now. The DNG
+  clips where the JPEG does (0.2% either way at sunset), so the sunset fix is exposure (the ev-2
+  merge, experiment 19), not raw; dense frames have no DNG; a raw pipeline needs `rawpy` and a grade.
+  Revisit for a master copy once issue #5 (keep the DNGs) is decided.
 - **Two cameras eventually**: one wide (all sunsets), one tight (downtown or another subject).
 - Hidden, compact setup. DSLR/mirrorless considered and set aside for size/visibility,
   though a used Sony a6300/a6400 tethered via gphoto2 remains the image-quality upgrade path.
@@ -142,6 +158,8 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   not recorded here). The last undervoltage warning was at 05:30 UTC, just before the swap; in the
   first 3.5 hours after it there were none (`throttled=0x80000`: only the soft temperature limit,
   no undervoltage bits). Keep watching for a few days before calling it fixed.
+  **Undervoltage again on 2026-11-12, 00:16-00:19 UTC** (three warnings, `throttled=0xd0000`), while the cameras
+  were being moved: likely a moved cable or a brief extra load. None before or since on the new supply.
 - **Freeze (2026-11-05):** `timelaps` froze at about 01:26 UTC during an experiment run: red light
   on, no green, no network, until a power-cycle at about 06:04 UTC. 19 production frames lost. Cause
   unproven because the logs were in RAM; undervoltage is the leading suspect, with 7 warnings in the
@@ -197,6 +215,11 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   options alongside experiment 19 (`cm4-sunset-1` to `-3`, Nov 12-14); 22, the lens geometry from the sun on clear
   evenings; 23, vignetting and sharpness; 24, Wi-Fi sync health; 25, the room-light glow (needs Steven). The runner
   reads `ROTATION`. These are transient timers on the CM4, so a reboot clears them.
+  **Experiment 20 result (night sweep, Nov 12):** the CM4's 3.2 mm lens gets about 1.3 stops less light than
+  the 6 mm one (its 4 s night sky is 40-43 where `timelaps` gives 67-73 on the same night). Gain 1 is still best.
+  **Applied 2026-11-12 22:15 UTC at Steven's go-ahead**, CM4 only: `NIGHT_SHUTTER_US=8000000` (most downtown detail, less noise, 2.8%
+  clipped) and `NIGHT_AWB=2.20,2.80`. This board passes less blue: at 2.25/2.40 its sky is yellow-brown (B/G 0.70),
+  and 2.20/2.80 matches `timelaps`' neutral sky (1.05, 0.97). Denoise, contrast, saturation, sharpness: defaults.
 - **Settings search (decided 2026-11-05):** Steven asked for wide experiments over a few days and for
   me to choose the best settings for night, day, sunset and sunrise, posting the evidence on #3.
   Night is 4 s gain 1 (confirmed by the first night sweep, 2026-11-06), with fixed colour gains
@@ -294,6 +317,11 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   2026-11-12 00:35 UTC** (Steven's go-ahead): the 5-minute, dense and sync timers, same schedule as
   `timelaps`. HA has a separate CM4 alert (`cm4wide`) from 2026-11-12, same 60-minute limit, also
   sent to the phone.
+  **Wi-Fi outage 2026-11-13, 02:48-04:35 UTC:** the dongle dropped off and never rejoined until Steven power-cycled
+  it. No frames lost (local-first), the HA alert fired, the backlog synced. Cause unproven (dongle or driver hang
+  suspected). **Network watchdog added the same night** (`sunset-netwatch.sh`, `NETWATCH=1` on the CM4 only):
+  resets the dongle after 10 min without the gateway, reboots after 30 min (at most every 6 h). Tested live:
+  the dongle rejoined in 6 s. Wired Ethernet would still be better.
   **The camera is mounted upside down.** `ROTATION=180` in its `sunset.env` (new setting, 2026-11-12)
   makes rpicam flip the readout, so frames from **01:08 UTC** on are upright, DNG included, and say
   `rotation: 180` in `Capture.settings`. Frames from 00:35 to 01:07 UTC are upside down. `timelaps`
@@ -361,6 +389,36 @@ Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi
 | Sun damage on telephoto | Skip/short-expose frames when the sun is in the 16 mm FOV; ND filter |
 | Heat | PETG/ASA mount, temperature logging |
 
+## Next session: fix the sunset flicker before anything posts (notes from 2026-11-12, late)
+Steven reviewed the Nov 12 `cm4wide` video (07:30 to dark, tighter crop, merged exposure) and said it is
+**not good enough to post: it still flickers around sunset.** Nothing posts until that is fixed. State:
+- **Fixed already:** frozen then jumping frames (bracket gaps filled by copying pictures; now a gain
+  transfer) and the bracket's exposure hunting (brightness smoothed). Merged exposure looks better, and the
+  crop is right (top 100, height 2440). Rebuild command in `README.md`.
+- **What is left:** between about 00:12 and 00:19 UTC (5:12-5:19 pm local, 15 to 20 min before sunset) the
+  frame-to-frame difference stays at 10 to 15 where it is 2 to 5 elsewhere. The sun disc and its glow
+  brighten and dim from one minute to the next. The unprocessed production frames do the same (9 to 13),
+  so it is in the source, not the merge. No camera shift (phase correlation 0.0 px).
+- **Questions to answer first:** (1) Is it real, thin cloud crossing the sun, or the camera's auto
+  exposure hunting? Plot the frames' `ExposureTime`, `AnalogueGain` and `Lux` from the JSONs against the
+  sky and disc brightness for 23:45 to 01:00 UTC, production and bracket. (2) Is it the double-glazing
+  flare, whose ripple bands move with the sun? Look at the ev-2 frames alone. (3) **Answered 2026-11-13:** the
+  7-minute holes in the CM4 bracket (00:19-00:25 and 00:49-00:55 UTC) were the runner's half-hourly NAS upload
+  blocking the camera on the slow Wi-Fi. The upload now runs in the background (`Run.upload`), from `sunset-5`/`cm4-sunset-2`.
+- **Ideas, cheapest first:** (a) a measured flicker number: mean absolute change of the sky region frame to
+  frame in the sunset window, printed by `tools/build_video.py` next to the sky score, so every fix is
+  checked by number and not by eye; (b) a light temporal blend (3 frames, ffmpeg `tmix`, or a weighted
+  mean in `fuse_sunset.py`) limited to the dense window, trading a faint ghost for calm; (c) normalise the
+  brightness of the sun region separately from the rest of the frame; (d) stop the cause at capture: lock
+  the exposure in the sunset window (a ramp of fixed shutter times from the Lux curve) instead of auto, or
+  shoot a proper 3-frame bracket in production (backlog #3), which also removes the need for the
+  experiment frames; (e) use the experiment's `ev-2` frames alone for the sun, if (c) is not enough.
+- **More data on the way:** `cm4-sunset-2` and `-3` and `sunset-5` and `-6` shoot the Nov 13 and Nov 14
+  sunsets; compare their flicker with Nov 12's before choosing. Check the weather first: a clear sunset is
+  the best test and a flat grey one the worst.
+- **Also open:** the tower blur boxes and the calibration were not rechecked on a clear sunset, the sky
+  score threshold is Steven's call (`sky` block, backlog #11), and `crop.cm4wide.json` is not yet on the NAS.
+
 ## Backlog for Claude Code
 1. ~~Disk-space guard~~ **Done** (`sunset-capture.sh`, tested in `tests/`).
 2. ~~Sun-position module~~ **Done**: `sunset-sun.py` (stdlib NOAA formula, no network). Writes the
@@ -376,16 +434,18 @@ Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi
 10. Post-processing pipeline: deflicker, stabilisation, "sunset along the horizon" sequence
     (frame nearest each sunset), time slices, sky calendar.
 
-11. **Sky score to pick sunsets worth posting. TODO once there are more good sunsets (needs
-    more than the one clear sunset so far, Nov 8, to set thresholds).** A deterministic score per day,
-    no AI: take the best frame in the window from 35 min before to 25 min after sunset, look at the sky
-    above the skyline, and compute the warm-sky fraction (bright pixels with red clearly above blue),
-    plus the luminance spread, maybe a cloud-texture measure. Saturation is useless (blue overcast is
-    also saturated). First try on Nov 4-10 frames: warm fraction 0.041 on the clear Nov 8 sunset vs
-    0.001-0.013 on every other day. Plan: a tested helper in `nas/` that writes a `sky` block (score
-    and label: clear and colourful / partly cloudy / overcast) into each daily record; the publisher
-    posts only days above a threshold set by Steven. Needs a fixed mask for the near towers, and a
-    recheck after any lens or camera change.
+11. **Sky score to pick sunsets worth posting. Built 2026-11-12, provisional; the threshold and the
+    tuning wait for more good sunsets.** Deterministic, no AI (stdlib plus ffmpeg, in
+    `nas/sunset-daily.py`): the best frame from 35 min before to 25 min after sunset, by the share of
+    the top 40% of the frame that is bright and warm (red over blue, at least 77/255). Score = that share
+    over 10%, as a percent, capped at 100 (`sky_full_warm` in `crop.json` sets a camera's own scale).
+    Bands: under 20 grey, 20 to 59 some colour, 60 and up colourful. It goes in each daily record as a
+    `sky` block and `tools/build_video.py` prints it. On the pilot so far (wide camera): grey evenings
+    5 to 13 (Nov 4-7, 9, 10), a part-clearing one 40 (Nov 11), the good ones Nov 8 and Nov 12 about 69 and 67.
+    The CM4 camera read 11.9% warm sky on Nov 12 against the wide camera's 6.7%, so it has its own
+    scale (0.178) that gives it 67 as well. Still to do: pick the posting threshold with Steven, make the
+    publisher post only days above it, and retune once there are more good and grey sunsets. The saturation
+    of blue overcast rules out saturation as a signal. Needs a recheck after any lens or camera change.
 
 ## Creative outputs (later)
 - Long time-lapse video (deflicker + stabilise).
@@ -398,7 +458,7 @@ Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi
 
 ## Testing
 `bash tests/run.sh` (offline, stubbed camera/NAS) and `python3 tests/test_sun.py`.
-`tests/test_daily.py` covers the NAS job; its encoding tests use the real ffmpeg and are skipped
+`tests/test_daily.py` covers the NAS job and `tests/test_fuse_sunset.py` the sunset merge (needs OpenCV); its encoding tests use the real ffmpeg and are skipped
 without it. On the Pi,
 `./sunset-selftest.sh` checks camera, clock, disk, memory, capture time, IR-cut and NAS.
 Its thresholds (30 s slow capture, 60 MB low memory, R/G 1.25 for IR-cut) are estimates to tune
