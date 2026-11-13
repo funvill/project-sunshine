@@ -103,6 +103,19 @@ reboot it after a hard freeze. Kernel messages are kept in `~/sunset/kernel.log`
 log that survives a reboot, so look there first after a crash. The log may still be empty for a
 hard freeze, since it only holds what the kernel managed to write.
 
+**Wi-Fi dongle watchdog (`NETWATCH=1`).** For a Pi on a USB Wi-Fi dongle, such as the CM4. On
+2026-11-13 the CM4's dongle dropped off and didn't rejoin until a power-cycle. `install.sh` enables
+`sunset-netwatch.timer` on every Pi, but `sunset-netwatch.sh` does nothing unless `sunset.env` has
+`NETWATCH=1`. Every 2 minutes, as root, it pings the default gateway through `wlan0`:
+
+- After 10 minutes without an answer it unbinds and rebinds the dongle's USB device, once per
+  outage. This is a software replug: tested on the CM4, the dongle rejoined in 6 s.
+- After 30 minutes it reboots, at most once every 6 hours (marker `~/sunset/.netwatch-reboot`),
+  so a router outage can't cause a reboot loop. A reboot costs about one capture and clears
+  transient experiment timers (`exp-*`).
+- It keeps its state in RAM (`/run/sunset-netwatch`) and writes `~/sunset/netwatch.log` only when it acts.
+- Tune with `NETWATCH_IFACE`, `NETWATCH_RESET_MIN`, `NETWATCH_REBOOT_MIN`, `NETWATCH_REBOOT_GAP_H`.
+
 ## 6. Freeze it
 After a week of clean running: disable unattended upgrades and save a full
 SD card image to the NAS. That image is the recovery plan.

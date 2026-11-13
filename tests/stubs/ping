@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Stub: succeeds if $STUB_PING is "ok", fails otherwise. Records how it was called.
+echo "ping $*" >> "${STUB_CALLS:-/dev/null}"
+[[ "${STUB_PING:-ok}" == ok ]]

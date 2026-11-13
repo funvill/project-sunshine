@@ -21,7 +21,7 @@ if (( UC517 )); then
   echo "camera: set camera_auto_detect=0 and dtoverlay=imx477 (backup: $CFG.sunset-backup). Reboot to apply."
 fi
 
-for u in sunset-capture.service sunset-capture.timer sunset-sync.service sunset-sync.timer sunset-dense.service sunset-dense.timer sunset-diag.service sunset-kernlog.service; do
+for u in sunset-capture.service sunset-capture.timer sunset-sync.service sunset-sync.timer sunset-dense.service sunset-dense.timer sunset-diag.service sunset-kernlog.service sunset-netwatch.service sunset-netwatch.timer; do
   sed -e "s|^User=.*|User=$RUN_USER|" -e "s|/home/pi/|$HOME_DIR/|g" "$HERE/systemd/$u" > "/etc/systemd/system/$u"
 done
 install -m 755 "$HERE/diag" /usr/local/bin/diag
@@ -33,6 +33,8 @@ udevadm trigger --subsystem-match=leds --action=add
 install -D -m 644 "$HERE/systemd/sunset-watchdog.conf" /etc/systemd/system.conf.d/sunset-watchdog.conf
 systemctl daemon-reload
 systemctl enable --now sunset-kernlog.service
+# Does nothing unless NETWATCH=1 in sunset.env (for a Pi on a USB Wi-Fi dongle).
+systemctl enable --now sunset-netwatch.timer
 if (( ENABLE )); then
   systemctl enable --now sunset-capture.timer sunset-sync.timer sunset-dense.timer
   systemctl list-timers 'sunset*' --no-pager
