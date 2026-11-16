@@ -1,7 +1,9 @@
 """Tests for tools/register_day.py: python3 tests/test_register_day.py (skipped without numpy and OpenCV)
 
 Synthetic scenes only: a random skyline of towers with window grids under a sky that is
-replaced from frame to frame. Nothing here has seen a real frame.
+replaced from frame to frame. No frame is stored here. The far moves with a turn and some
+thresholds are modelled on the real moves of the wide camera (checked on real frames on
+2026-11-15, issue #20; the numbers are in the docstring of tools/register_day.py).
 """
 import hashlib
 import importlib.util
@@ -28,6 +30,8 @@ LARGE_TOL = 1.0        # 600 px shifts
 NIGHT_TOL = 1.0
 ROT_TOL_DEG = 0.08     # measured worst 0.046 (0.3 deg with 0.995 scale); some room for other OpenCV builds
 SCALE_TOL = 0.002
+FAR_TOL = 4.0          # far moves with a turn: the turn is found to the nearest ~0.1 deg first
+FAR_ROT_TOL_DEG = 0.15
 
 
 def load():
@@ -182,6 +186,52 @@ class Measure(unittest.TestCase):
         self.assertTrue(got["orb"]["ok"])
         self.assertFalse(got["methods_disagree"], got)
 
+    def test_a_far_move_with_a_turn_is_found_by_phase(self):
+        # Like the real moves: the 2026-11-05 reseat (scene 35% of the width left, 1 deg clockwise,
+        # a little down) and the 2026-11-08 refocus (17% left, 5% up, 2 deg counter-clockwise).
+        # Without the rotation search the peak is under 0.1 and the frame is thrown away.
+        band = self.settings.band
+        for dx, dy, rot in ((-560.0, 30.0, -1.0), (-270.0, -80.0, 2.0), (300.0, 40.0, -4.0)):
+            with self.subTest(dx=dx, dy=dy, rot=rot):
+                got = self.measure(render(self.scene, self.W, self.H, dx, dy, rot=rot, seed=12))
+                ex, ey = expected_at_band_centre(self.W, self.H, dx, dy, rot, 1.0, band)
+                self.assertTrue(got["used"], got)
+                self.assertTrue(got["phase"]["searched"], got)
+                self.assertAlmostEqual(got["phase"]["dx_px"], ex, delta=FAR_TOL, msg=got)
+                self.assertAlmostEqual(got["phase"]["dy_px"], ey, delta=FAR_TOL, msg=got)
+                self.assertAlmostEqual(got["phase"]["rotation_deg"], rot, delta=FAR_ROT_TOL_DEG, msg=got)
+
+    def test_no_rotation_search_when_the_plain_match_is_good(self):
+        got = self.measure(render(self.scene, self.W, self.H, 10.0, -4.0, seed=13))
+        self.assertFalse(got["phase"]["searched"], got)
+        self.assertEqual(got["phase"]["rotation_deg"], 0.0)
+
+    def test_a_weak_match_of_a_still_camera_does_not_gain_a_turn(self):
+        # Heavy noise puts the plain peak under the search limit (0.23), and a tried turn of
+        # 0.125 deg can then score a hair higher by chance. That must not be taken as a turn:
+        # with the 0.1 deg move limit it would call a still camera moved.
+        got = self.measure(render(self.scene, self.W, self.H, 5.0, -2.0, seed=14, noise=90, sky=cloud_sky))
+        self.assertTrue(got["phase"]["searched"], got)
+        self.assertEqual(got["phase"]["rotation_deg"], 0.0, got)
+        self.assert_shift(got, 5.0, -2.0, SUBPIXEL_TOL)
+
+    def test_signs_follow_the_scene_not_the_camera(self):
+        # A camera that turns right (pans to the right) sees the scene move left: dx < 0. One that
+        # tips up sees it move down: dy > 0. Made by cropping one big image at two places, the
+        # way a pan works, rather than by moving the scene.
+        img, mask = skyline(2, self.W, self.H)
+        full = np.clip(np.where(mask, 180.0, img), 0, 255).astype(np.uint8)
+        x0, y0 = MARGIN, MARGIN
+        ref = full[y0:y0 + self.H, x0:x0 + self.W]
+        panned_right = full[y0:y0 + self.H, x0 + 40:x0 + 40 + self.W]
+        tipped_up = full[y0 - 25:y0 - 25 + self.H, x0:x0 + self.W]
+        got = self.rd.measure_pair(ref, panned_right, self.settings)
+        self.assertAlmostEqual(got["phase"]["dx_px"], -40.0, delta=SUBPIXEL_TOL, msg=got)
+        self.assertAlmostEqual(got["phase"]["dy_px"], 0.0, delta=SUBPIXEL_TOL, msg=got)
+        got = self.rd.measure_pair(ref, tipped_up, self.settings)
+        self.assertAlmostEqual(got["phase"]["dx_px"], 0.0, delta=SUBPIXEL_TOL, msg=got)
+        self.assertAlmostEqual(got["phase"]["dy_px"], 25.0, delta=SUBPIXEL_TOL, msg=got)
+
     def test_unrelated_skyline_is_low_confidence_not_a_confident_answer(self):
         other = skyline(99, self.W, self.H)
         got = self.measure(render(other, self.W, self.H, seed=3))
@@ -243,6 +293,53 @@ class Summary(unittest.TestCase):
         self.assertAlmostEqual(s["rotation_deg"], 0.21)
         self.assertAlmostEqual(s["scale"], 1.001)
 
+    def test_a_turn_found_only_by_phase_counts_as_a_move(self):
+        # At night ORB rarely has enough matches; the rotation search still sees the turn.
+        ms = [self.m(0.5, 0.0), self.m(0.6, 0.1)]
+        for m in ms:
+            m["phase"].update(rotation_deg=1.5, searched=True)
+        s = self.rd.summarise(ms, self.settings)
+        self.assertIsNone(s["rotation_deg"])
+        self.assertAlmostEqual(s["phase_rotation_deg"], 1.5)
+        self.assertEqual(self.rd.decide_moved(s, None, self.settings)[0], True)
+
+    def test_a_big_move_with_scattered_frames_is_still_a_move(self):
+        # 2026-11-05 on the wide camera: the reseat put every daytime frame about 1,415 px left of
+        # the reference, but the loose camera then sagged ~10 px through the afternoon, so the
+        # frames scatter by more than max_spread_px and the day isn't reliable. It has still moved.
+        ms = [self.m(-1415.1, 68.3), self.m(-1414.8, 73.0), self.m(-1415.2, 76.7), self.m(-1415.1, 79.6),
+              self.m(276.2, 249.8), self.m(1.5, 0.0)]
+        s = self.rd.summarise(ms, self.settings)
+        self.assertFalse(s["reliable"], s)
+        self.assertEqual(self.rd.decide_moved(s, None, self.settings), (True, "day"))
+
+    def test_scatter_around_a_small_shift_is_not_a_move(self):
+        for ms in ([self.m(0, 0), self.m(10, 0), self.m(20, 0), self.m(30, 0)],
+                   [self.m(10, 0), self.m(-40, 0), self.m(25, 0)],
+                   [self.m(6, 0), self.m(1, 0), self.m(9, 0), self.m(4, 0)]):
+            s = self.rd.summarise(ms, self.settings)
+            self.assertFalse(s["reliable"], s)
+            self.assertEqual(self.rd.decide_moved(s, None, self.settings), (None, None), s)
+
+    def test_methods_may_differ_by_a_little_more_on_a_big_turned_move(self):
+        # 2026-11-08 refocus: phase -687, -205 and ORB -684, -209 at a 2 deg turn. The phase
+        # search finds the turn only to ~0.3 deg, which moves the middle of the band a few px.
+        ms = [self.m(-687.2, -205.3, rot=1.9, scale=1.0), self.m(-686.1, -205.3, rot=1.9, scale=1.0)]
+        for m in ms:
+            m["orb"].update(dx_px=m["phase"]["dx_px"] + 3.0, dy_px=m["phase"]["dy_px"] - 4.5)
+        self.assertFalse(self.rd.summarise(ms, self.settings)["methods_disagree"])
+        small = [self.m(5.0, 2.0, rot=0.0, scale=1.0), self.m(5.0, 2.0, rot=0.0, scale=1.0)]
+        for m in small:
+            m["orb"].update(dx_px=9.5)
+        self.assertTrue(self.rd.summarise(small, self.settings)["methods_disagree"])
+
+    def test_response_limit_sits_between_real_misses_and_real_weak_matches(self):
+        # Measured on real frames (wide camera, Nov 2026): a frame of another camera 0.013, the
+        # reference flipped 0.021, the synthetic unrelated skyline here 0.047; correct but weak
+        # matches across the refocus at night 0.085 to 0.18 and across the reseat by day 0.17.
+        self.assertGreater(self.settings.min_response, 2 * 0.047)
+        self.assertLess(self.settings.min_response, 0.112)
+
     def test_moved_against_the_thresholds(self):
         still = self.rd.summarise([self.m(0.5, -0.4), self.m(0.6, -0.3)], self.settings)
         nudged = self.rd.summarise([self.m(8.0, 0.0), self.m(8.2, 0.1)], self.settings)
@@ -292,10 +389,10 @@ class Day(unittest.TestCase):
             json.dump(data, f)
         return base + ".jpg"
 
-    def build(self, dx, dy, bad_frame=False):
+    def build(self, dx, dy, bad_frame=False, rot=0.0):
         skies = [gradient_sky(), noise_sky, cloud_sky, gradient_sky(40, 230), cloud_sky, gradient_sky(250, 90)]
         for i, sky in enumerate(skies):
-            img = render(self.scene, self.W, self.H, dx, dy, sky=sky, gain=0.6 + 0.15 * i, seed=100 + i,
+            img = render(self.scene, self.W, self.H, dx, dy, rot=rot, sky=sky, gain=0.6 + 0.15 * i, seed=100 + i,
                          sun=(150 * i + 100, 450))
             if bad_frame and i == 2:
                 img = render(skyline(77, self.W, self.H), self.W, self.H, seed=1)
@@ -377,6 +474,19 @@ class Day(unittest.TestCase):
         names = {m["frame"] for m in saved["frames"]}
         self.assertNotIn("cm4wide_20261114T160000Z.jpg", names, "sun at 2 deg is not daytime")
         self.assertNotIn("cm4wide_20261114T060000Z.jpg", names)
+
+    def test_a_far_move_with_a_turn_is_moved_not_unknown(self):
+        # The 2026-11-08 refocus, scaled to these frames: before the rotation search every
+        # daytime frame fell under the response limit and the day came out as unknown.
+        self.build(-200.0, -60.0, rot=2.0)
+        ref, _ = self.reference()
+        record = self.run_day(ref, night_frames=0)
+        day = record["day"]
+        ex, ey = expected_at_band_centre(self.W, self.H, -200.0, -60.0, 2.0, 1.0, self.rd.Settings().band)
+        self.assertTrue(day["reliable"], day)
+        self.assertAlmostEqual(day["dx_px"], ex, delta=FAR_TOL)
+        self.assertAlmostEqual(day["dy_px"], ey, delta=FAR_TOL)
+        self.assertIs(record["moved"], True)
 
     def test_a_still_camera_is_not_moved(self):
         self.build(0.3, -0.2)
