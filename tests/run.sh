@@ -22,6 +22,8 @@ fresh_env() {
   export SYNC_LOG_FILE="$W/sync.log" SYNC_LOCK_FILE="$W/.sync.lock"
   export CLOCK_OK_FILE="$W/clock-ok" STUB_NAS_DIR="$W/nas" CAM_NAME=wide
   export STUB_CALLS="$W/calls.txt"
+  # The sync backs up /etc/fstab and the boot config: point it at an empty folder, never this machine's.
+  export SYNC_CONFIG_ROOT="$W/sysroot"; mkdir -p "$W/sysroot"
   unset STUB_SAME_FS STUB_RPICAM STUB_LUX STUB_NTP STUB_DF_PCT STUB_DF_FREE_MB STUB_RSYNC
   unset SAVE_RAW SITE_LAT SITE_LON NAS_TARGET NIGHT_LUX CAPTURE_TIMEOUT_S REQUIRE_TIME_SYNC
   unset SUN_PY SLOT_EVERY_MIN STUB_DENSE DENSE_TIMEOUT_S ROTATION

@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
-# Test stub: STUB_RSYNC=ok (copy to STUB_NAS_DIR and remove source) | fail | hang
+# Test stub: STUB_RSYNC=ok (copy each listed file) | fail | hang
+# Copies into the destination when it is a local path (a mounted share), else into STUB_NAS_DIR
+# (user@host:/path). Removes the source only when given --remove-source-files, as rsync does.
 # Records its arguments, and each --files-from list (one "list:" line per file), in STUB_CALLS.
 # `rsync --help` mentions --fsync unless STUB_RSYNC_NOFSYNC=1 (like rsync before 3.2.4).
+# Faults that still exit 0, as a CIFS write that "succeeded" might (issue #13); each is a
+# substring matched against the listed path:
+#   STUB_RSYNC_TRUNCATE  the copy is cut short (half the bytes)
+#   STUB_RSYNC_FLIP      the copy is the same size with different bytes
+#   STUB_RSYNC_DROP      no copy is written at all
+#   STUB_RSYNC_HOLE      4 KiB of zeros in the middle of the copy, same size, ends intact
 if [[ "${1:-}" == --help || "${1:-}" == --version ]]; then
   echo "rsync stub"
   [[ "${STUB_RSYNC_NOFSYNC:-0}" == 1 ]] || echo "     --fsync                 fsync every written file"
@@ -16,9 +24,30 @@ if [[ "${STUB_RSYNC:-ok}" == hang ]]; then
   echo $$ > "${STUB_RSYNC_PID:-/dev/null}"
   wait "$s"; exit 0
 fi
-list=""
-for a in "$@"; do [[ "$a" == --files-from=* ]] && list="${a#--files-from=}"; done
+list=""; remove=0
+for a in "$@"; do
+  [[ "$a" == --files-from=* ]] && list="${a#--files-from=}"
+  [[ "$a" == --remove-source-files ]] && remove=1
+done
+dest="${*: -1}"
+[[ "$dest" == /* ]] || dest="$STUB_NAS_DIR"
+matches() { [[ -n "$1" && "$2" == *"$1"* ]]; }
 while IFS= read -r -d '' f; do
   echo "list: $f" >> "${STUB_CALLS:-/dev/null}"
-  mkdir -p "$STUB_NAS_DIR/$(dirname "$f")"; cp "$f" "$STUB_NAS_DIR/$f"; rm -f "$f"
+  matches "${STUB_RSYNC_DROP:-}" "$f" && continue
+  mkdir -p "$dest/$(dirname "$f")"
+  if matches "${STUB_RSYNC_TRUNCATE:-}" "$f"; then
+    n=$(( $(wc -c < "$f") / 2 ))
+    head -c "$n" "$f" > "$dest/$f"
+  elif matches "${STUB_RSYNC_HOLE:-}" "$f"; then
+    cp "$f" "$dest/$f"
+    dd if=/dev/zero of="$dest/$f" bs=1 seek=$(( $(wc -c < "$f") / 2 )) count=4096 conv=notrunc status=none
+  elif matches "${STUB_RSYNC_FLIP:-}" "$f"; then
+    tr 'a-zA-Z0-9' 'b-zaB-ZA1-90' < "$f" > "$dest/$f"
+  else
+    cp "$f" "$dest/$f"
+  fi
+  touch -r "$f" "$dest/$f"
+  (( remove )) && rm -f "$f"
 done < "$list"
+exit 0

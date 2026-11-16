@@ -15,6 +15,7 @@ for arg in "$@"; do
 done
 
 CAM_NAME="${CAM_NAME:-wide}"                     # wide | tight
+OUT_ROOT_GIVEN="${OUT_ROOT:+1}"                   # the caller chose the outbox (the offline tests do)
 OUT_ROOT="${OUT_ROOT:-$HOME/sunset/outbox}"
 LOG_FILE="${LOG_FILE:-$(dirname "$OUT_ROOT")/capture.log}"
 LOCK_FILE="${LOCK_FILE:-$(dirname "$OUT_ROOT")/.sunset-capture.lock}"
@@ -46,6 +47,9 @@ RUN_DIR="$(dirname "$CLOCK_OK_FILE")"                  # tmpfs: counters that sh
 CAPTURE_FAIL_FILE="$RUN_DIR/sunset-capture-failures"
 CAPTURE_REBOOT_MARK="$(dirname "$OUT_ROOT")/.capture-reboot"   # on the SD: survives the reboot
 CAPTURE_LOG_MAX_BYTES="${CAPTURE_LOG_MAX_BYTES:-10485760}"   # then capture.log moves to capture.log.1 (logrotate is masked)
+ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sunset.env"   # what the systemd units load
+if [[ -n "$OUT_ROOT_GIVEN" ]]; then ENV_DEFAULT=0; else ENV_DEFAULT=1; fi
+REQUIRE_ENV_FILE="${REQUIRE_ENV_FILE:-$ENV_DEFAULT}"   # 1 = refuse to capture without sunset.env next to this script
 
 TAG=""
 log() {
@@ -67,6 +71,18 @@ case "$ROTATION" in
 esac
 
 mkdir -p "$(dirname "$LOG_FILE")" "$OUT_ROOT"
+
+# Site settings (issue #23). The units load sunset.env with EnvironmentFile=-, so systemd
+# runs this happily without it. A Pi rebuilt without the file would then default to
+# CAM_NAME=wide with no ROTATION: its frames would join the wide/ series, and keep the wide
+# alert fresh while the real wide camera might be dead. A gap is better. Required by default
+# only when the caller has not set OUT_ROOT (the Pis never do; the offline tests do).
+# The dense frame exits quietly: the regular frame logs it every 5 minutes.
+if [[ "$REQUIRE_ENV_FILE" == "1" && ! -s "$ENV_FILE" ]]; then
+  [[ "$SCHEDULE" == dense ]] && exit 0
+  log "SKIPPED: $ENV_FILE missing or empty (CAM_NAME would default to wide; restore it, or set REQUIRE_ENV_FILE=0)"
+  exit 1
+fi
 
 # Clock. The Zero has no RTC: after a power cut it boots with the time fake-hwclock
 # last saved, which is hours or days wrong until NTP answers. UTC filenames from a
