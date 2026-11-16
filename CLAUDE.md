@@ -186,7 +186,7 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   commented out; its newest frame before today was from 2025-05-27). That job is disabled in cron,
   not deleted. Its frames and the empty desktop folders in the home folder are gone. `~/readme.md`
   on the Pi explains what is there.
-- **NAS:** SMB share `//chipkin_nas.local/camera`, folder `project_sunshine`, user `camera`, not
+- **NAS:** SMB share `camera` on the NAS (host name kept out of the repo), folder `project_sunshine`, its own NAS user, not
   rsync over SSH (decision changed 2026-11-03). Automounted at `/mnt/nas-camera` via `/etc/fstab`;
   login in the root-only `/etc/sunset-nas.cred` on the Pi (never in this repo). Guest login was
   refused by the NAS. `sunset-sync.sh` refuses to run if the share is missing or on the SD card.
@@ -486,14 +486,14 @@ Steven reviewed the Nov 12 `cm4wide` video (07:30 to dark, tighter crop, merged 
    `Sun` block per frame; `sunset-sun.py sunset [--epoch|--json]` gives the next sunset for burst
    scheduling (backlog #3).
 3. **Sunset burst mode**: 1/min done (dense frames, from 2026-11-09). The 3-shot bracket is not.
-4. **Sensor protection** for the telephoto camera based on sun azimuth vs. its FOV.
-5. **Fog detection**: flag low-contrast frames.
+4. **Sensor protection** for the telephoto camera based on sun azimuth vs. its FOV (#32).
+5. **Fog detection**: flag low-contrast frames (#33).
 6. Port capture to **Picamera2** if finer control is needed than `rpicam-still` gives.
-7. SHT4x + TSL2591 logging.
+7. SHT4x + TSL2591 logging (#34).
 8. ~~Home Assistant config for the stale-file alert~~ **Done** (`homeassistant/`, steps in `docs/setup.md`).
-9. Mount design: start from Printables model 250692 or design a keyed plate + foam hood.
+9. Mount design: start from Printables model 250692 or design a keyed plate + foam hood (#35).
 10. Post-processing pipeline: deflicker, stabilisation, "sunset along the horizon" sequence
-    (frame nearest each sunset), time slices, sky calendar.
+    (frame nearest each sunset), time slices, sky calendar (#20, #21).
 
 11. **Sky score to pick sunsets worth posting. Built 2026-11-12, provisional; the threshold and the
     tuning wait for more good sunsets.** Deterministic, no AI (stdlib plus ffmpeg, in
@@ -527,7 +527,8 @@ from pilot data.
 
 ## Unverified numbers
 Sunset azimuths, magnetic declination, lens FOVs and per-frame sizes above were estimated, not
-measured. Confirm during the pilot before printing the mount or buying lenses.
+measured. Confirm during the pilot before printing the mount or buying lenses: the FOV and edges
+on #4 (experiment 22), frame sizes on #9; due before the mount is glued (#35), checked by Claude Code.
 
 ## Related
 - A project doc also exists as a Claude Docs artifact titled "Project Sunset" (overview + shopping list).

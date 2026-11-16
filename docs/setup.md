@@ -221,7 +221,7 @@ Alerts when no new production frame has reached the NAS for an hour. It reads th
 the Pi, so it also catches a dead Pi, a dead camera or a stuck sync. Written for Home Assistant OS.
 
 1. **Connect the share.** Settings > System > Storage > Add network storage. Name `camera`, usage
-   **Share**, server `<nas-host>` (the NAS's name or address), protocol Samba, remote share `camera`, user `camera`.
+   **Share**, server `<nas-host>` (the NAS's name or address), protocol Samba, remote share `camera`, user `<nas-user>`.
    It appears in Home Assistant as `/share/camera`. The script has no setting at the top. It reads
    two environment variables: `FRAME_BASE` (the folder that holds one folder per camera, default
    `/share/camera/project_sunshine`) and `FRAME_ROOT` (one camera's whole folder; it overrides

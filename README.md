@@ -145,7 +145,7 @@ job as the NAS for a chosen sunset date, reads the frames from the NAS share and
 python tools/build_video.py --camera cm4wide --date 2026-11-12 --start 07:30 --redo --crop nas/crop.cm4wide.json --fuse-run cm4-sunset-1
 ```
 
-It needs ffmpeg, and numpy and OpenCV for `--fuse-run`. It prints the video path and the **sky score**
+Set `SUNSET_NAS` once on the PC to the `project_sunshine` folder on the share (for example `//<nas-host>/camera/project_sunshine`; the host is kept out of this repo), or pass `--nas`. It needs ffmpeg, and numpy and OpenCV for `--fuse-run`. It prints the video path and the **sky score**
 (0 to 100, from how much of the sky is lit warm around sunset; provisional, see
 [nas/README.md](nas/README.md#sky-score)). `--start 07:30` starts at that local time, `--fuse-run` merges
 that experiment run's sunset bracket first and blends each sunset minute with its neighbours (1:2:1, to

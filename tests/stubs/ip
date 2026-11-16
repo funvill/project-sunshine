@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stub: a default route via $STUB_GATEWAY (none if empty). Records how it was called.
 echo "ip $*" >> "${STUB_CALLS:-/dev/null}"
-if [[ "$*" == *default* && -n "${STUB_GATEWAY-192.168.3.1}" ]]; then
-  echo "default via ${STUB_GATEWAY-192.168.3.1} dev wlan0 proto dhcp src 192.168.3.60 metric 600"
+if [[ "$*" == *default* && -n "${STUB_GATEWAY-192.0.2.1}" ]]; then
+  echo "default via ${STUB_GATEWAY-192.0.2.1} dev wlan0 proto dhcp src 192.0.2.60 metric 600"
 fi
 exit 0

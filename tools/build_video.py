@@ -27,7 +27,8 @@ spec = importlib.util.spec_from_file_location("sunset_daily", HERE.parent / "nas
 daily = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(daily)
 
-NAS = "//chipkin_nas.local/camera/project_sunshine"
+# The share's address stays out of this public repo: set SUNSET_NAS once on the PC, or pass --nas.
+NAS = os.environ.get("SUNSET_NAS", "")
 FONTS = ("C:/Windows/Fonts/arialbd.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
          "/Library/Fonts/Arial Bold.ttf", daily.DEFAULT_FONT_FILE)
 
@@ -57,7 +58,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--camera", default="wide", help="folder under the NAS root: wide or cm4wide")
     ap.add_argument("--date", required=True, help="the local date of the sunset, YYYY-MM-DD")
-    ap.add_argument("--nas", default=NAS, help="project_sunshine folder (default %(default)s)")
+    ap.add_argument("--nas", default=NAS, help="project_sunshine folder on the share, e.g. //<nas-host>/camera/project_sunshine (default: $SUNSET_NAS)")
     ap.add_argument("--out", help="output folder (default ~/Documents/sunset-daily-out/<camera>)")
     ap.add_argument("--crop", help="crop.json (default <out>/crop.json)")
     ap.add_argument("--start", help="start the video at this local time, e.g. 07:30 (default: dark to dark)")
@@ -70,6 +71,8 @@ def main():
     ap.add_argument("--redo", action="store_true",
                     help="delete that day's record first, so it is built again; with --fuse-run, make the fused frames again too")
     args = ap.parse_args()
+    if not args.nas:
+        ap.error("set SUNSET_NAS (or pass --nas) to the project_sunshine folder on the share")
 
     from zoneinfo import ZoneInfo
     day = date.fromisoformat(args.date)

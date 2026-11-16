@@ -24,7 +24,7 @@ section "netwatch: network up"
 net_env
 netwatch 600; rc=$?
 check "exits 0" test "$rc" = 0
-check "pings the default gateway through wlan0" grep -q 'ping .*-I wlan0.* 192.168.3.1' "$STUB_CALLS"
+check "pings the default gateway through wlan0" grep -q 'ping .*-I wlan0.* 192.0.2.1' "$STUB_CALLS"
 check "writes nothing to the SD when all is well" test ! -e "$NETWATCH_LOG"
 
 section "netwatch: short outage is left alone"
