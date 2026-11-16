@@ -496,7 +496,9 @@ Steven reviewed the Nov 12 `cm4wide` video (07:30 to dark, tighter crop, merged 
    `Sun` block per frame; `sunset-sun.py sunset [--epoch|--json]` gives the next sunset for burst
    scheduling (backlog #3).
 3. **Sunset burst mode**: 1/min done (dense frames, from 2026-11-09). The 3-shot bracket is not.
-4. **Sensor protection** for the telephoto camera based on sun azimuth vs. its FOV (#32).
+4. **Sensor protection** for the telephoto camera (#32). Sun-in-view check built (`sunset-sun.py view`,
+   `view-calendar`, `VIEW_*` in `sunset.env`, `Sun.in_view`); estimate: in the 16 mm frame Mar 19-May 31 and
+   Jul 11-Sep 23. Software can't protect the sensor (no shutter): the iris or an ND filter is Steven's call.
 5. **Fog detection**: flag low-contrast frames (#33).
 6. Port capture to **Picamera2** if finer control is needed than `rpicam-still` gives.
 7. SHT4x + TSL2591 logging (#34).

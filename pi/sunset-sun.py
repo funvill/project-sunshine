@@ -13,6 +13,19 @@ refraction. "Sunset" is the upper limb touching the horizon (zenith 90.833 deg).
                                           from {} with "rpicam_metadata": "missing"/"invalid"
     sunset-sun.py dense     [--time T]    exit 0 and "sunrise"/"sunset" inside a
                                           1-a-minute window, exit 1 and "none" outside
+    sunset-sun.py view      [--time T]    exit 0 and "in ..." if the sun is in the camera's view
+                                          (plus VIEW_MARGIN), exit 1 and "out ..." if not
+    sunset-sun.py view-calendar [--from YYYY-MM-DD] [--days N]
+                                          each day the sun is in view: first and last minute,
+                                          in UTC and Vancouver time, and its elevation
+
+The view (#32) comes from VIEW_BEARING (true degrees at the frame centre), VIEW_HFOV and
+VIEW_VFOV (degrees), VIEW_TILT (degrees up at the centre, default 0) and VIEW_MARGIN (degrees
+added on every side, default 3), as a rectilinear lens with no roll. With VIEW_BEARING set,
+annotate also writes Sun.in_view and the sun's offset from the centre (view_x_deg right,
+view_y_deg up; null when it is behind the camera). Unset, nothing changes. The sun only counts
+as in view above the horizon (elevation > 0). This says when; it does not protect the sensor,
+which has the sun on it whenever the sun is in view, whether or not a frame is being taken.
 
 Site comes from --lat/--lon or the SITE_LAT / SITE_LON environment variables
 (sunset.env). T is ISO 8601 (2026-12-21T16:00:00Z) or the filename form
@@ -188,7 +201,92 @@ def nearest_sunset(dt, lat, lon):
     return min(cands, key=lambda s: abs((s - dt).total_seconds())) if cands else None
 
 
-def sun_block(dt, lat, lon):
+VIEW_DEFAULT_MARGIN = 3.0
+VIEW_MIN_ELEVATION = 0.0    # at or below this the sun is behind the ground or the far horizon
+
+
+def view_offset(az, el, bearing, tilt):
+    """(right, up) angles in degrees of the direction (az, el) as seen by a camera aimed at
+    (bearing, tilt) with no roll, for a rectilinear lens; None if it is behind the camera."""
+    def vec(a, e):
+        a, e = math.radians(a), math.radians(e)
+        return (math.cos(e) * math.sin(a), math.cos(e) * math.cos(a), math.sin(e))   # east, north, up
+
+    def dot(p, q):
+        return p[0] * q[0] + p[1] * q[1] + p[2] * q[2]
+    s, f = vec(az, el), vec(bearing, tilt)
+    b = math.radians(bearing)
+    r = (math.cos(b), -math.sin(b), 0.0)                                   # level, to the right
+    u = (r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0])   # r x f
+    depth = dot(s, f)
+    if depth <= 1e-9:
+        return None
+    return math.degrees(math.atan(dot(s, r) / depth)), math.degrees(math.atan(dot(s, u) / depth))
+
+
+def in_view(az, el, view):
+    """True if the sun at (az, el) is above the horizon and inside the view plus its margin."""
+    if el <= VIEW_MIN_ELEVATION:
+        return False
+    off = view_offset(az, el, view["bearing"], view["tilt"])
+    if off is None:
+        return False
+    return (abs(off[0]) <= view["hfov"] / 2.0 + view["margin"]
+            and abs(off[1]) <= view["vfov"] / 2.0 + view["margin"])
+
+
+def view_from_env(env=None):
+    """The camera's view from the VIEW_* settings, or None when VIEW_BEARING is unset."""
+    env = os.environ if env is None else env
+    if env.get("VIEW_BEARING", "") == "":
+        return None
+
+    def num(name, default=None, lo=None, hi=None):
+        text = env.get(name, "")
+        if text == "" and default is not None:
+            return default
+        try:
+            value = float(text)
+        except ValueError:
+            raise ValueError("%s must be a number, not %r" % (name, text))
+        if math.isnan(value) or value < lo or value > hi:
+            raise ValueError("%s=%s is out of range (%g to %g)" % (name, text, lo, hi))
+        return value
+    return {"bearing": num("VIEW_BEARING", lo=0, hi=360), "hfov": num("VIEW_HFOV", lo=0.1, hi=179),
+            "vfov": num("VIEW_VFOV", lo=0.1, hi=179), "tilt": num("VIEW_TILT", 0.0, -90, 90),
+            "margin": num("VIEW_MARGIN", VIEW_DEFAULT_MARGIN, 0, 45)}
+
+
+def vancouver(dt):
+    try:
+        from zoneinfo import ZoneInfo
+        return dt.astimezone(ZoneInfo("America/Vancouver"))
+    except Exception:       # no tz database: UTC-7, Vancouver's offset all year since 2026
+        return dt.astimezone(timezone(timedelta(hours=-7)))
+
+
+def view_calendar(start, days, lat, lon, view, step_min=1):
+    """One dict per day from start (a date) with the minutes the sun is in view, scanned from 16:00
+    UTC that day to 16:00 UTC the next (morning to morning in Vancouver, so an evening is one day)."""
+    out = []
+    for i in range(days):
+        day = start + timedelta(days=i)
+        t0 = datetime(day.year, day.month, day.day, 16, 0, tzinfo=UTC)
+        hits = []
+        for m in range(0, 24 * 60, step_min):
+            t = t0 + timedelta(minutes=m)
+            az, el = sun_position(t, lat, lon)
+            if in_view(az, el, view):
+                hits.append((t, el))
+        row = {"date": day.isoformat(), "minutes": len(hits) * step_min}
+        if hits:
+            row.update(first_utc=iso(hits[0][0]), last_utc=iso(hits[-1][0]),
+                       min_el=round(min(e for _, e in hits), 2), max_el=round(max(e for _, e in hits), 2))
+        out.append(row)
+    return out
+
+
+def sun_block(dt, lat, lon, view=None):
     """The dict stored under "Sun" in each frame's JSON.
 
     It holds no lat/lon, but its exact angles and times locate the site to about 30 m (#25),
@@ -201,6 +299,11 @@ def sun_block(dt, lat, lon):
     if near is not None:
         block["nearest_sunset_utc"] = iso(near)
         block["minutes_from_sunset"] = round((dt - near).total_seconds() / 60.0, 1)
+    if view is not None:
+        off = view_offset(az, el, view["bearing"], view["tilt"])
+        block["in_view"] = in_view(az, el, view)
+        block["view_x_deg"] = None if off is None else round(off[0], 2)
+        block["view_y_deg"] = None if off is None else round(off[1], 2)
     return block
 
 
@@ -219,11 +322,11 @@ def load_frame_json(path):
     return data, None
 
 
-def annotate(path, dt, lat, lon):
+def annotate(path, dt, lat, lon, view=None):
     data, problem = load_frame_json(path)
     if problem:
         data["rpicam_metadata"] = problem
-    data["Sun"] = sun_block(dt, lat, lon)
+    data["Sun"] = sun_block(dt, lat, lon, view)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(data, f, indent=4)
@@ -260,6 +363,11 @@ def main(argv=None):
     sa = sub.add_parser("annotate")
     sa.add_argument("files", nargs="+")
     sa.add_argument("--time")
+    sv = sub.add_parser("view")
+    sv.add_argument("--time")
+    sc = sub.add_parser("view-calendar")
+    sc.add_argument("--from", dest="start", help="YYYY-MM-DD, default today (UTC)")
+    sc.add_argument("--days", type=int, default=365)
     args = p.parse_args(argv)
     try:
         lat, lon = site(args)
@@ -282,6 +390,28 @@ def main(argv=None):
                                   "azimuth_deg": round(az, 2), "after_utc": iso(after)}))
             else:
                 print(iso(s))
+        elif args.cmd in ("view", "view-calendar"):
+            view = view_from_env()
+            if view is None:
+                raise ValueError("no view set: VIEW_BEARING, VIEW_HFOV and VIEW_VFOV in sunset.env")
+            if args.cmd == "view":
+                dt = parse_time(args.time)
+                az, el = sun_position(dt, lat, lon)
+                off = view_offset(az, el, view["bearing"], view["tilt"])
+                inside = in_view(az, el, view)
+                xy = "x=na y=na" if off is None else "x=%.1f y=%.1f" % off
+                print("%s az=%.1f el=%.1f %s" % ("in" if inside else "out", az, el, xy))
+                return 0 if inside else 1
+            start = (datetime.strptime(args.start, "%Y-%m-%d").date() if args.start
+                     else datetime.now(UTC).date())
+            rows = [r for r in view_calendar(start, args.days, lat, lon, view) if r["minutes"]]
+            print("# view: bearing %(bearing)g, %(hfov)g x %(vfov)g deg, tilt %(tilt)g, margin %(margin)g" % view)
+            print("# %d of %d days have the sun in view" % (len(rows), args.days))
+            for r in rows:
+                a, b = parse_time(r["first_utc"]), parse_time(r["last_utc"])
+                print("%s  %s-%s UTC  %s-%s Vancouver  %3d min  el %.1f to %.1f" % (
+                    r["date"], a.strftime("%H:%M"), b.strftime("%H:%M"), vancouver(a).strftime("%H:%M"),
+                    vancouver(b).strftime("%H:%M"), r["minutes"], r["min_el"], r["max_el"]))
         elif args.cmd == "dense":
             window = dense_window(parse_time(args.time), lat, lon)
             print(window or "none")
@@ -289,8 +419,9 @@ def main(argv=None):
         else:
             dt = parse_time(args.time)
             problems = []
+            view = view_from_env()
             for path in args.files:
-                b, problem = annotate(path, dt, lat, lon)
+                b, problem = annotate(path, dt, lat, lon, view)
                 if problem and problem not in problems:
                     problems.append(problem)
             # One short line for the capture log.

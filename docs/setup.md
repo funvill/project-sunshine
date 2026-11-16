@@ -261,7 +261,7 @@ Not installed in Home Assistant yet. To install: copy `sunset_frame_age.sh`, `su
 copy: it holds the phone notifier. Add the phone line under each new alert's `notifiers`.
 
 The new blocks add alerts for:
-- NAS free space (default 350 GB, about 14 days of frames at 25 GB a day);
+- NAS free space (default 100 GB, about a month of frames at about 3 GB a day with no DNGs);
 - each Pi's health from its newest frame's JSON: undervoltage and throttle bits, temperature,
   frames waiting to sync, disk use, tiny or repeated JPEGs;
 - the daily video job's status;
