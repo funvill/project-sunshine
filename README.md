@@ -58,18 +58,19 @@ Known problems:
   warnings since; keep watching before calling it fixed.
 - **Heat:** the Pi runs at 55 to 60 °C at capture, at its soft limit. A heatsink is on the to-do list.
 - **Sunset flicker (blocks posting).** Between about 00:12 and 00:19 UTC on Nov 12 the sun and its glow
-  brighten and dim minute to minute, in the raw frames too. Not a camera shift, not missing frames.
+  brighten and dim minute to minute, in the raw frames too. Measured on 2026-11-15: it is real cloud crossing
+  the glow (the same minutes on both cameras), not auto exposure. `fuse_sunset.py` now blends each sunset
+  minute with its neighbours (1:2:1), which cut the Nov 12 video's worst change from 17 to 11. Waiting on
+  Steven's view of the result.
 - **Few clear sunsets.** Nov 8 and Nov 12 were the good ones. The 9° dusk cut-off, the `cm4wide`
   calibration and the tower blur boxes haven't been checked on a clear sunset yet.
 
 ## Next steps (from 2026-11-13)
 
-1. **Fix the sunset flicker** before anything posts. The full notes, questions and ideas are in
-   `CLAUDE.md` under "Next session". Start by measuring it (a flicker number printed by
-   `tools/build_video.py`) and by plotting each frame's exposure, gain and Lux from its JSON against the
-   sun's brightness, to tell cloud from auto-exposure hunting. Compare with the Nov 13 and Nov 14 sunsets
-   (experiments `cm4-sunset-2`/`-3`, `sunset-5`/`-6`).
-2. **Look at the 7-minute hole** in the sunset bracket at 00:19 to 00:25 UTC on Nov 12 (runner log on the CM4).
+1. **Sunset flicker:** Steven to judge the blended Nov 12 video. Still open: the 5-minute frames inside the
+   merge window are not real merges (the runner skips that minute), and no clear sunset yet. Notes in
+   `CLAUDE.md` under "Next session" and on issue #3.
+2. ~~Look at the 7-minute hole~~ in the sunset bracket on Nov 12: the runner's NAS upload, fixed 2026-11-13.
 3. **Commit the video work** (see git status below) on a branch, and put `nas/crop.cm4wide.json` on the NAS
    as `daily/crop.json` when the NAS job is set up.
 4. **Steven's calls:** the sky score threshold for posting; Instagram login and public posting (issue #2);
@@ -143,7 +144,8 @@ python tools/build_video.py --camera cm4wide --date 2026-11-12 --start 07:30 --r
 It needs ffmpeg, and numpy and OpenCV for `--fuse-run`. It prints the video path and the **sky score**
 (0 to 100, from how much of the sky is lit warm around sunset; provisional, see
 [nas/README.md](nas/README.md#sky-score)). `--start 07:30` starts at that local time, `--fuse-run` merges
-that experiment run's sunset bracket first, and `--redo` builds a day again. The camera's `crop.json`
+that experiment run's sunset bracket first and blends each sunset minute with its neighbours (1:2:1, to
+calm the cloud flicker; `--no-blend` to skip it), and `--redo` builds a day again. The camera's `crop.json`
 (calibration, tighter view, tower blur) is `nas/crop.cm4wide.json`.
 
 ## Rules

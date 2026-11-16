@@ -1,8 +1,40 @@
 # Changelog
 
-Changes to Project Sunset by date, newest first. Dates are Vancouver local time. Entries marked **Pi** were made on the pilot Pi (`timelaps`) and may have no commit of their own. Decisions and their reasons are in `CLAUDE.md`.
+The history of Project Sunset, newest first: every change (code, settings, hardware, including changes made only on a Pi, marked **Pi**) and every event that affects the record (outages and lost frames, power cuts, camera moves, weather that matters, good sunsets, solstices, the moon, milestones). Dates are Vancouver local time; times are given in UTC and Vancouver. Decisions and their reasons are in `CLAUDE.md`.
+
+## 2026-11-16
+
+- **Project review and fixes (issues #7 to #27). Repo only: nothing is on the Pis, the NAS or Home Assistant yet, and nothing is committed.**
+  - **Capture (`pi/sunset-capture.sh`, `sunset-netwatch.sh`, `sunset-selftest.sh`):** a network-watchdog reboot no longer stops capture until NTP returns: netwatch leaves the time in `~/sunset/.clock-trusted` and the first capture after the boot trusts the clock if it reads within `CLOCK_TRUST_MAX_S` (900 s) of it (#8). `timeout -k`, the lock's file descriptor closed for children, an `ABORTED line N` log line on any unexpected exit, one retry for a quick camera failure, complete frames rescued from `.partial`, a warning for a missing DNG, and a failure counter with an optional reboot (`CAPTURE_FAIL_REBOOT`, off by default) (#15). A failing sun script now logs `WARN dense: sun script failed` instead of silently stopping dense frames (#16). The self-test takes the capture lock. `capture.log` and `netwatch.log` rotate by size.
+  - **Camera lock (#14):** the experiment runner and the diag page take `.sunset-capture.lock` while they hold the camera; diag also yields to the 1-a-minute dense frames; the runner's shot timeout is its estimate plus 15 s.
+  - **Sync (`pi/sunset-sync.sh`):** `--fsync` when rsync has it, zero-length images kept and logged instead of shipped, oldest-first batches (`SYNC_BATCH`), a line in `sync.log` when the unit timeout stops a sync, log rotation. It still deletes on rsync's word without reading the NAS copy back (#13, open).
+  - **Metadata:** `sunset-meta.py` has an overall deadline (`META_DEADLINE_S`, 15 s), writes `Capture` before probing `System`, caches the daily version probes, and records eMMC `life_time` / `pre_eol_info`. A frame with no rpicam metadata still gets its `Sun` and `Capture` blocks, flagged `rpicam_metadata`. `Sun` gains `algorithm: "noaa-1"`; weather files gain `schema_version`.
+  - **Daily video (`nas/sunset-daily.py`, record `schema_version` 2):** bad JPEGs are dropped and counted, ffmpeg runs with `-xerror` and the frame count is checked, only regular frames count towards "enough frames", days with a gap over 60 min (20 min near sunset) are skipped, failed days get a `failed` record and are retried (#17). Blur, view and sky settings live in each calibration entry with a `setup_id`; a mismatch with the frame sets `setup_mismatch` and `post_ok: false` (#19). `provenance` block. Sky score is the mean of the best 5 frames (the old value is kept as `score_best_frame`). Output is converted to and tagged BT.709. Dockerfile pinned by digest and package version. Optional, off by default: a sunset-only cut (`SUNSET_CUT=1`), a master render (`MASTER=1`) and opt-in redo rules (#21).
+  - **New NAS jobs:** `nas/sunset-verify.py` checks JPEGs and DNGs against the SHA-256 in their JSON (#13); `nas/sunset-health.py` writes a daily health record per camera (#22). Not scheduled yet.
+  - **Home Assistant (`homeassistant/`):** new sensors and alerts for NAS free space (#7), each Pi's health from its newest frame, the daily video's status, and the two NAS jobs' results; a frame named in the future no longer reads as fresh; acknowledged alerts re-arm after 12 hours; a separate heartbeat package. Not installed in Home Assistant yet (steps in `docs/setup.md`).
+  - **New PC tools:** `tools/register_day.py` (how far the camera has moved against a reference, #20) and `tools/sunset_stills.py` (one still per evening for the horizon-swing piece, #21). Tested on synthetic images only. `tools/issue_blur.py` refuses a setup it has no outlines for.
+  - **Install and recovery:** `install.sh --uc517-cam0` for the CM4, `try-restart` of the kernel log unit; reference settings per Pi in `pi/hosts/` (several values marked unverified); "Rebuild a Pi" and "Save and restore the frozen image" in `docs/setup.md` (#23). `pi/sunset.env.example` lists every setting; `.gitignore` covers `sunset.env*` and `*.cred` (#26).
+  - **Tests and CI:** `.gitattributes` makes every text file LF; `tests/run.sh` runs every `tests/test_*.py`; a GitHub Actions workflow (not run yet) (#24). Linux: 887 passed, 0 failed (was 262 and 10).
+
+- `pi/sunset-diag.py`: new **Centre lines** button on the diag page, for lining up the cameras. It draws the frame's centre lines over the live view (cyan, 50% opaque) with a ruler every 5% across and down, labelled every 10%. The full view is the whole sensor, so 50% is the middle of the frame; in the centre focus view only the cross shows, and on a picked spot nothing. **Pi (both):** installed at 00:35-00:50 UTC (Nov 15 17:35-17:50 Vancouver); old file kept as `~/sunset/sunset-diag.py.bak-20261116`. No capture change.
+
+## 2026-11-15
+
+- **Event:** clear and sunny afternoon; `timelaps` reached 63 °C at 23:35 UTC (4:35 pm) and its soft temperature limit (CPU slowed to 1.2 GHz), with captures on time.
+- **Event:** the CM4's Wi-Fi dropped for about 2 minutes at 05:56 and 20:13 UTC (Nov 14 22:56 and Nov 15 13:13 Vancouver) and rejoined by itself; no frames lost.
+- **Pi (both):** both Pis rebooted together at about 19:25 UTC (12:25 pm), probably a power cut. Each skipped one capture (clock not yet synced). The reboot cleared the transient moon timers; `moon-1` to `-9` and `cm4-moon-1` to `-9` were recreated at 23:4x UTC with the same times and arguments.
+- Sunset runs Nov 12-14 analysed on both cameras with a new flicker number (mean minute-to-minute change of the sky band). The Nov 12 flicker is real cloud, not auto exposure; ev-2 roughly halves it. The CM4 runs since the background upload have no gaps. Results on issue #3.
+- `tools/fuse_sunset.py`: new `blend_run`, a 1:2:1 blend of each sunset minute with the minutes either side, run by default after the merge (CLI and `tools/build_video.py --fuse-run`; `--no-blend` skips it). On Nov 12 it cut the video's worst minute-to-minute change from 17 to 11. Tests in `tests/test_fuse_sunset.py`.
+
+## 2026-11-14
+
+- **Event:** overcast with drizzle at sunset. The sunset runs `sunset-6` and `cm4-sunset-3` shot the full 84 minutes with no gaps.
+- **Event:** the CM4's Wi-Fi dropped for about 2 minutes at 22:09 UTC (3:09 pm) and rejoined by itself.
 
 ## 2026-11-13
+
+- **Event:** rain at sunset (1.4 mm forecast). The sunset runs `sunset-5` and `cm4-sunset-2` shot the full 84 minutes, the first CM4 run with no gaps.
+- **Event:** the CM4's Wi-Fi dropped for about 2 minutes at 05:53 and 13:19 UTC (Nov 12 22:53 and Nov 13 06:19 Vancouver) and rejoined by itself.
 
 ### Same setup on both cameras
 - **Pi (`timelaps`):** updated `sunset-capture.sh` and `sunset-diag.py` to the repo versions at 07:37 UTC (00:37 Vancouver), so both Pis run the same code. The only difference was the `ROTATION` setting, which defaults to 0. The 07:40 capture ran cleanly. Old files kept as `*.bak-2026-11-13`.
@@ -16,6 +48,9 @@ Changes to Project Sunset by date, newest first. Dates are Vancouver local time.
 - Last night's sunset analysed on both cameras (`sunset-4`, `cm4-sunset-1`), partly cloudy with a clear band at the horizon: E holds the glow before sunset on both, and daylight white balance turns the sky grey-brown by 30 minutes after, as on the overcast nights.
 
 ## 2026-11-12
+
+- **Event:** a good sunset, partly cloudy with a clear band at the horizon: sky score 67 on both cameras, the second good one of the pilot (after Nov 8). Thin cloud crossing the glow 15 to 20 minutes before sunset is what made the video flicker.
+- **Event:** one undervoltage warning on `timelaps` at 21:51 UTC (2:51 pm), the fourth since the new supply; no frames lost.
 
 ### Handoff update (Nov 13)
 - Brought `README.md` up to date as the handoff: current state, the sunset flicker as the blocker, next steps, uncommitted work, the two cameras. `CLAUDE.md` has the detailed next-session notes.

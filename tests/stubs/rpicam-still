@@ -1,9 +1,24 @@
 #!/usr/bin/env bash
 # Test stub for rpicam-still. STUB_RPICAM=ok|fail|hang  STUB_LUX=<lux>
 [[ -n "${STUB_CALLS:-}" ]] && echo "$*" >> "$STUB_CALLS"
+# STUB_LOCK_PROBE=<lock file>: note in $STUB_CALLS.lock whether someone held that lock during the call.
+if [[ -n "${STUB_LOCK_PROBE:-}" ]] && command -v flock >/dev/null 2>&1; then
+  if flock -n "$STUB_LOCK_PROBE" true 2>/dev/null; then echo free; else echo held; fi >> "${STUB_CALLS:-/dev/null}.lock"
+fi
+# More modes: hang_term (ignores SIGTERM, like a child stuck in a driver call), nodng (exits 0
+# but writes no DNG), nojson (no metadata file), failonce (the first call fails at once, as when
+# another program holds the camera; later calls work), orphan (works, but leaves a child running
+# that keeps every inherited file descriptor open for STUB_ORPHAN_S seconds).
 case "${STUB_RPICAM:-ok}" in
   fail) echo "ERROR: *** no cameras available ***" >&2; exit 1 ;;
   hang) sleep 30; exit 0 ;;
+  hang_term) trap '' TERM; sleep 30; exit 0 ;;
+  failonce)
+    once="${STUB_CALLS:-/tmp/stub}.failonce"
+    if [[ ! -e "$once" ]]; then
+      : > "$once"; echo "ERROR: *** failed to acquire camera: pipeline handler in use ***" >&2; exit 1
+    fi ;;
+  orphan) sleep "${STUB_ORPHAN_S:-4}" >/dev/null 2>&1 & ;;
 esac
 if [[ "$*" == *--list-cameras* ]]; then
   case "${STUB_CAMERA:-imx477}" in
@@ -36,6 +51,6 @@ PY
   exit 0
 fi
 printf 'jpegdata' > "$out"
-[[ $raw == 1 ]] && printf 'dngdata' > "${out%.jpg}.dng"
-[[ -n "$meta" ]] && printf '{\n    "ExposureTime": 1000,\n    "Lux": %s,\n    "AnalogueGain": 1.0\n}\n' "${STUB_LUX:-1000}" > "$meta"
+[[ $raw == 1 && "${STUB_RPICAM:-ok}" != nodng ]] && printf 'dngdata' > "${out%.jpg}.dng"
+[[ -n "$meta" && "${STUB_RPICAM:-ok}" != nojson ]] && printf '{\n    "ExposureTime": 1000,\n    "Lux": %s,\n    "AnalogueGain": 1.0\n}\n' "${STUB_LUX:-1000}" > "$meta"
 exit 0

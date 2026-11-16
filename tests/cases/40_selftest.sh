@@ -50,3 +50,25 @@ check "IR-cut check deferred to daylight" grep -q 'too dark' <<<"$out"
 check "clock failure" grep -q 'FAIL.*clock NOT synchronized' <<<"$out"
 check "disk failure" grep -q 'FAIL.*disk 96% full' <<<"$out"
 check "site failure" grep -q 'FAIL.*SITE_LAT' <<<"$out"
+
+section "selftest: shares the capture lock (issue #14)"
+if command -v flock >/dev/null 2>&1; then
+  st_env; export STUB_LUX=1000 LOCK_WAIT_S=1
+  ( exec 8>"$LOCK_FILE"; flock 8; sleep 4 ) & holder=$!; sleep 0.5
+  out="$(selftest --no-nas 2>&1)"; rc=$?
+  check "camera busy is a failure, not a clash" bash -c "[[ $rc == 1 ]] && grep -q 'FAIL.*camera busy' <<<'$out'"
+  check "did not touch the camera while a capture held it" bash -c "! grep -qv '^systemctl' '$STUB_CALLS'"
+  wait "$holder"
+  st_env; export STUB_LUX=1000; unset LOCK_WAIT_S
+  ( exec 8>"$LOCK_FILE"; flock 8; sleep 2 ) & holder=$!; sleep 0.5
+  start=$SECONDS; out="$(selftest --no-nas 2>&1)"; rc=$?
+  check "waits for a running capture, then passes" test "$rc" = 0 -a $((SECONDS - start)) -ge 1
+  wait "$holder"
+  st_env; export STUB_LUX=1000 STUB_LOCK_PROBE="$LOCK_FILE"
+  selftest --no-nas >/dev/null 2>&1
+  check "holds the lock around every camera call" bash -c "test -s '$STUB_CALLS.lock' && ! grep -q free '$STUB_CALLS.lock'"
+  unset STUB_LOCK_PROBE
+else
+  echo "  (flock not installed here: lock tests skipped)"
+fi
+unset LOCK_WAIT_S

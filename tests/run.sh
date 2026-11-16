@@ -38,6 +38,26 @@ for t in "$HERE"/cases/*.sh; do
   source "$t"
 done
 
+# Every tests/test_*.py that no case already runs (a case runs one by naming "$HERE/test_x.py").
+# A test that needs OpenCV or numpy is skipped with a message when they are missing; ffmpeg-only
+# parts skip themselves inside the test file.
+section "python tests"
+have_py_mods() { python3 -I -c "import $1" >/dev/null 2>&1; }
+command -v ffmpeg >/dev/null 2>&1 || echo "  note: ffmpeg not found; encoding tests inside the Python files will skip themselves"
+for t in "$HERE"/test_*.py; do
+  [[ -e "$t" ]] || continue
+  name="$(basename "$t")"
+  grep -qs "HERE/$name" "$HERE"/cases/*.sh && continue
+  case "$name" in
+    test_fuse_sunset.py|test_issue_blur.py)
+      if ! have_py_mods cv2 || ! have_py_mods numpy; then
+        echo "  SKIP: tests/$name (needs OpenCV and numpy: pip install numpy opencv-python-headless)"
+        continue
+      fi ;;
+  esac
+  check "tests/$name" python3 -I "$t"
+done
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [[ $FAIL -eq 0 ]]

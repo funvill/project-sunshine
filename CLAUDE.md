@@ -4,8 +4,23 @@ Five-year time-lapse of the western sky from Steven's 23rd-floor window in Burna
 looking toward downtown Vancouver. **Sunset is the subject.** Start date: **winter solstice,
 2026-12-21**. Pilot should run by late November 2026.
 
-This file is the project brief. `docs/setup.md` is the Pi setup guide. `changelog.md` lists changes
-by date: add an entry with every change, including changes made only on the Pi.
+This file is the project brief. `docs/setup.md` is the Pi setup guide.
+
+**`changelog.md` is the whole project history** (decided by Steven, 2026-11-15). Over five years it is the
+one place that explains every gap, jump or change in the footage, so record both:
+- **Changes:** code, settings, hardware, mounts, `SETUP_ID`, including changes made only on a Pi.
+- **Events:** anything that affects the record. For example:
+  - power cuts, reboots, freezes and outages (camera, Wi-Fi, NAS), with the frames lost
+  - undervoltage or heat
+  - camera bumps and moves
+  - weather that matters: storms, smoke, snow, fog, condensation on the glass
+  - notably good sunsets (with the sky score)
+  - solstices and equinoxes
+  - the moon or other sky events in frame
+  - the start of the real run (2026-12-21)
+  - milestones such as a year of frames
+
+Give times in UTC and Vancouver. Add the entry when it happens, or as soon as it is found.
 
 ## Repo layout
 - `pi/`: everything that runs on the Pi. Copied flat into `~/sunset`; the systemd units expect that path.
@@ -399,9 +414,12 @@ Steven reviewed the Nov 12 `cm4wide` video (07:30 to dark, tighter crop, merged 
   frame-to-frame difference stays at 10 to 15 where it is 2 to 5 elsewhere. The sun disc and its glow
   brighten and dim from one minute to the next. The unprocessed production frames do the same (9 to 13),
   so it is in the source, not the merge. No camera shift (phase correlation 0.0 px).
-- **Questions to answer first:** (1) Is it real, thin cloud crossing the sun, or the camera's auto
-  exposure hunting? Plot the frames' `ExposureTime`, `AnalogueGain` and `Lux` from the JSONs against the
-  sky and disc brightness for 23:45 to 01:00 UTC, production and bracket. (2) Is it the double-glazing
+- **Questions to answer first:** (1) **Answered 2026-11-15: real cloud, not auto exposure.** The worst
+  minutes (00:14, 00:17, 00:18 UTC) are the same on both cameras, each with its own lens and auto exposure; the
+  mean sky brightness barely moved while pixels changed by about 10 (cloud crossing the glow). ev-2 roughly halves
+  the worst flicker. So locking exposure at capture (d) would not fix it. The 3-frame blend (b) is in `fuse_sunset.py` (`blend_run`,
+  1:2:1, on by default): Nov 12 worst change 17 to 11, sun and cloud edges a little softer. Steven to judge. Also
+  found: the 5-minute frames in the merge window aren't real merges (runner skips that minute). Numbers on #3. (2) Is it the double-glazing
   flare, whose ripple bands move with the sun? Look at the ev-2 frames alone. (3) **Answered 2026-11-13:** the
   7-minute holes in the CM4 bracket (00:19-00:25 and 00:49-00:55 UTC) were the runner's half-hourly NAS upload
   blocking the camera on the slow Wi-Fi. The upload now runs in the background (`Run.upload`), from `sunset-5`/`cm4-sunset-2`.

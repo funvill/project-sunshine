@@ -4,7 +4,10 @@
 Results go to experiments/runs/<run>/ and then to a NAS folder of their own, never to the outbox
 or the production NAS folder, so the regular series and anything reading it are untouched. Real
 captures always win: no shot starts unless it will finish before the next 5-minute slot, and
-the runner waits while diag or a real capture has the camera.
+the runner waits while diag or a real capture has the camera. Each shot also holds production's
+camera lock (~/sunset/.sunset-capture.lock, the file sunset-capture.sh flocks), taken without
+waiting, so a shot that overruns makes a regular capture wait for it instead of failing, and a
+dense frame skips with "camera busy". A shot is killed SHOT_TIMEOUT_MARGIN_S after its estimate.
 
     sunset-experiment.py night --run night-1
     sunset-experiment.py settle --run settle-night
@@ -15,6 +18,7 @@ the runner waits while diag or a real capture has the camera.
     sunset-experiment.py sunset --run sunset-1 --sunset <epoch> --until <epoch>
 """
 import argparse
+import contextlib
 import csv
 import dataclasses
 import json
@@ -26,6 +30,11 @@ import sys
 import tempfile
 import threading
 import time
+
+try:
+    import fcntl
+except ImportError:  # Windows test runs: no locking, everything else works
+    fcntl = None
 
 HERE = pathlib.Path(__file__).resolve().parent
 EXP_ROOT = HERE / "runs"
@@ -46,7 +55,10 @@ DUSK_MS = (250, 500, 1000, 2000, 4000)
 DAY_SWEEP_MINUTE = 21  # past each hour, clear of the real captures
 NIGHT_SWEEP_EVERY_S = 2 * 3600
 NIGHT_AWB = "2.25,2.40"
-MIN_SD_FREE_GB = 5
+MAX_SD_USED_PCT = 70  # no shots above this; production drops DNGs at 85% (DISK_DROP_RAW_PCT)
+MIN_SD_FREE_GB = 5  # and never below this much free, whatever the card size
+SHOT_TIMEOUT_MARGIN_S = 15  # a shot is killed this long after its estimate (plus settle time)
+UPLOAD_JOIN_S = 1800  # longest wait for a copy at the end of a run; the rsync itself allows 3600
 MIN_NAS_FREE_GB = 50
 UPLOAD_EVERY_S = 1800
 MAX_FAILURES = 3  # failed shots in a row before the runner leaves the camera alone
@@ -71,6 +83,90 @@ def clear_to_start(now, est_s):
 def estimate_s(shutter_us):
     """Pessimistic shot time. Fixed long exposures take several frames at that shutter."""
     return 6 + 3 * (shutter_us or 0) / 1_000_000
+
+
+def shot_timeout_s(shot):
+    """When a shot counts as hung and is killed. Was 60 s plus 4x the shutter, long enough to run
+    into the next regular capture."""
+    return estimate_s(shot.shutter_us) + shot.settle_ms / 1000 + SHOT_TIMEOUT_MARGIN_S
+
+
+def sd_low_reason(usage):
+    """Why the SD card is too full for experiments, or None. `usage` is shutil.disk_usage()."""
+    used_pct = 100.0 * usage.used / max(usage.used + usage.free, 1)   # as df's Use%
+    if used_pct > MAX_SD_USED_PCT:
+        return f"SD {used_pct:.0f}% used > {MAX_SD_USED_PCT}%"
+    if usage.free < MIN_SD_FREE_GB * 1024 ** 3:
+        return f"SD {usage.free / 1024 ** 3:.1f} GB free < {MIN_SD_FREE_GB} GB"
+    return None
+
+
+def capture_lock_path():
+    """The production capture's lock file: $LOCK_FILE, else ~/sunset/.sunset-capture.lock (this file
+    is in ~/sunset/experiments). Not $HOME: the runner may run as root."""
+    if os.environ.get("LOCK_FILE"):
+        return pathlib.Path(os.environ["LOCK_FILE"])
+    return HERE.parent / ".sunset-capture.lock"
+
+
+class CaptureLock:
+    """Production's camera lock, held while a shot has the camera. Never waits for it."""
+
+    def __init__(self, path):
+        self.path = str(path)
+        self._fd = None
+        self.held = False
+
+    def _open(self):
+        try:
+            return os.open(self.path, os.O_RDONLY)   # flock works on a read-only descriptor
+        except FileNotFoundError:
+            fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o664)
+            if hasattr(os, "geteuid") and os.geteuid() == 0:
+                # Run as root, the file must still be writable by the capture's user, whose
+                # script opens it for writing (exec 9>) and would fail.
+                st = os.stat(os.path.dirname(self.path) or ".")
+                os.fchown(fd, st.st_uid, st.st_gid)
+            return fd
+
+    def acquire(self):
+        """True if this process may use the camera now."""
+        if fcntl is None:
+            return True
+        if self._fd is not None:
+            return True
+        try:
+            fd = self._open()
+        except OSError as e:
+            print(f"cannot open the capture lock {self.path}: {e}; shooting without it", file=sys.stderr)
+            return True
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            return False
+        self._fd = fd
+        self.held = True
+        return True
+
+    def release(self):
+        fd, self._fd = self._fd, None
+        self.held = False
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
+
+
+@contextlib.contextmanager
+def experiment_lock(path):
+    """One program at a time; a late start just waits."""
+    path.touch()
+    with path.open() as lock:
+        if fcntl is not None:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
 @dataclasses.dataclass
@@ -357,6 +453,7 @@ class Run:
         self.last_upload = time.time()
         self._upload_thread = None
         self.guard = FailureGuard()
+        self.camera_lock = CaptureLock(capture_lock_path())
 
     def record(self, **row):
         fields = ["utc", "label", "status", "seconds", "bytes", "exposure_us", "analogue_gain",
@@ -373,25 +470,36 @@ class Run:
         if not self.guard.allowed(time.time()):
             self.record(utc=stamp, label=shot.label, status="skipped: camera failing")
             return
+        low = sd_low_reason(shutil.disk_usage(self.dir))
+        if low:
+            self.record(utc=stamp, label=shot.label, status=f"skipped: SD low ({low})")
+            return
         est = estimate_s(shot.shutter_us)
         waited = time.time()
-        while not clear_to_start(time.time(), est) or camera_busy():
+        while True:
+            if not clear_to_start(time.time(), est) or camera_busy():
+                reason = "camera not clear"
+            elif self.camera_lock.acquire():
+                break
+            else:
+                reason = "camera busy (capture lock)"
             if time.time() - waited > max_wait_s:
-                self.record(utc=stamp, label=shot.label, status="skipped: camera not clear")
+                self.record(utc=stamp, label=shot.label, status="skipped: " + reason)
                 return
             time.sleep(2)
-        if shutil.disk_usage(self.dir).free < MIN_SD_FREE_GB * 1024 ** 3:
-            self.record(utc=stamp, label=shot.label, status="skipped: SD low")
-            return
         stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
         base = str(self.dir / f"{shot.label}_{stamp}")
         started = time.time()
         try:
             rc = subprocess.run(shot.command(base), capture_output=True,
-                                timeout=60 + 4 * (shot.shutter_us or 0) / 1e6).returncode
+                                timeout=shot_timeout_s(shot)).returncode
             status = "ok" if rc == 0 else f"failed rc={rc}"
         except subprocess.TimeoutExpired:
-            status = "failed timeout"
+            status = "failed timeout"   # subprocess.run has killed it, so the camera is free
+        except OSError as e:
+            status = f"failed {e.__class__.__name__}"
+        finally:
+            self.camera_lock.release()
         self.guard.note(status == "ok", time.time())
         seconds = round(time.time() - started, 1)
         meta, sun = {}, {}
@@ -422,10 +530,14 @@ class Run:
     def uploading(self):
         return self._upload_thread is not None and self._upload_thread.is_alive()
 
-    def finish_upload(self):
+    def finish_upload(self, timeout=None):
+        """Wait for a running copy, at most `timeout` seconds. False if it is still running."""
         if self._upload_thread is not None:
-            self._upload_thread.join()
+            self._upload_thread.join(timeout)
+            if self._upload_thread.is_alive():
+                return False
             self._upload_thread = None
+        return True
 
     def upload(self, wait=False):
         """Copy to the NAS, removing each frame only after rsync confirms it. Never fatal.
@@ -433,17 +545,21 @@ class Run:
         Runs in the background so the camera keeps shooting: on the CM4's slow Wi-Fi a copy took
         about 7 minutes. Only the files already here when it is called are sent. It is called
         between shots, so none of them can be half-written. With wait=True (the end of a run) it
-        first lets a running copy finish, then copies the rest and returns when done."""
+        first lets a running copy finish, then copies the rest and returns when done, waiting at
+        most UPLOAD_JOIN_S each time. A copy still running then is left alone (results stay on
+        the SD card), rather than starting a second rsync over the same files."""
         if wait:
-            self.finish_upload()
+            if not self.finish_upload(UPLOAD_JOIN_S):
+                print("upload still running after the wait, not starting another", file=sys.stderr)
+                return
         elif self.uploading():
             return
         self.last_upload = time.time()
         files = sorted(p.name for p in self.dir.iterdir() if p.is_file() and p.name != "manifest.csv")
         self._upload_thread = threading.Thread(target=self._transfer, args=(files,), daemon=True)
         self._upload_thread.start()
-        if wait:
-            self.finish_upload()
+        if wait and not self.finish_upload(UPLOAD_JOIN_S):
+            print("final upload still running, leaving it", file=sys.stderr)
 
     def _transfer(self, files):
         target = pathlib.Path(NAS_EXP_ROOT) / self.name
@@ -536,7 +652,23 @@ def run_day(run, sunset, until, settle_at, sunrise=None):
         time.sleep(max(0, minute + 60 - time.time()))
 
 
-def main():
+def run_program(run, args):
+    if args.program == "day":
+        run_day(run, args.sunset, args.until, args.settle_at, args.sunrise)
+    elif args.program == "rate-night":
+        run_rate_night(run, args.until)
+    elif args.program == "night-sweep":
+        run_night_sweep(run, args.until)
+    elif args.program == "moon":
+        run_moon(run, args.until)
+    elif args.program == "sunset":
+        run_sunset(run, args.sunset, args.until)
+    else:
+        for shot in night_shots() if args.program == "night" else settle_shots():
+            run.take(shot, max_wait_s=900)
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("program", choices=["night", "settle", "day", "rate-night", "night-sweep", "moon", "sunset"])
     parser.add_argument("--run", required=True)
@@ -544,29 +676,14 @@ def main():
     parser.add_argument("--sunrise", type=int)
     parser.add_argument("--until", type=int)
     parser.add_argument("--settle-at", type=int)
-    args = parser.parse_args()
-
-    import fcntl  # Linux only; the scheduling above is tested on any machine
+    args = parser.parse_args(argv)
 
     load_site_env()
-    LOCK_FILE.touch()
-    with LOCK_FILE.open() as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)  # one program at a time; a late start just waits
+    with experiment_lock(LOCK_FILE):
         run = Run(args.run)
-        if args.program == "day":
-            run_day(run, args.sunset, args.until, args.settle_at, args.sunrise)
-        elif args.program == "rate-night":
-            run_rate_night(run, args.until)
-        elif args.program == "night-sweep":
-            run_night_sweep(run, args.until)
-        elif args.program == "moon":
-            run_moon(run, args.until)
-        elif args.program == "sunset":
-            run_sunset(run, args.sunset, args.until)
-        else:
-            for shot in night_shots() if args.program == "night" else settle_shots():
-                run.take(shot, max_wait_s=900)
-        run.upload(wait=True)
+        run_program(run, args)
+    # The last copy doesn't need the camera, so the next program may start meanwhile.
+    run.upload(wait=True)
 
 
 if __name__ == "__main__":

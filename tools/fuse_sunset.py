@@ -17,6 +17,9 @@ The output files are named like the production frames, so the video job swaps th
         --frames <NAS>/project_sunshine/cm4wide --out fused/
     FUSED_DIR=fused/ ...   (or tools/build_video.py --fuse-run cm4-sunset-1)
 
+Then each sunset minute is blended 1:2:1 with the minutes either side (blend_run), which calms
+thin cloud crossing the glow; --no-blend skips it, and --force redoes both.
+
 It changes nothing on the NAS. Needs numpy and OpenCV.
 """
 import argparse
@@ -233,6 +236,85 @@ def smooth_brightness(paths, radius):
                         [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
 
 
+BLEND_WEIGHTS = (1, 2, 1)  # each minute with the minutes either side
+BLEND_MARGIN_MIN = 15      # blended this far either side of the bracket, which covers the dense frames
+BLEND_SPACING_S = 20       # a neighbour must be one minute away, give or take this
+BLEND_MARK = ".blended"    # what the blend wrote, so it is never blended twice
+
+
+def blend_minutes(frames_dir, out_dir, start, end, weights=BLEND_WEIGHTS):
+    """Blend each frame between start and end with the frames either side, 1:2:1. Returns how many
+    were written.
+
+    Thin cloud crossing the glow changes the sky by 10 to 19 a minute (Nov 12, both cameras, each
+    with its own exposure), which reads as flicker. The blend cut the Nov 12 video's worst change
+    from 17 to 11. Still things stay sharp; the sun and cloud edges soften a little.
+
+    The picture for each minute is the fused one in out_dir if there is one, otherwise the production
+    frame, and the result goes to out_dir under the production name. Only frames one minute apart
+    are blended, so the 5-minute frames outside the dense window are left alone. Done once per
+    out_dir: undo_blend() clears it to do it again."""
+    mark = os.path.join(out_dir, BLEND_MARK)
+    if os.path.exists(mark):
+        return 0
+    frames = production_frames(frames_dir, start, end)
+    sources = []
+    for t, path in frames:
+        fused = os.path.join(out_dir, os.path.basename(path))
+        sources.append((t, fused if os.path.exists(fused) else path))
+    reach = len(weights) // 2
+    originals = {}   # read before anything is overwritten, so a neighbour is never already blended
+
+    def picture(i):
+        if i not in originals:
+            originals[i] = cv2.imread(sources[i][1])
+        return originals[i]
+
+    os.makedirs(out_dir, exist_ok=True)
+    written = []
+    for i, (t, _) in enumerate(sources):
+        around = range(i - reach, i + reach + 1)
+        if all(0 <= j < len(sources) for j in around) and all(
+                abs((sources[j][0] - t).total_seconds() - 60 * (j - i)) <= BLEND_SPACING_S for j in around):
+            images = [picture(j) for j in around]
+            if all(img is not None and img.shape == images[reach].shape for img in images):
+                mixed = sum(img.astype(np.float32) * w for img, w in zip(images, weights)) / float(sum(weights))
+                name = os.path.basename(frames[i][1])
+                cv2.imwrite(os.path.join(out_dir, name), np.clip(mixed + 0.5, 0, 255).astype(np.uint8),
+                            [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+                written.append(name)
+        originals.pop(i - reach, None)
+    with open(mark, "w") as f:
+        json.dump({"weights": list(weights), "blended": written}, f)
+    return len(written)
+
+
+def undo_blend(out_dir):
+    """Remove the frames the blend wrote, and its mark. Fused frames it blended are removed too,
+    so run fuse_run again (with force) before blending again."""
+    mark = os.path.join(out_dir, BLEND_MARK)
+    try:
+        with open(mark) as f:
+            names = json.load(f).get("blended", [])
+    except (OSError, ValueError):
+        return
+    for name in names:
+        try:
+            os.remove(os.path.join(out_dir, name))
+        except OSError:
+            pass
+    os.remove(mark)
+
+
+def blend_run(run_dir, frames_dir, out_dir, bright_name="ev+0-daylight", weights=BLEND_WEIGHTS):
+    """blend_minutes() over the experiment run's bracket and BLEND_MARGIN_MIN either side."""
+    brights = list_run(run_dir, bright_name)
+    if not brights:
+        return 0
+    margin = timedelta(minutes=BLEND_MARGIN_MIN)
+    return blend_minutes(frames_dir, out_dir, brights[0][0] - margin, brights[-1][0] + margin, weights)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run", required=True, help="experiment folder, e.g. .../project_sunshine_experiments/cm4-sunset-1")
@@ -241,9 +323,14 @@ def main():
     ap.add_argument("--bright", default="ev+0-daylight")
     ap.add_argument("--dark", default="ev-2-daylight")
     ap.add_argument("--force", action="store_true", help="redo frames that already exist")
+    ap.add_argument("--no-blend", action="store_true", help="skip the 1:2:1 blend of each minute with its neighbours")
     args = ap.parse_args()
+    if args.force:
+        undo_blend(args.out)
     made = fuse_run(args.run, args.frames, args.out, args.bright, args.dark, args.force)
     print("%d fused frames in %s" % (made, args.out))
+    if not args.no_blend:
+        print("%d frames blended with their neighbours" % blend_run(args.run, args.frames, args.out, args.bright))
     return 0 if made else 1
 
 

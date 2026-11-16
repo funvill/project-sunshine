@@ -29,6 +29,9 @@ OUT_ROOT = HERE / "runs" / "weather"
 NAS_ROOT = pathlib.Path("/mnt/nas-camera/project_sunshine_experiments/weather")
 MIN_NAS_FREE_GB = 50
 TIMEOUT_S = 30
+# Layout of the saved files. 1: the first layout with a version (files from before 2026-11-15
+# have none and the same layout). Raise it when a field is renamed, moved or changes meaning.
+SCHEMA_VERSION = 1
 
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 AIR_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
@@ -77,7 +80,8 @@ def http_fetch(url):
 
 def fetch_and_save(lat, lon, root, now, fetch=http_fetch):
     """Fetch both, save one file. 0 if the forecast was saved, 1 if nothing was."""
-    saved = {"fetched_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+    saved = {"schema_version": SCHEMA_VERSION,
+             "fetched_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
              "source": "open-meteo", "position": "site rounded to 0.1 degrees, not stored"}
     for name, url in build_urls(lat, lon).items():
         try:

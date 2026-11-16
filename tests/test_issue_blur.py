@@ -1,6 +1,11 @@
 """Tests for tools/issue_blur.py: python3 tests/test_issue_blur.py (skipped without numpy, OpenCV, Pillow)"""
 import importlib.util
+import json
 import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 
 try:
@@ -11,6 +16,7 @@ except ImportError:
     np = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+SCRIPT = os.path.join(os.path.dirname(HERE), "tools", "issue_blur.py")
 
 
 def load():
@@ -53,6 +59,72 @@ class IssueBlur(unittest.TestCase):
         self.assertEqual(out.shape[1], 200)
         # building now at x 50-150 of the crop, scaled by 2/3: about 33-100
         self.assertTrue(np.array_equal(out[:, 110:], cv2_resize(self.frame[:, 100:400], 200)[:, 110:]))
+
+
+@unittest.skipIf(np is None, "needs numpy, OpenCV and Pillow")
+class SetupChoice(unittest.TestCase):
+    """The outlines must belong to the camera position the frame was taken at (issue #19)."""
+
+    def setUp(self):
+        self.ib = load()
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.frame = os.path.join(self.dir, "wide_20261112T003000Z.jpg")
+        import cv2
+        cv2.imwrite(self.frame, np.full((300, 400, 3), 128, np.uint8))
+
+    def write_json(self, setup_id, path=None):
+        data = {"Sun": {}, "Capture": {"schedule": "regular"}}
+        if setup_id:
+            data["Capture"]["setup_id"] = setup_id
+        with open(path or os.path.splitext(self.frame)[0] + ".json", "w") as f:
+            json.dump(data, f)
+
+    def test_setup_comes_from_the_frames_json(self):
+        self.write_json("pilot-3")
+        self.assertEqual(self.ib.frame_setup(self.frame), "pilot-3")
+        self.assertIs(self.ib.choose_outlines(None, "pilot-3"), self.ib.BUILDINGS["pilot-3"])
+
+    def test_a_setup_with_no_outlines_is_refused(self):
+        with self.assertRaises(self.ib.SetupError) as e:
+            self.ib.choose_outlines(None, "pilot-4")
+        self.assertIn("pilot-4", str(e.exception))
+
+    def test_no_setup_anywhere_is_refused_rather_than_assuming_pilot_3(self):
+        self.assertIsNone(self.ib.frame_setup(self.frame))
+        with self.assertRaises(self.ib.SetupError):
+            self.ib.choose_outlines(None, None)
+
+    def test_a_setup_argument_that_disagrees_with_the_frame_is_refused(self):
+        with self.assertRaises(self.ib.SetupError):
+            self.ib.choose_outlines("pilot-3", "cm4-window-1")
+
+    def test_explicit_outlines_need_no_setup(self):
+        self.assertEqual(self.ib.choose_outlines(None, "pilot-4", [[(0, 0), (1, 0), (1, 1)]]), [[(0, 0), (1, 0), (1, 1)]])
+
+    def run_cli(self, *args):
+        return subprocess.run([sys.executable, SCRIPT, self.frame, os.path.join(self.dir, "out.jpg")] + list(args),
+                              capture_output=True, text=True)
+
+    def test_command_line_refuses_an_unknown_setup_with_a_clear_message(self):
+        self.write_json("pilot-4")
+        got = self.run_cli()
+        self.assertNotEqual(got.returncode, 0)
+        self.assertIn("no building outlines for setup 'pilot-4'", got.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "out.jpg")))
+
+    def test_command_line_works_for_a_known_setup_from_the_json(self):
+        self.write_json("pilot-3")
+        got = self.run_cli("--width", "200")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "out.jpg")))
+
+    def test_command_line_reads_a_json_given_by_path(self):
+        other = os.path.join(self.dir, "other.json")
+        self.write_json("cm4-window-1", other)
+        got = self.run_cli("--json", other)
+        self.assertNotEqual(got.returncode, 0)
+        self.assertIn("cm4-window-1", got.stderr)
 
 
 def cv2_resize(img, width):

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Stub: records the call and runs the command without privileges (so systemctl hits its stub).
+echo "sudo $*" >> "${STUB_CALLS:-/dev/null}"
+[[ "${1:-}" == -n ]] && shift
+exec "$@"

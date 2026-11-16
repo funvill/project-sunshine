@@ -612,5 +612,280 @@ class BackgroundUpload(unittest.TestCase):
         self.assertGreaterEqual(self.run_.last_upload, before)
 
 
+class BoundedUpload(BackgroundUpload):
+    """#27: the final upload waited with no limit, holding .experiment.lock, so later programs
+    queued behind a copy that can take up to an hour."""
+
+    def setUp(self):
+        super().setUp()
+        self.saved_join = exp.UPLOAD_JOIN_S
+        exp.UPLOAD_JOIN_S = 0.2
+
+    def tearDown(self):
+        exp.UPLOAD_JOIN_S = self.saved_join
+        super().tearDown()
+
+    def test_waiting_for_a_stuck_copy_has_a_limit(self):
+        self.run_.upload()
+        self.assertTrue(self.entered.wait(5))
+        t0 = time.time()
+        self.assertFalse(self.run_.finish_upload(timeout=0.2))
+        self.assertLess(time.time() - t0, 2)
+        self.assertTrue(self.run_.uploading())
+
+    def test_final_upload_gives_up_on_a_stuck_copy_without_starting_another(self):
+        self.run_.upload()
+        self.assertTrue(self.entered.wait(5))
+        t0 = time.time()
+        self.run_.upload(wait=True)
+        self.assertLess(time.time() - t0, 2)
+        self.assertEqual(len(self.frames_sent()), 1)
+
+
+class FakeLock:
+    def __init__(self, free=True):
+        self.free = free
+        self.held = False
+        self.events = []
+
+    def acquire(self):
+        self.events.append("acquire")
+        if self.free:
+            self.held = True
+        return self.free
+
+    def release(self):
+        self.events.append("release")
+        self.held = False
+
+
+class ShotWithTheCaptureLock(unittest.TestCase):
+    """#14: the runner takes production's lock around each shot, so a regular capture waits for an
+    overrunning shot instead of failing on a busy camera, and a dense frame skips cleanly."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.saved = {name: getattr(exp, name) for name in
+                      ("EXP_ROOT", "clear_to_start", "camera_busy", "read_text", "subprocess", "time",
+                       "sd_low_reason")}
+        exp.EXP_ROOT = pathlib.Path(self.tmp.name) / "runs"
+        exp.sd_low_reason = lambda usage: None      # whatever the test machine's disk holds
+        exp.clear_to_start = lambda now, est: True
+        exp.camera_busy = lambda: False
+        exp.read_text = lambda cmd: ""
+        self.run_ = exp.Run("t")
+        self.lock = self.run_.camera_lock = FakeLock()
+
+    def tearDown(self):
+        for name, value in self.saved.items():
+            setattr(exp, name, value)
+        self.tmp.cleanup()
+
+    def rows(self):
+        import csv
+        with self.run_.manifest.open() as f:
+            return list(csv.DictReader(f))
+
+    def fake_subprocess(self, behaviour):
+        import types
+        calls = []
+
+        def run(cmd, **kw):
+            calls.append((cmd, kw, self.lock.held))
+            return behaviour(cmd, kw)
+        exp.subprocess = types.SimpleNamespace(run=run, TimeoutExpired=exp.subprocess.TimeoutExpired,
+                                               SubprocessError=exp.subprocess.SubprocessError,
+                                               CompletedProcess=exp.subprocess.CompletedProcess)
+        return calls
+
+    def test_the_shot_runs_while_holding_the_lock_and_lets_go_after(self):
+        calls = self.fake_subprocess(lambda cmd, kw: exp.subprocess.CompletedProcess(cmd, 0))
+        self.run_.take(exp.Shot("ev-2", ev=-2), max_wait_s=0)
+        self.assertTrue(calls[0][2], "lock not held during the shot")
+        self.assertEqual(self.lock.events, ["acquire", "release"])
+        self.assertEqual(self.rows()[0]["status"], "ok")
+
+    def test_no_shot_while_a_capture_holds_the_lock(self):
+        self.lock.free = False
+        calls = self.fake_subprocess(lambda cmd, kw: self.fail("shot taken without the lock"))
+        exp.time = __import__("types").SimpleNamespace(time=time.time, sleep=lambda s: None,
+                                                       strftime=time.strftime, gmtime=time.gmtime)
+        self.run_.take(exp.Shot("ev-2", ev=-2), max_wait_s=0)
+        self.assertEqual(calls, [])
+        self.assertEqual(self.rows()[0]["status"], "skipped: camera busy (capture lock)")
+
+    def test_waits_for_the_lock_within_its_time(self):
+        self.lock.free = False
+        sleeps = []
+
+        def sleep(s):
+            sleeps.append(s)
+            self.lock.free = True       # the capture finishes
+        exp.time = __import__("types").SimpleNamespace(time=time.time, sleep=sleep,
+                                                       strftime=time.strftime, gmtime=time.gmtime)
+        self.fake_subprocess(lambda cmd, kw: exp.subprocess.CompletedProcess(cmd, 0))
+        self.run_.take(exp.Shot("ev-2", ev=-2), max_wait_s=30)
+        self.assertEqual(len(sleeps), 1)
+        self.assertEqual(self.rows()[0]["status"], "ok")
+
+    def test_a_hung_shot_is_killed_soon_after_its_estimate_and_frees_the_lock(self):
+        def hang(cmd, kw):
+            raise exp.subprocess.TimeoutExpired(cmd, kw["timeout"])
+        calls = self.fake_subprocess(hang)
+        shot = exp.Shot("ev-2", ev=-2)
+        self.run_.take(shot, max_wait_s=0)
+        self.assertEqual(calls[0][1]["timeout"], exp.estimate_s(None) + 1 + exp.SHOT_TIMEOUT_MARGIN_S)
+        self.assertEqual(self.rows()[0]["status"], "failed timeout")
+        self.assertFalse(self.lock.held)
+        self.assertEqual(self.lock.events, ["acquire", "release"])
+
+    def test_a_real_overrunning_process_is_stopped_at_the_timeout(self):
+        import sys
+        saved_timeout, saved_command = exp.shot_timeout_s, exp.Shot.command
+        exp.shot_timeout_s = lambda shot: 1.0
+        exp.Shot.command = lambda self_, base: [sys.executable, "-c", "import time; time.sleep(30)"]
+        try:
+            t0 = time.time()
+            self.run_.take(exp.Shot("ev-2", ev=-2), max_wait_s=0)
+            took = time.time() - t0
+        finally:
+            exp.shot_timeout_s, exp.Shot.command = saved_timeout, saved_command
+        self.assertLess(took, 10)
+        row = self.rows()[0]
+        self.assertEqual(row["status"], "failed timeout")
+        self.assertLess(float(row["seconds"]), 10)
+        self.assertFalse(self.lock.held)
+
+    def test_timeouts_are_the_estimate_plus_a_margin(self):
+        self.assertEqual(exp.SHOT_TIMEOUT_MARGIN_S, 15)
+        self.assertEqual(exp.shot_timeout_s(exp.Shot("auto")), 6 + 1 + 15)
+        night = exp.Shot("n", shutter_us=4_000_000, gain=1)
+        self.assertEqual(exp.shot_timeout_s(night), exp.estimate_s(4_000_000) + 1 + 15)
+        self.assertLess(exp.shot_timeout_s(night), 60 + 4 * 4)          # the old limit
+        settle = exp.Shot("s", settle_ms=3000)
+        self.assertEqual(exp.shot_timeout_s(settle), 6 + 3 + 15)
+
+
+class CaptureLockFile(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = os.path.join(self.tmp.name, ".sunset-capture.lock")
+        self.saved_env = os.environ.pop("LOCK_FILE", None)
+
+    def tearDown(self):
+        os.environ.pop("LOCK_FILE", None)
+        if self.saved_env is not None:
+            os.environ["LOCK_FILE"] = self.saved_env
+
+    def test_same_file_as_the_capture_script(self):
+        # sunset-capture.sh: $(dirname "$OUT_ROOT")/.sunset-capture.lock, and the runner lives in
+        # ~/sunset/experiments, so its parent is ~/sunset.
+        self.assertEqual(exp.capture_lock_path(), exp.HERE.parent / ".sunset-capture.lock")
+        os.environ["LOCK_FILE"] = "/elsewhere/lock"
+        self.assertEqual(str(exp.capture_lock_path()), str(pathlib.Path("/elsewhere/lock")))
+
+    def test_without_fcntl_locking_is_skipped_not_fatal(self):
+        saved = exp.fcntl
+        exp.fcntl = None
+        try:
+            lock = exp.CaptureLock(self.path)
+            self.assertTrue(lock.acquire())
+            lock.release()
+        finally:
+            exp.fcntl = saved
+
+    @unittest.skipIf(exp.fcntl is None, "flock needs Linux")
+    def test_a_lock_held_by_the_capture_blocks_the_runner(self):
+        import fcntl
+        with open(self.path, "w") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            self.assertFalse(exp.CaptureLock(self.path).acquire())
+        lock = exp.CaptureLock(self.path)
+        self.assertTrue(lock.acquire())
+        with open(self.path) as other:
+            with self.assertRaises(OSError):
+                fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock.release()
+        with open(self.path) as other:
+            fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    @unittest.skipIf(exp.fcntl is None, "flock needs Linux")
+    def test_creates_the_file_if_the_capture_never_has(self):
+        lock = exp.CaptureLock(self.path)
+        self.assertTrue(lock.acquire())
+        lock.release()
+        self.assertTrue(os.path.exists(self.path))
+
+
+class SdGuard(unittest.TestCase):
+    """#27: an absolute 5 GB floor let experiments push a 64 GB card past production's 85% DNG drop."""
+    GB = 1024 ** 3
+
+    def usage(self, total_gb, free_gb):
+        import collections
+        u = collections.namedtuple("usage", "total used free")
+        return u(total_gb * self.GB, (total_gb - free_gb) * self.GB, free_gb * self.GB)
+
+    def test_stops_above_the_percentage(self):
+        self.assertEqual(exp.MAX_SD_USED_PCT, 70)
+        self.assertIn("71%", exp.sd_low_reason(self.usage(64, 18.5)))
+
+    def test_carries_on_below_it(self):
+        self.assertIsNone(exp.sd_low_reason(self.usage(64, 30)))
+
+    def test_absolute_floor_still_applies(self):
+        self.assertIsNotNone(exp.sd_low_reason(self.usage(8, 4)))   # 50% used but only 4 GB free
+
+    def test_skips_the_shot(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        saved = exp.EXP_ROOT, exp.sd_low_reason, exp.clear_to_start, exp.camera_busy
+        exp.EXP_ROOT = pathlib.Path(tmp.name)
+        exp.sd_low_reason = lambda usage: "SD 90% used"
+        exp.clear_to_start, exp.camera_busy = (lambda now, est: True), (lambda: False)
+        try:
+            run = exp.Run("t")
+            run.camera_lock = FakeLock()
+            run.take(exp.Shot("x"), max_wait_s=0)
+        finally:
+            exp.EXP_ROOT, exp.sd_low_reason, exp.clear_to_start, exp.camera_busy = saved
+        self.assertIn("skipped: SD low", run.manifest.read_text())
+        self.assertFalse(run.camera_lock.held)
+
+
+class FinalUpload(unittest.TestCase):
+    """#27: .experiment.lock is let go before the last copy, so the next program can start."""
+
+    def test_lock_released_before_the_final_upload(self):
+        import contextlib, tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        state = {"held": False, "held_at_upload": None}
+
+        @contextlib.contextmanager
+        def fake_lock(path):
+            state["held"] = True
+            try:
+                yield
+            finally:
+                state["held"] = False
+
+        def fake_upload(self_, wait=False):
+            state["held_at_upload"] = state["held"]
+        saved = exp.experiment_lock, exp.run_program, exp.Run.upload, exp.EXP_ROOT, exp.load_site_env
+        exp.experiment_lock, exp.Run.upload = fake_lock, fake_upload
+        exp.run_program = lambda run, args: self.assertTrue(state["held"])
+        exp.EXP_ROOT, exp.load_site_env = pathlib.Path(tmp.name), (lambda: None)
+        try:
+            exp.main(["sunset", "--run", "t", "--sunset", "1", "--until", "1"])
+        finally:
+            exp.experiment_lock, exp.run_program, exp.Run.upload, exp.EXP_ROOT, exp.load_site_env = saved
+        self.assertIs(state["held_at_upload"], False)
+
+
 if __name__ == "__main__":
     unittest.main()

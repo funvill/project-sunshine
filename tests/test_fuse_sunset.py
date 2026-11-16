@@ -193,5 +193,75 @@ class Run(unittest.TestCase):
         self.assertFalse(any(self.stamp(late) in n for n in os.listdir(self.out)))
 
 
+@unittest.skipIf(np is None, "needs numpy and OpenCV")
+class TemporalBlend(unittest.TestCase):
+    """Thin cloud crossing the glow changes the sky by 10 to 19 a minute (Nov 12, both cameras),
+    which reads as flicker. A 1:2:1 blend of each minute with the minutes either side calms it."""
+
+    stamp, add_minute, out_mean = Run.stamp, Run.add_minute, Run.out_mean
+
+    def setUp(self):
+        Run.setUp(self)
+        self.start = SUNSET - timedelta(minutes=30)
+
+    def minutes(self, values, pair=True):
+        for i, v in enumerate(values):
+            self.add_minute(self.start + timedelta(minutes=i), prod=v, pair=pair)
+
+    def at(self, i):
+        return self.start + timedelta(minutes=i)
+
+    def test_a_jump_in_one_minute_is_spread_over_its_neighbours(self):
+        self.minutes([100, 100, 100, 200, 100, 100, 100])
+        made = self.fs.blend_minutes(self.frames, self.out, self.at(0), self.at(6))
+        self.assertEqual(made, 5, "the first and last minutes have no neighbour on one side")
+        self.assertAlmostEqual(self.out_mean(self.at(3)), 150, delta=3)    # (100 + 2*200 + 100) / 4
+        self.assertAlmostEqual(self.out_mean(self.at(2)), 125, delta=3)
+        self.assertAlmostEqual(self.out_mean(self.at(1)), 100, delta=3)
+
+    def test_the_ends_of_the_window_are_left_alone(self):
+        self.minutes([100, 100, 100, 100])
+        self.fs.blend_minutes(self.frames, self.out, self.at(0), self.at(3))
+        for i in (0, 3):
+            self.assertFalse(os.path.exists(os.path.join(self.out, "cam_%s.jpg" % self.stamp(self.at(i)))))
+
+    def test_uses_the_fused_frame_where_there_is_one(self):
+        self.minutes([100, 100, 100, 100, 100])
+        os.makedirs(self.out)
+        cv2.imwrite(os.path.join(self.out, "cam_%s.jpg" % self.stamp(self.at(2))), np.full((8, 8, 3), 180, np.uint8))
+        self.fs.blend_minutes(self.frames, self.out, self.at(0), self.at(4))
+        self.assertAlmostEqual(self.out_mean(self.at(2)), 140, delta=3)     # (100 + 2*180 + 100) / 4
+        self.assertAlmostEqual(self.out_mean(self.at(1)), 120, delta=3)     # its neighbour sees the fused frame too
+
+    def test_frames_five_minutes_apart_are_not_blended(self):
+        # outside the dense window there is one frame every 5 minutes: too far apart to mix
+        for i in range(5):
+            self.add_minute(self.start + timedelta(minutes=5 * i), prod=100 + 50 * (i % 2))
+        made = self.fs.blend_minutes(self.frames, self.out, self.at(0), self.at(20))
+        self.assertEqual(made, 0)
+
+    def test_running_it_twice_does_not_blend_twice(self):
+        self.minutes([100, 100, 200, 100, 100])
+        self.fs.blend_minutes(self.frames, self.out, self.at(0), self.at(4))
+        once = self.out_mean(self.at(2))
+        self.assertEqual(self.fs.blend_minutes(self.frames, self.out, self.at(0), self.at(4)), 0)
+        self.assertAlmostEqual(self.out_mean(self.at(2)), once, delta=0.5)
+
+    def test_undo_removes_what_the_blend_wrote_so_it_can_be_redone(self):
+        self.minutes([100, 100, 200, 100, 100])
+        self.fs.blend_minutes(self.frames, self.out, self.at(0), self.at(4))
+        self.fs.undo_blend(self.out)
+        self.assertEqual([n for n in os.listdir(self.out)], [])
+        self.assertEqual(self.fs.blend_minutes(self.frames, self.out, self.at(0), self.at(4)), 3)
+
+    def test_blend_run_covers_the_bracket_and_15_minutes_either_side(self):
+        for i in range(30):
+            self.add_minute(self.start + timedelta(minutes=i), prod=100 + 20 * (i % 2), pair=(10 <= i < 15))
+        made = self.fs.blend_run(self.run_dir, self.frames, self.out)
+        self.assertEqual(made, 28, "minutes 1 to 28: the bracket (10 to 14) is well inside 15 minutes")
+        with open(os.path.join(self.out, self.fs.BLEND_MARK)) as f:
+            self.assertEqual(len(json.load(f)["blended"]), 28)
+
+
 if __name__ == "__main__":
     unittest.main()

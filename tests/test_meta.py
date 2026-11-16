@@ -400,12 +400,211 @@ class Annotate(CaptureBlock):
         with self.assertRaises(SystemExit):
             self.run_main("--schedule", "burst")
 
-    def test_bad_json_is_an_error_and_the_file_is_untouched(self):
+    def load(self):
+        with open(self.json_path) as f:
+            return json.load(f)
+
+    def test_bad_json_starts_again_from_nothing_and_says_so(self):
+        # #27: Capture and System don't need rpicam's metadata, so the frame still gets them.
         with open(self.json_path, "w") as f:
             f.write("{not json")
-        self.assertNotEqual(self.run_main(), 0)
-        with open(self.json_path) as f:
-            self.assertEqual(f.read(), "{not json")
+        self.assertEqual(self.run_main(), 0)
+        data = self.load()
+        self.assertEqual(data["rpicam_metadata"], "invalid")
+        self.assertEqual(data["Capture"]["kind"], "auto")
+        self.assertIn("System", data)
+
+    def test_missing_metadata_file_still_gets_a_json(self):
+        os.remove(self.json_path)
+        self.assertEqual(self.run_main(), 0)
+        data = self.load()
+        self.assertEqual(data["rpicam_metadata"], "missing")
+        self.assertIn("sha256", data["Capture"]["files"]["jpg"])
+        self.assertNotIn("frame_wall_clock_utc", data["Capture"])
+
+    def test_a_flag_from_the_sun_step_is_kept(self):
+        with open(self.json_path, "w") as f:
+            json.dump({"rpicam_metadata": "invalid", "Sun": {"azimuth_deg": 1.0}}, f)
+        self.run_main()
+        self.assertEqual(self.load()["rpicam_metadata"], "invalid")
+
+    def test_good_metadata_is_not_flagged(self):
+        self.run_main()
+        self.assertNotIn("rpicam_metadata", self.load())
+
+    def test_unknown_kind_is_still_an_argument_error(self):
+        with self.assertRaises(SystemExit) as e:
+            meta.main(["annotate", self.json_path, "--kind", "banana", "--camera", "wide",
+                       "--slot", "20261104T190000Z", "--started", "1", "--finished", "2", "--outbox", self.outbox])
+        self.assertEqual(e.exception.code, 2)
+
+    def test_capture_is_on_disk_before_the_system_probes_run(self):
+        # The capture kills this script after 30 s. Capture, with the checksums, must survive that.
+        real = meta.system_block
+
+        def killed(*args, **kw):
+            raise SystemExit("killed by timeout")
+        meta.system_block = killed
+        try:
+            with self.assertRaises(SystemExit):
+                self.run_main()
+        finally:
+            meta.system_block = real
+        data = self.load()
+        self.assertEqual(data["Capture"]["files"]["dng"]["sha256"], hashlib.sha256(b"dngdata").hexdigest())
+        self.assertNotIn("System", data)
+        self.assertEqual(sorted(os.listdir(self.d)), ["f.dng", "f.jpg", "f.json"])
+
+    def test_deadline_option(self):
+        self.assertEqual(self.run_main("--deadline", "0"), 0)
+        data = self.load()
+        self.assertIn("Capture", data)
+        self.assertTrue(data["System"]["cut_short"])
+        self.assertIn("cpu_temp_c", data["System"]["unavailable"])
+
+
+class FakeClock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+class Deadline(Tree):
+    """#27: seven probes at up to 5 s each, inside the capture's 30 s kill. Stop in time instead."""
+
+    def test_probes_after_the_deadline_are_skipped_and_named(self):
+        clock = FakeClock()
+        deadline = meta.Deadline(15, clock)
+        calls = []
+
+        def slow_run(cmd):
+            calls.append(cmd)
+            clock.t += 6                     # each command takes 6 s on a struggling Pi
+            return fake_run(cmd)
+        s = meta.system_block(self.root, self.outbox, "/mnt/nas", self.sync_log, slow_run, deadline=deadline)
+        self.assertLessEqual(len(calls), 3)
+        self.assertTrue(s["cut_short"])
+        self.assertIn("clock", s["unavailable"])
+        self.assertIsNone(s["clock"])
+        self.assertEqual(s["cpu_temp_c"], 52.6)          # what ran before the deadline is kept
+
+    def test_no_flag_when_everything_ran(self):
+        s = meta.system_block(self.root, self.outbox, "/mnt/nas", self.sync_log, fake_run,
+                              deadline=meta.Deadline(15))
+        self.assertNotIn("cut_short", s)
+        self.assertEqual(s["unavailable"], [])
+
+    def test_expired_deadline_skips_checksums_but_keeps_sizes(self):
+        d = os.path.join(self.root, "stage")
+        write(d, "f.jpg", "jpegdata")
+        block = meta.capture_block(os.path.join(d, "f.json"), {}, kind="auto", camera="wide",
+                                   slot="20261104T190000Z", started=1, finished=2, setup_id=None,
+                                   system_id=None, settings=[], decision_lux=None, checksums=True,
+                                   deadline=meta.Deadline(0))
+        self.assertEqual(block["files"]["jpg"], {"bytes": 8})
+        self.assertEqual(block["unavailable"], ["sha256"])
+
+    def test_commands_are_given_no_more_than_the_time_left(self):
+        clock = FakeClock()
+        deadline = meta.Deadline(3, clock)
+        self.assertEqual(deadline.timeout(5), 3)
+        clock.t += 10
+        self.assertEqual(deadline.timeout(5), 0)
+        self.assertTrue(deadline.expired())
+
+
+class EmmcWear(Tree):
+    """#22: the CM4's eMMC reports its own wear; an SD card does not have these files."""
+
+    def test_emmc_wear_is_recorded_when_present(self):
+        write(self.root, "sys/block/mmcblk0/device/life_time", "0x01 0x02\n")
+        write(self.root, "sys/block/mmcblk0/device/pre_eol_info", "0x01\n")
+        sd = meta.daily_fields(self.root, self.outbox, fake_run, None, None, None)[0]["sd_card"]
+        self.assertEqual(sd["life_time"], "0x01 0x02")
+        self.assertEqual(sd["pre_eol_info"], "0x01")
+        self.assertEqual(sd["name"], "SH32G")
+
+    def test_sd_card_without_them_has_no_such_keys(self):
+        sd = meta.daily_fields(self.root, self.outbox, fake_run, None, None, None)[0]["sd_card"]
+        self.assertNotIn("life_time", sd)
+        self.assertNotIn("pre_eol_info", sd)
+
+    def test_a_change_in_wear_starts_a_new_daily_record(self):
+        write(self.root, "sys/block/mmcblk0/device/life_time", "0x01 0x01\n")
+        first = meta.update_daily(self.outbox, "wide", "20261104T190000Z",
+                                  *meta.daily_fields(self.root, self.outbox, fake_run, None, None, None))
+        write(self.root, "sys/block/mmcblk0/device/life_time", "0x02 0x01\n")
+        second = meta.update_daily(self.outbox, "wide", "20261104T191500Z",
+                                   *meta.daily_fields(self.root, self.outbox, fake_run, None, None, None))
+        self.assertNotEqual(first, second)
+
+
+class DailyCache(CaptureBlock):
+    """#27: `rpicam-still --version` and `vcgencmd version` ran on every frame (about 500 a day)
+    while the capture held the camera lock. Once per UTC day and boot is enough."""
+
+    SLOW = (("rpicam-still", "--version"), ("vcgencmd", "version"))
+
+    def setUp(self):
+        super().setUp()
+        write(self.root, "proc/sys/kernel/random/boot_id", "boot-1\n")
+        self.calls = []
+        real = meta.run_command
+
+        def counting(cmd, timeout=None):
+            self.calls.append(tuple(cmd))
+            return fake_run(cmd)
+        meta.run_command = counting
+        self.addCleanup(setattr, meta, "run_command", real)
+
+    def annotate(self, slot="20261104T190000Z"):
+        self.assertEqual(meta.main(["annotate", self.json_path, "--kind", "auto", "--camera", "wide",
+                                    "--slot", slot, "--started", "1793818800", "--finished", "1793818805",
+                                    "--outbox", self.outbox, "--root", self.root]), 0)
+
+    def slow_calls(self):
+        return [c for c in self.calls if c in self.SLOW]
+
+    def daily(self):
+        with open(os.path.join(self.outbox, "wide/2026/11/04/system.json")) as f:
+            return json.load(f)["records"]
+
+    def test_versions_are_probed_once_a_day(self):
+        self.annotate()
+        self.annotate("20261104T190500Z")
+        self.annotate("20261104T191000Z")
+        self.assertEqual(sorted(self.slow_calls()), sorted(self.SLOW))
+        self.assertEqual(len(self.daily()), 1)
+        self.assertEqual(self.daily()[0]["firmware"], "a8698392")
+        self.assertIn("v1.9.0", self.daily()[0]["rpicam_apps"])
+
+    def test_probed_again_on_a_new_utc_day(self):
+        self.annotate()
+        self.annotate("20261105T000000Z")
+        self.assertEqual(len(self.slow_calls()), 4)
+
+    def test_probed_again_after_a_reboot(self):
+        self.annotate()
+        write(self.root, "proc/sys/kernel/random/boot_id", "boot-2\n")
+        self.annotate("20261104T190500Z")
+        self.assertEqual(len(self.slow_calls()), 4)
+
+    def test_a_failed_probe_is_not_cached(self):
+        meta.run_command = lambda cmd, timeout=None: self.calls.append(tuple(cmd))
+        self.annotate()
+        meta.run_command = lambda cmd, timeout=None: (self.calls.append(tuple(cmd)), fake_run(cmd))[1]
+        self.annotate("20261104T190500Z")
+        self.assertEqual(len(self.slow_calls()), 4)
+        self.assertEqual(self.daily()[-1]["firmware"], "a8698392")
+
+    def test_cache_file_stays_out_of_the_outbox(self):
+        self.annotate()
+        names = [n for n in os.listdir(os.path.dirname(self.outbox)) if "cache" in n]
+        self.assertEqual(names, [".meta-cache.json"])
+        for folder, _, files in os.walk(self.outbox):
+            self.assertFalse([f for f in files if "cache" in f], folder)
 
 
 if __name__ == "__main__":

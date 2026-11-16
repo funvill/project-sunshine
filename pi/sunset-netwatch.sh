@@ -6,6 +6,8 @@
 #   - down 10 min: unbinds and rebinds the interface's USB device, once per outage (a software replug)
 #   - down 30 min: reboots, at most once every 6 hours, so a router outage can't cause a reboot loop.
 #     A reboot costs about one capture and clears transient experiment timers (exp-*).
+#     With a trusted clock it first leaves the time in CLOCK_TRUST_FILE on the SD card, so
+#     sunset-capture.sh keeps capturing after the reboot although NTP still can't answer.
 # State lives in /run (RAM). It writes to the SD card only when it acts.
 set -u
 [[ "${NETWATCH:-0}" == 1 ]] || exit 0
@@ -20,8 +22,16 @@ REBOOT_MIN="${NETWATCH_REBOOT_MIN:-30}"
 REBOOT_GAP_H="${NETWATCH_REBOOT_GAP_H:-6}"
 SETTLE_S="${NETWATCH_SETTLE_S:-3}"
 UPTIME="${NETWATCH_UPTIME:-$(cut -d. -f1 /proc/uptime)}"   # monotonic, unlike the clock
+CLOCK_OK_FILE="${CLOCK_OK_FILE:-/dev/shm/sunset-clock-ok}"  # sunset-capture.sh's "synced this boot" flag
+CLOCK_TRUST_FILE="$(dirname "$LOG")/.clock-trusted"           # read once by sunset-capture.sh after the reboot
+LOG_MAX_BYTES="${NETWATCH_LOG_MAX_BYTES:-1048576}"         # then netwatch.log moves to netwatch.log.1
 
-log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"; }
+log() {
+  if [[ -f "$LOG" ]] && (( $(wc -c < "$LOG" 2>/dev/null || echo 0) >= LOG_MAX_BYTES )); then
+    mv -f "$LOG" "$LOG.1"
+  fi
+  printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG"
+}
 
 online() {
   local gw="${NETWATCH_TARGET:-$(ip route show default 2>/dev/null | awk '{print $3; exit}')}"
@@ -63,6 +73,13 @@ if (( down >= REBOOT_MIN )); then
   fi
   log "rebooting: no network for $down min"
   touch "$MARK"
+  # NTP won't answer after the reboot either, so capture would wait for the network. Leave the
+  # time for it, but only if the clock is trusted now (sunset-capture.sh reads it once, then deletes it).
+  if [[ -e "$CLOCK_OK_FILE" || "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" == yes ]]; then
+    now="$(date +%s)"
+    echo "$now" > "$CLOCK_TRUST_FILE"
+    log "clock trusted at $now: kept for the capture after the reboot"
+  fi
   sync
   systemctl reboot
 fi

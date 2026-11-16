@@ -14,7 +14,13 @@ from collections import deque, namedtuple
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-Config = namedtuple("Config", "out_root capture_log sync_log nas_target sun_script mountinfo")
+try:
+    import fcntl
+except ImportError:  # Windows test runs: no locking, everything else works
+    fcntl = None
+
+Config = namedtuple("Config", "out_root capture_log sync_log nas_target sun_script mountinfo lock_file",
+                    defaults=(None,))
 
 # Estimates, to tune from pilot data.
 SLOT_S = 300                   # regular capture spacing; must match pi/systemd/sunset-capture.timer
@@ -307,7 +313,7 @@ def stream_command(view, width, height):
     return cmd + ["--mode", "2028:1520", "--width", str(width), "--height", str(height)]
 
 
-def parse_next_capture(text, now):
+def parse_next_capture(text, now, every_s=SLOT_S):
     """Next capture from `systemctl list-timers --output=json`. If the timer has none, assume the
     5-minute schedule, so the camera is still released for a capture started some other way."""
     try:
@@ -316,7 +322,47 @@ def parse_next_capture(text, now):
             return value
     except (TypeError, ValueError, LookupError):
         pass
-    return (int(now) // SLOT_S + 1) * SLOT_S
+    return (int(now) // every_s + 1) * every_s
+
+
+class CaptureLock:
+    """Production's camera lock (sunset-capture.sh flocks the same file), held while rpicam-vid has
+    the camera. Never waits: a regular capture waits up to 90 s for it, a dense frame skips."""
+
+    def __init__(self, path):
+        self.path = path
+        self._fd = None
+
+    def acquire(self):
+        """True if the stream may use the camera now."""
+        if fcntl is None or not self.path:
+            return True
+        if self._fd is not None:
+            return True
+        try:
+            fd = os.open(self.path, os.O_RDONLY)   # flock works on a read-only descriptor
+        except FileNotFoundError:
+            try:
+                fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o664)
+            except OSError:
+                return True
+        except OSError:
+            return True       # unreadable lock file: stream as before rather than not at all
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            return False
+        self._fd = fd
+        return True
+
+    def release(self):
+        fd, self._fd = self._fd, None
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
 
 
 class HandoverPolicy:
@@ -341,8 +387,11 @@ class HandoverPolicy:
 class Camera:
     """Owns the rpicam-vid process and keeps only the newest frame, in memory."""
 
-    def __init__(self, build_command, retry_s=5, kill_after_s=10):
+    def __init__(self, build_command, retry_s=5, kill_after_s=10, lock=None):
         self._build = build_command
+        self._lock = lock
+        self._locked_out = False
+        self._pause_reason = None
         self._retry_s = retry_s
         self._kill_after = kill_after_s
         self._proc = None
@@ -381,23 +430,35 @@ class Camera:
 
     def state(self):
         if self._paused:
-            return "paused for capture"
+            return self._pause_reason or "paused for capture"
+        if self._locked_out:
+            return "waiting: a capture has the camera"
         if self.running():
             return "streaming" if self._got_frame else "starting"
         return "camera error" if self._proc is not None else "idle"
 
-    def tick(self, now, wanted, paused):
+    def tick(self, now, wanted, paused, reason=None):
         self._paused = paused
+        self._pause_reason = reason
         if paused or not wanted:
+            self._locked_out = False
             self.stop()
             return
         if self.running():
             if self._proc_view == self._view:
                 return
             self.stop()
+        self._release()               # rpicam-vid has exited by itself, or was just stopped
         if self._proc is not None and now < self._started_at + self._retry_s:
             return                    # crashed; wait a little before trying again
+        self._locked_out = self._lock is not None and not self._lock.acquire()
+        if self._locked_out:
+            return                    # a capture has the camera; try again next step
         self._start(now)
+
+    def _release(self):
+        if self._lock is not None:
+            self._lock.release()
 
     def _start(self, now):
         self._started_at = now
@@ -434,16 +495,19 @@ class Camera:
                 self._stderr.append(line.decode("utf-8", "replace").strip())
 
     def stop(self):
-        """Returns only once the camera is free."""
+        """Returns only once the camera is free, and the capture lock with it."""
         proc, self._proc = self._proc, None
-        if proc is None or proc.poll() is not None:
-            return
-        proc.terminate()
         try:
-            proc.wait(timeout=self._kill_after)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+            if proc is None or proc.poll() is not None:
+                return
+            proc.terminate()
+            try:
+                proc.wait(timeout=self._kill_after)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+        finally:
+            self._release()
 
 
 class _NeverStarted:
@@ -456,6 +520,9 @@ class _NeverStarted:
 CAPTURE_BUSY = ("active", "activating", "deactivating", "reloading")
 VIEWER_GRACE_S = 5             # so reloading the page does not restart the camera
 SECONDS_BETWEEN_STEPS = 2      # well inside the 20-second margin
+DENSE_CHECK_S = 30             # how often to ask whether a dense window is open (a Python start)
+PAUSE_REGULAR = "paused for capture"
+PAUSE_DENSE = "paused for the 1-a-minute frame"
 
 
 class Service:
@@ -468,6 +535,8 @@ class Service:
         self._viewers = 0
         self._last_left = None
         self._lock = threading.Lock()
+        self._dense = None            # "sunrise" / "sunset" while sunset-dense takes a frame a minute
+        self._dense_checked = None
 
     def viewers(self):
         return self._viewers
@@ -481,21 +550,47 @@ class Service:
             self._viewers -= 1
             self._last_left = now
 
+    def _is_active(self, unit):
+        return (self.run(["systemctl", "is-active", unit]) or "").strip()
+
+    def dense_window(self, now):
+        """"sunrise" or "sunset" while sunset-dense.timer is on and its window is open, else None.
+        Asked every DENSE_CHECK_S; `sunset-sun.py dense` prints the window, or "none"."""
+        if self._dense_checked is None or not 0 <= now - self._dense_checked < DENSE_CHECK_S:
+            self._dense_checked = now
+            self._dense = None
+            if self._is_active("sunset-dense.timer") == "active":
+                out = _stripped(self.run([sys.executable or "python3", self.cfg.sun_script, "dense"]))
+                self._dense = out if out in ("sunrise", "sunset") else None
+        return self._dense
+
     def step(self, now):
         """One pass of the control loop. Returns False when it is time to shut down."""
         if now >= self.deadline:
             return False
         next_capture = parse_next_capture(self.run(["systemctl", "list-timers", "sunset-capture.timer", "--all",
                                                     "--no-legend", "--output=json"]), now)
-        busy = (self.run(["systemctl", "is-active", "sunset-capture.service"]) or "").strip() in CAPTURE_BUSY
+        regular_busy = self._is_active("sunset-capture.service") in CAPTURE_BUSY
+        dense_busy = self._is_active("sunset-dense.service") in CAPTURE_BUSY
+        reason = PAUSE_REGULAR
+        if self.dense_window(now):
+            # Every minute in the window: yield before it, like before a regular slot.
+            next_dense = parse_next_capture(self.run(["systemctl", "list-timers", "sunset-dense.timer", "--all",
+                                                      "--no-legend", "--output=json"]), now, 60)
+            if next_dense < next_capture:
+                next_capture, reason = next_dense, PAUSE_DENSE
+        if dense_busy and not regular_busy:
+            reason = PAUSE_DENSE
         recent = self._last_left is not None and now - self._last_left < VIEWER_GRACE_S
-        self.camera.tick(now, wanted=self._viewers > 0 or recent, paused=self.policy.should_pause(now, next_capture, busy))
+        paused = self.policy.should_pause(now, next_capture, regular_busy or dense_busy)
+        self.camera.tick(now, wanted=self._viewers > 0 or recent, paused=paused, reason=reason)
         return True
 
     def camera_status(self, now):
         """Cheap enough for the page to ask often: runs no commands."""
         return {"seconds_left": int(self.deadline - now), "camera": self.camera.state(),
-                "camera_error": self.camera.error(), "view": self.camera.view(), "viewers": self._viewers}
+                "camera_error": self.camera.error(), "view": self.camera.view(), "viewers": self._viewers,
+                "dense_window": self._dense}
 
     def status(self, now):
         status = collect_status(self.cfg, self.run, now)
@@ -607,13 +702,15 @@ def write_url_file(path, url):
 
 def config_from_env():
     out_root = os.environ.get("OUT_ROOT") or os.path.expanduser("~/sunset/outbox")
-    base = os.path.dirname(out_root)
+    base = os.path.dirname(out_root.rstrip("/"))
     return Config(out_root=out_root,
                   capture_log=os.environ.get("LOG_FILE") or os.path.join(base, "capture.log"),
                   sync_log=os.environ.get("SYNC_LOG_FILE") or os.path.join(base, "sync.log"),
                   nas_target=os.environ.get("NAS_TARGET", ""),
                   sun_script=os.path.join(os.path.dirname(os.path.abspath(__file__)), "sunset-sun.py"),
-                  mountinfo="/proc/self/mountinfo")
+                  mountinfo="/proc/self/mountinfo",
+                  # The same file sunset-capture.sh locks: $LOCK_FILE or beside the outbox.
+                  lock_file=os.environ.get("LOCK_FILE") or os.path.join(base, ".sunset-capture.lock"))
 
 
 def main():
@@ -623,8 +720,9 @@ def main():
     height = int(os.environ.get("DIAG_HEIGHT", "960"))
     url_file = os.environ.get("DIAG_URL_FILE", "/run/sunset-diag/url")
 
-    camera = Camera(lambda view: stream_command(view, width, height))
-    service = Service(config_from_env(), camera, time.time() + max_s)
+    cfg = config_from_env()
+    camera = Camera(lambda view: stream_command(view, width, height), lock=CaptureLock(cfg.lock_file))
+    service = Service(cfg, camera, time.time() + max_s)
     server = make_server(service, "0.0.0.0", port)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
@@ -661,6 +759,12 @@ h2 { font-size: 14px; margin: 0 0 8px; }
 .view img { width: 100%; height: auto; display: block; }
 .view.pick img { cursor: crosshair; }
 #peak { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; image-rendering: pixelated; }
+#guide { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+#guide .under { stroke: rgba(0,0,0,.75); stroke-width: 3.5px; }
+#guide .over { stroke: #00e6ff; stroke-width: 1.5px; }
+#guide .under, #guide .over { opacity: .5; }
+#guide text { fill: #00e6ff; font: 12px system-ui, sans-serif; paint-order: stroke; stroke: rgba(0,0,0,.8); stroke-width: 3px; }
+#guide[hidden], #guide.cross .ruler { display: none; }
 select { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); }
 #trend { width: 100%; max-width: 420px; height: 64px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 #state { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,.7); color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 13px; line-height: 1.5; }
@@ -681,12 +785,17 @@ pre { margin: 8px 0 0; font-size: 12px; line-height: 1.4; white-space: pre-wrap;
 <main>
 <header><h1>Sunset diagnostics</h1><span id="left"></span></header>
 <ul id="warnings"></ul>
-<div class="view" id="view"><img id="cam" alt="Live camera view"><canvas id="peak"></canvas><span id="state">connecting</span></div>
+<div class="view" id="view"><img id="cam" alt="Live camera view"><canvas id="peak"></canvas><svg id="guide" hidden aria-hidden="true">
+<g class="under"><line x1="50%" y1="0" x2="50%" y2="100%"/><line x1="0" y1="50%" x2="100%" y2="50%"/></g>
+<g class="over"><line x1="50%" y1="0" x2="50%" y2="100%"/><line x1="0" y1="50%" x2="100%" y2="50%"/></g>
+<g class="ruler" id="ruler"></g></svg><span id="state">connecting</span></div>
 <div class="controls">
   <button id="full" type="button">Full frame</button>
   <button id="focus" type="button">Focus (centre, real pixels)</button>
+  <button id="centre" type="button" aria-pressed="false">Centre lines</button>
   <span class="muted" id="pickHint">In full frame, click the image to focus there instead.</span>
 </div>
+<p class="muted" id="denseNote" hidden></p>
 <div class="controls">
   <button id="peaking" type="button" aria-pressed="false">Focus peaking</button>
   <label>Sensitivity <select id="peakLevel">
@@ -739,13 +848,55 @@ function showCamera(d) {
   var mins = Math.max(0, Math.ceil(d.seconds_left / 60));
   $("left").textContent = "Stops by itself in " + mins + " min";
   $("state").textContent = d.camera_error ? d.camera + ": " + d.camera_error : d.camera;
+  $("denseNote").hidden = !d.dense_window;
+  $("denseNote").textContent = d.dense_window ? "In the " + d.dense_window + " window the Pi takes a frame every "
+    + "minute, so the view pauses for about 25 seconds before each minute and comes back after it." : "";
   view = d.view;
   $("full").setAttribute("aria-pressed", d.view === "full");
   $("focus").setAttribute("aria-pressed", d.view.indexOf("focus") === 0);
   $("view").classList.toggle("pick", d.view === "full");
   $("pickHint").textContent = d.view === "full" ? "Click the image to focus there instead."
     : (d.view === "focus" ? "Showing the centre." : "Showing the spot you picked.");
+  showGuide();
 }
+
+// Centre lines over the live view, for lining the cameras up. The full view is the whole sensor,
+// so its middle is the frame's middle; the ruler marks every 5% across and down from the left and
+// top edge. The centre focus view keeps the cross only; a picked spot is off-centre, so nothing.
+var guideOn = false;
+(function () {
+  var ns = "http://www.w3.org/2000/svg", r = $("ruler");
+  function add(tag, attrs, text) {
+    var e = document.createElementNS(ns, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text) e.textContent = text;
+    r.appendChild(e);
+  }
+  for (var p = 5; p < 100; p += 5) {
+    if (p === 50) continue;
+    // Tick length as a share of the frame (4:3), since SVG line ends can't mix % and px.
+    var v = p % 10 ? 0.8 : 1.6, h = v * 0.75;
+    ["under", "over"].forEach(function (c) {
+      add("line", { "class": c, x1: p + "%", x2: p + "%", y1: (50 - v) + "%", y2: (50 + v) + "%" });
+      add("line", { "class": c, y1: p + "%", y2: p + "%", x1: (50 - h) + "%", x2: (50 + h) + "%" });
+    });
+    if (p % 10 === 0) {
+      add("text", { x: p + "%", y: "50%", dx: "-8", dy: "-16" }, p);
+      add("text", { x: "50%", y: p + "%", dx: "16", dy: "4" }, p);
+    }
+  }
+})();
+function showGuide() {
+  var g = $("guide");
+  // SVG elements have no .hidden property, so set the attribute itself.
+  g.toggleAttribute("hidden", !guideOn || view.indexOf("focus@") === 0);
+  g.classList.toggle("cross", view !== "full");
+}
+$("centre").onclick = function () {
+  guideOn = !guideOn;
+  this.setAttribute("aria-pressed", guideOn);
+  showGuide();
+};
 
 function show(s) {
   var c = s.capture, b = s.outbox, y = s.system, f = b.newest_frame || {};

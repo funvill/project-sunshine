@@ -8,7 +8,7 @@ It reads frames from the NAS share, writes to --out, and posts nothing. The crop
 calibration and the tower blur come from a crop.json: --crop, else <out>/crop.json. The
 checked-in one for the CM4 camera is nas/crop.cm4wide.json (calibration, tower blur and the tighter
 view). --fuse-run merges the sunset bracket first (tools/fuse_sunset.py) so the sunset isn't blown
-out. Settings are in nas/README.md.
+out, and blends each sunset minute with its neighbours (--no-blend to skip). Settings are in nas/README.md.
 Needs ffmpeg and a font (--font; the NAS image has its own).
 """
 import argparse
@@ -42,6 +42,7 @@ def main():
     ap.add_argument("--font", help="bold TTF for the text")
     ap.add_argument("--fuse-run", help="experiment run with the sunset bracket, e.g. cm4-sunset-1: merge it first")
     ap.add_argument("--fused", help="a folder of already-fused frames (what --fuse-run makes in <out>/fused)")
+    ap.add_argument("--no-blend", action="store_true", help="with --fuse-run: skip the 1:2:1 blend of each sunset minute with its neighbours")
     ap.add_argument("--redo", action="store_true", help="delete that day's record first, so it is built again")
     args = ap.parse_args()
 
@@ -61,6 +62,8 @@ def main():
         run_dir = Path(args.nas).parent / "project_sunshine_experiments" / args.fuse_run
         args.fused = str(out / "fused")
         print("fused %d frames" % fuse.fuse_run(str(run_dir), cfg.frames_dir, args.fused))
+        if not args.no_blend:
+            print("blended %d frames with their neighbours" % fuse.blend_run(str(run_dir), cfg.frames_dir, args.fused))
     cfg.fused_dir = args.fused
     if args.redo:
         for suffix in (".json", ".mp4", ".txt", "_check.jpg"):

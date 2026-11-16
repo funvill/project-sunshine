@@ -6,8 +6,14 @@ docs/hardware/*.webp
 __pycache__/
 *.pyc
 
-# Site config on the Pi: holds the real coordinates and NAS target
-sunset.env
+# Site config on the Pi: holds the real coordinates and NAS target. Also its backups
+# (sunset.env.bak-*). The example and the per-host reference copies in pi/hosts/ are tracked.
+sunset.env*
+!sunset.env.example
+!pi/hosts/*.env
+
+# NAS login files (never in the repo)
+*.cred
 
 # Local working notes, not part of the project
 windowtracking/
