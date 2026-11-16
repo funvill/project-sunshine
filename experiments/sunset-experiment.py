@@ -16,6 +16,13 @@ dense frame skips with "camera busy". A shot is killed SHOT_TIMEOUT_MARGIN_S aft
     sunset-experiment.py night-sweep --run sweep-1 --until <epoch>
     sunset-experiment.py moon --run moon-1 --until <epoch>
     sunset-experiment.py sunset --run sunset-1 --sunset <epoch> --until <epoch>
+
+Before the mount is glued (#12), each needs someone at the camera:
+    sunset-experiment.py dark --run calib-dark-1 [--count 5]      lens capped, room dark: 4 s and 8 s
+                                                                   at gain 1, and bias frames, with DNG
+    sunset-experiment.py flat --run calib-flat-1 [--count 9]      even white diffuser over the lens, daylight
+    sunset-experiment.py checker --run calib-checker-1 [--count 30] [--every 4]
+                                                                   move a printed checkerboard through the view
 """
 import argparse
 import contextlib
@@ -285,6 +292,33 @@ def day_sweep_shots():
              Shot("sweep-awb-cloudy", extra=("--awb", "cloudy")),
              Shot("sweep-denoise-off", denoise="off"), Shot("sweep-denoise-cdn_hq", denoise="cdn_hq")]
     return shots + tuning_shots(prefix="sweep-")
+
+
+CALIB_DARK_MS = (4000, 8000)   # the night exposures in use (timelaps 4 s, the CM4 8 s)
+CALIB_BIAS_US = 100             # about the shortest shutter: the sensor's offset and read noise only
+CHECKER_EVERY_S = 4
+
+
+def dark_shots(count=5):
+    """Lens capped, room dark (#12): the sensor's own dark level and hot pixels at the night
+    exposures, plus bias frames, as a baseline to tell sensor ageing from scene change."""
+    shots = []
+    for ms in CALIB_DARK_MS:
+        shots += [Shot(f"dark-{ms}ms-{i}", shutter_us=ms * 1000, gain=1, raw=True, awbgains=NIGHT_AWB)
+                  for i in range(count)]
+    shots += [Shot(f"bias-{i}", shutter_us=CALIB_BIAS_US, gain=1, raw=True, awbgains=NIGHT_AWB)
+              for i in range(count)]
+    return shots
+
+
+def flat_shots(count=9):
+    """An even white diffuser over the lens, in daylight (#12): vignetting and dust."""
+    return [Shot(f"flat-{i}", raw=True, settle_ms=2000) for i in range(count)]
+
+
+def checker_shots(count=30):
+    """A printed checkerboard moved through the view (#12): the lens's distortion."""
+    return [Shot(f"checker-{i:02d}") for i in range(count)]
 
 
 def settle_shots():
@@ -663,20 +697,34 @@ def run_program(run, args):
         run_moon(run, args.until)
     elif args.program == "sunset":
         run_sunset(run, args.sunset, args.until)
+    elif args.program in ("dark", "flat", "checker"):
+        make = {"dark": dark_shots, "flat": flat_shots, "checker": checker_shots}[args.program]
+        shots = make(args.count) if args.count else make()
+        for i, shot in enumerate(shots):
+            if args.program == "checker" and i:
+                time.sleep(args.every)          # time to move the board
+            run.take(shot, max_wait_s=900)
     else:
         for shot in night_shots() if args.program == "night" else settle_shots():
             run.take(shot, max_wait_s=900)
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("program", choices=["night", "settle", "day", "rate-night", "night-sweep", "moon", "sunset"])
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("program", choices=["night", "settle", "day", "rate-night", "night-sweep", "moon", "sunset",
+                                            "dark", "flat", "checker"])
     parser.add_argument("--run", required=True)
     parser.add_argument("--sunset", type=int)
     parser.add_argument("--sunrise", type=int)
     parser.add_argument("--until", type=int)
     parser.add_argument("--settle-at", type=int)
-    args = parser.parse_args(argv)
+    parser.add_argument("--count", type=int, help="dark, flat, checker: frames (dark: of each kind)")
+    parser.add_argument("--every", type=float, default=CHECKER_EVERY_S, help="checker: seconds between frames")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
 
     load_site_env()
     with experiment_lock(LOCK_FILE):

@@ -32,6 +32,15 @@ check "marked dense in Capture" python3 -c "import json,sys;assert json.load(ope
 check "has the Sun block" grep -q '"azimuth_deg"' "$json"
 check "logged as dense" grep -q ' dense window=sunset .* ok$' "$LOG_FILE"
 
+section "dense: a regular slot minute is left to the 5-minute frame"
+# The date stub pins the UTC minute (default 07), so these tests no longer fail at minute :00.
+dense_env; export STUB_UTC_MINUTE=00 STUB_LUX=1
+dense; rc=$?
+check "exits 0" test "$rc" = 0
+check "no frame at minute 00" test -z "$(frames)"
+check "camera not touched at minute 00" test ! -s "$STUB_CALLS"
+unset STUB_UTC_MINUTE
+
 section "dense: outside the windows"
 dense_env; export STUB_DENSE=none
 dense; rc=$?

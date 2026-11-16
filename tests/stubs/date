@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Test stub for date: "date -u +%M" (the capture script's slot-minute check in dense mode) answers
+# STUB_UTC_MINUTE, default 07, so the dense tests don't fail when they happen to run at minute :00
+# (0 is a multiple of any SLOT_EVERY_MIN). Everything else goes to the real date.
+if [[ "$*" == "-u +%M" ]]; then
+  echo "${STUB_UTC_MINUTE:-07}"
+  exit 0
+fi
+for real in /usr/bin/date /bin/date; do
+  [[ -x "$real" ]] && exec "$real" "$@"
+done
+echo "date stub: no real date found" >&2
+exit 127

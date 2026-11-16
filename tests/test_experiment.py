@@ -241,6 +241,64 @@ class DuskLadder(unittest.TestCase):
         self.assertLess(total, 180)
 
 
+class Calibration(unittest.TestCase):
+    """Shots to take before the mount is glued (#12): dark, flat field, checkerboard."""
+
+    def test_dark_frames_at_four_and_eight_seconds_with_bias(self):
+        shots = exp.dark_shots()
+        by = lambda p: [s for s in shots if s.label.startswith(p)]
+        self.assertEqual(len(by("dark-4000ms-")), 5)
+        self.assertEqual(len(by("dark-8000ms-")), 5)
+        self.assertEqual(len(by("bias-")), 5)
+        self.assertTrue(all(s.shutter_us == 4_000_000 for s in by("dark-4000ms-")))
+        self.assertTrue(all(s.shutter_us == 100 for s in by("bias-")))
+        self.assertTrue(all(s.raw and s.gain == 1 and s.awbgains for s in shots))
+        self.assertEqual(len({s.label for s in shots}), len(shots))
+
+    def test_dark_frame_count_can_change(self):
+        self.assertEqual(len(exp.dark_shots(count=2)), 6)
+
+    def test_flat_field_is_auto_exposed_with_raw(self):
+        shots = exp.flat_shots()
+        self.assertEqual(len(shots), 9)
+        self.assertTrue(all(s.raw and s.shutter_us is None and s.gain is None for s in shots))
+        self.assertEqual(len({s.label for s in shots}), 9)
+
+    def test_checkerboard_is_jpeg_only(self):
+        shots = exp.checker_shots()
+        self.assertEqual(len(shots), 30)
+        self.assertTrue(all(not s.raw for s in shots))
+        self.assertEqual(len({s.label for s in shots}), 30)
+
+    def test_programs_take_every_shot_and_space_the_checkerboard(self):
+        class FakeRun:
+            def __init__(self):
+                self.taken = []
+
+            def take(self, shot, max_wait_s):
+                self.taken.append((shot.label, max_wait_s))
+
+        slept = []
+        saved = exp.time.sleep
+        exp.time.sleep = slept.append
+        try:
+            for program, n in (("dark", 15), ("flat", 9), ("checker", 30)):
+                run = FakeRun()
+                args = exp.argparse.Namespace(program=program, count=None, every=4)
+                exp.run_program(run, args)
+                self.assertEqual(len(run.taken), n, program)
+                self.assertTrue(all(w >= 300 for _, w in run.taken))
+        finally:
+            exp.time.sleep = saved
+        self.assertEqual(slept.count(4), 29)      # between the 30 checkerboard frames only
+
+    def test_the_command_line_knows_the_programs(self):
+        for program in ("dark", "flat", "checker"):
+            args = exp.parse_args([program, "--run", "calib-1"])
+            self.assertEqual(args.program, program)
+        self.assertEqual(exp.parse_args(["dark", "--run", "x", "--count", "3"]).count, 3)
+
+
 class NightPlan(unittest.TestCase):
     def setUp(self):
         self.shots = exp.night_shots()

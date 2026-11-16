@@ -143,5 +143,61 @@ class Clarity(unittest.TestCase):
         self.assertLess(runs[0]["min_clarity"], 0.3)
 
 
+@unittest.skipIf(np is None, "needs numpy and OpenCV")
+class Glare(unittest.TestCase):
+    """A low sun in front of the west window flares the glass: that is glare, not fog (#33)."""
+
+    def setUp(self):
+        self.fs = load()
+
+    def test_sun_on_glass_needs_a_low_sun_in_front_of_the_window(self):
+        self.assertTrue(self.fs.sun_on_glass(227.0, 9.2))          # Nov 15, 23:15 UTC: flare
+        self.assertFalse(self.fs.sun_on_glass(200.3, 21.2))        # Nov 10, 21:15 UTC: high, south-west
+        self.assertFalse(self.fs.sun_on_glass(150.0, 10.0))        # low, but behind the building
+        self.assertFalse(self.fs.sun_on_glass(270.0, -1.0))        # set
+        self.assertFalse(self.fs.sun_on_glass(None, 9.0))          # unknown counts as no
+        self.assertTrue(self.fs.sun_on_glass(320.0, 14.0))
+        self.assertFalse(self.fs.sun_on_glass(320.0, 14.0, max_elevation=10.0))
+        self.assertFalse(self.fs.sun_on_glass(320.0, 14.0, half_width=40.0))
+
+    def rows(self, el, az):
+        t0 = datetime(2026, 11, 15, 22, 0, tzinfo=UTC)
+        return [{"time": t0 + timedelta(minutes=5 * i), "clarity": 0.3, "elevation": el, "azimuth": az}
+                for i in range(4)]
+
+    def test_runs_get_a_cause(self):
+        self.assertEqual(self.fs.low_runs(self.rows(9.0, 227.0))[0]["cause"], "glare")
+        self.assertEqual(self.fs.low_runs(self.rows(20.0, 200.0))[0]["cause"], "fog")
+
+    def test_a_run_is_glare_only_when_most_frames_have_the_sun_on_the_glass(self):
+        rows = self.rows(20.0, 200.0)
+        rows[0].update(elevation=9.0, azimuth=227.0)
+        self.assertEqual(self.fs.low_runs(rows)[0]["cause"], "fog")
+        for r in rows[:3]:
+            r.update(elevation=9.0, azimuth=227.0)
+        self.assertEqual(self.fs.low_runs(rows)[0]["cause"], "glare")
+
+    def test_frames_carry_the_azimuth_and_old_caches_are_read_again(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        t = datetime(2026, 11, 14, 20, 0, tzinfo=UTC)
+        folder = os.path.join(d, "2026/11/14")
+        os.makedirs(folder)
+        cv2.imwrite(os.path.join(folder, "wide_20261114T200000Z.jpg"), scene())
+        with open(os.path.join(folder, "wide_20261114T200000Z.json"), "w") as f:
+            json.dump({"Sun": {"elevation_deg": 9.0, "azimuth_deg": 227.0}}, f)
+        self.assertEqual(self.fs.list_frames(d, "wide", t.date(), t.date())[0]["azimuth"], 227.0)
+        old = os.path.join(d, "old.csv")
+        with open(old, "w") as f:      # a cache written before the azimuth column
+            f.write("# every_min=5\ntime,sharpness,contrast,mean,lux,elevation,setup_id\n"
+                    "2026-11-14T20:00:00Z,1,1,1,1,9,a\n")
+        self.assertIsNone(self.fs.read_rows(old, 5))
+        out = os.path.join(d, "out")
+        first = self.fs.scan(d, "wide", t.date(), t.date(), out, today=t.date() + timedelta(days=1))
+        again = self.fs.scan(d, "wide", t.date(), t.date(), out, today=t.date() + timedelta(days=1))
+        self.assertEqual(again[0]["azimuth"], 227.0)
+        self.assertEqual(first[0]["azimuth"], 227.0)
+
+
 if __name__ == "__main__":
     unittest.main()

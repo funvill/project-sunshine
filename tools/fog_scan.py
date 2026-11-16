@@ -12,7 +12,8 @@ the height, as in register_day.py; the sky above has nothing sharp in it):
                 focus read lower.
     contrast    RMS contrast: the standard deviation of the grey level over its mean.
     mean        mean grey level of the band (0-255).
-    lux, elevation, setup_id   from the frame's JSON (Lux, Sun.elevation_deg, Capture.setup_id).
+    lux, elevation, azimuth, setup_id   from the frame's JSON (Lux, Sun.elevation_deg,
+                Sun.azimuth_deg, Capture.setup_id).
 
 clarity is a frame's sharpness over the camera's baseline for the same time of day: the median
 sharpness of the same --slot-min slot (UTC) on up to --baseline-days earlier days with the same
@@ -21,6 +22,11 @@ under it. A camera move or refocus changes setup_id (or should), which starts a 
 nobody recorded shows as a step that stays. Night frames get a clarity too, but street lights and
 lit windows make it a different measure; low_runs() only looks at daylight (sun above
 --day-min-elevation).
+
+Each low run gets a cause. "glare" when most of its frames have the sun low in front of the window
+(above the horizon, no higher than --glare-max-elevation, within --glare-half-width of west): flare
+through the glass washes the scene out the way fog does. Otherwise "fog", meaning anything that
+softens the whole view: weather, condensation, smoke. The limits are estimates from two cases.
 
     python tools/fog_scan.py --frames <NAS>/project_sunshine/wide --day 2026-11-04 --to 2026-11-16 --out fog/
 
@@ -44,7 +50,11 @@ import numpy as np
 UTC = timezone.utc
 FRAME = re.compile(r"^(?P<cam>[A-Za-z0-9]+)_(?P<t>\d{8}T\d{6}Z)\.jpg$")   # regular frames only: no _night, _ev*
 BAND = (0.35, 0.85)
-FIELDS = ["time", "sharpness", "contrast", "mean", "lux", "elevation", "setup_id"]
+FIELDS = ["time", "sharpness", "contrast", "mean", "lux", "elevation", "azimuth", "setup_id"]
+CACHE_HEADER = "# every_min=%d fields=2"   # fields=2: azimuth added; older caches are read again
+WINDOW_FACING = 270.0       # the window faces due west (true)
+GLARE_HALF_WIDTH = 60.0     # sun within this many degrees of WINDOW_FACING ...
+GLARE_MAX_ELEVATION = 15.0  # ... and above the horizon but no higher than this: flare on the glass
 
 
 def measure(gray, band=BAND):
@@ -86,8 +96,9 @@ def list_frames(frames_dir, camera, first, last, every_min=5):
                 continue
             path = os.path.join(folder, name)
             meta = read_json(path[:-4] + ".json")
+            sun = meta.get("Sun") or {}
             found.append({"time": t, "path": path, "lux": number(meta.get("Lux")),
-                          "elevation": number((meta.get("Sun") or {}).get("elevation_deg")),
+                          "elevation": number(sun.get("elevation_deg")), "azimuth": number(sun.get("azimuth_deg")),
                           "setup_id": str((meta.get("Capture") or {}).get("setup_id") or "")})
         day += timedelta(days=1)
     return found
@@ -101,7 +112,7 @@ def measure_frame(path):
 def write_rows(path, rows, every_min):
     tmp = path + ".tmp"
     with open(tmp, "w", newline="", encoding="utf-8") as f:
-        f.write("# every_min=%d\n" % every_min)
+        f.write(CACHE_HEADER % every_min + "\n")
         w = csv.DictWriter(f, FIELDS, extrasaction="ignore")
         w.writeheader()
         for r in rows:
@@ -112,14 +123,14 @@ def write_rows(path, rows, every_min):
 def read_rows(path, every_min):
     try:
         with open(path, encoding="utf-8") as f:
-            if f.readline().strip() != "# every_min=%d" % every_min:
+            if f.readline().strip() != CACHE_HEADER % every_min:
                 return None
             rows = []
             for r in csv.DictReader(f):
                 rows.append({"time": datetime.strptime(r["time"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC),
                              "sharpness": float(r["sharpness"]), "contrast": float(r["contrast"]),
                              "mean": float(r["mean"]), "lux": number(r["lux"]), "elevation": number(r["elevation"]),
-                             "setup_id": r["setup_id"]})
+                             "azimuth": number(r["azimuth"]), "setup_id": r["setup_id"]})
             return rows
     except (OSError, ValueError, KeyError):
         return None
@@ -162,8 +173,19 @@ def add_clarity(rows, baseline_days=7, slot_min=30, min_baseline=3):
     return rows
 
 
-def low_runs(rows, threshold=0.5, min_frames=3, day_min_elevation=5.0):
-    """Runs of at least min_frames daylight frames in a row with clarity under threshold."""
+def sun_on_glass(azimuth, elevation, half_width=GLARE_HALF_WIDTH, max_elevation=GLARE_MAX_ELEVATION,
+                 facing=WINDOW_FACING):
+    """True when the sun is low and in front of the window, where it flares the glass."""
+    if azimuth is None or elevation is None:
+        return False
+    off = abs((azimuth - facing + 180.0) % 360.0 - 180.0)
+    return 0.0 < elevation <= max_elevation and off <= half_width
+
+
+def low_runs(rows, threshold=0.5, min_frames=3, day_min_elevation=5.0,
+             glare_half_width=GLARE_HALF_WIDTH, glare_max_elevation=GLARE_MAX_ELEVATION):
+    """Runs of at least min_frames daylight frames in a row with clarity under threshold, each with a
+    cause: "glare" when most of its frames have the sun on the glass, otherwise "fog"."""
     runs, current = [], []
     daylight = [r for r in sorted(rows, key=lambda r: r["time"])
                 if r.get("clarity") is not None and r["elevation"] is not None and r["elevation"] > day_min_elevation]
@@ -172,8 +194,11 @@ def low_runs(rows, threshold=0.5, min_frames=3, day_min_elevation=5.0):
             current.append(r)
             continue
         if len(current) >= min_frames:
+            glare = sum(sun_on_glass(c.get("azimuth"), c["elevation"], glare_half_width, glare_max_elevation)
+                        for c in current)
             runs.append({"start": current[0]["time"], "end": current[-1]["time"], "frames": len(current),
-                         "min_clarity": min(c["clarity"] for c in current)})
+                         "min_clarity": min(c["clarity"] for c in current),
+                         "cause": "glare" if glare * 2 > len(current) else "fog"})
         current = [r] if r is not None and r["clarity"] < threshold else []
     return runs
 
@@ -188,8 +213,9 @@ def day_line(camera, day, rows, runs, day_min_elevation):
     return "%s %s: %d daylight frames, median clarity %.2f, lowest %.2f at %s%s" % (
         camera, day, len(lit), statistics.median(r["clarity"] for r in lit), low["clarity"],
         low["time"].strftime("%H:%M"),
-        "".join(" | low %s-%s (%d frames, min %.2f)" % (x["start"].strftime("%H:%M"), x["end"].strftime("%H:%M"),
-                                                       x["frames"], x["min_clarity"]) for x in mine_runs))
+        "".join(" | %s %s-%s (%d frames, min %.2f)" % (x["cause"], x["start"].strftime("%H:%M"),
+                                                      x["end"].strftime("%H:%M"), x["frames"], x["min_clarity"])
+                for x in mine_runs))
 
 
 def main(argv=None):
@@ -205,6 +231,9 @@ def main(argv=None):
     ap.add_argument("--threshold", type=float, default=0.5, help="clarity under this is low (an estimate, to tune)")
     ap.add_argument("--min-frames", type=int, default=3, help="this many low daylight frames in a row make a run")
     ap.add_argument("--day-min-elevation", type=float, default=5.0)
+    ap.add_argument("--glare-half-width", type=float, default=GLARE_HALF_WIDTH,
+                    help="sun within this many degrees of west counts as on the glass")
+    ap.add_argument("--glare-max-elevation", type=float, default=GLARE_MAX_ELEVATION)
     a = ap.parse_args(argv)
     camera = a.camera or os.path.basename(os.path.normpath(a.frames))
     first = date.fromisoformat(a.day)
@@ -212,7 +241,7 @@ def main(argv=None):
     # the baseline needs the days before the first one asked for
     rows = scan(a.frames, camera, first - timedelta(days=a.baseline_days), last, a.out, a.every)
     add_clarity(rows, a.baseline_days, a.slot_min)
-    runs = low_runs(rows, a.threshold, a.min_frames, a.day_min_elevation)
+    runs = low_runs(rows, a.threshold, a.min_frames, a.day_min_elevation, a.glare_half_width, a.glare_max_elevation)
     out = os.path.join(a.out, camera, "clarity.csv")
     with open(out + ".tmp", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, FIELDS + ["clarity"], extrasaction="ignore")
