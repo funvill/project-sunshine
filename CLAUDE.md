@@ -30,7 +30,7 @@ Give times in UTC and Vancouver. Add the entry when it happens, or as soon as it
 - `homeassistant/`: stale-frame alert, copied into Home Assistant by hand. Steps in `docs/setup.md`.
 - `tools/`: PC-side helpers. **`build_video.py` builds one day's Instagram video with no AI** (it runs the
   NAS job for a chosen date, prints the sky score, posts nothing; command in `README.md`).
-  `fuse_sunset.py` merges the sunset bracket (ev+0 and ev-2) into the frames the video uses.
+  `ups_bench.py` bench-tests the UPS reader (`pi/sunset-ups.py`) against the real board. `fuse_sunset.py` merges the sunset bracket (ev+0 and ev-2) into the frames the video uses.
   `issue_blur.py` blurs and labels the nearby buildings in images posted
   to GitHub issues, and nothing else. Style 1 (light Gaussian) is the default, chosen by Steven 2026-11-09.
 - `docs/`: setup guide and hardware notes.
@@ -384,7 +384,9 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   tested on the bench before it goes on `sunshine`; on low battery pause the capture/dense/sync timers rather than halt
   (a halted Pi stays off if mains returns before the UPS cuts out); HA alert later; `ups_source` and
   `ups_charge_pct` in each frame's `System` block after the pending `sunset-meta.py` work merges. The flasher (`HIDBootLoader.exe`) comes from
-  Mini-Box's OpenUPS (v1) firmware pack; never flash that pack's hex files. **Reader built 2026-11-16, not installed:** `pi/sunset-ups.py` (`--once`, `--raw`, `--run`), `pi/systemd/sunset-ups.service` (root, not yet in `install.sh`), `tests/test_ups.py`. Bench-tested on the PC in WSL (USB passed through with usbipd-win, busid 1-14) against the real board: steady values wrote only keyframes, and an unplug wrote one lost and one found line. Settings are `UPS_*` in `sunset.env` (defaults in the script). Deadbands to tune once the cells are in. Steps and status in issue #29.
+  Mini-Box's OpenUPS (v1) firmware pack; never flash that pack's hex files. **Reader built 2026-11-16, not installed:** `pi/sunset-ups.py` (`--once`, `--raw`, `--run`), `pi/systemd/sunset-ups.service` (root, not yet in `install.sh`), `tests/test_ups.py`. Bench-tested on the PC in WSL (USB passed through with usbipd-win, busid 1-14) against the real board: steady values wrote only keyframes, and an unplug wrote one lost and one found line. Settings are `UPS_*` in `sunset.env` (defaults in the script). Deadbands to tune once the cells are in. Bench runs: `tools/ups_bench.py` (WSL as root; summarises the log, warns on cells under 2.5 V).
+  **No cells (2026-11-16):** the three 34Ts read 1.14-1.18 V (over-discharged) and were recycled with Steven's other 18650s. New cells are Steven's to buy. Recommended: **LiFePO4** (e.g. Lithium Werks APR18650M1B, ~1.1 Ah, ~1.5-2 h on the CM4): no R20 change, but reflash Mini-Box's LiFePO4 firmware 1.5 and set CAPACITY again; safer and longer-lived at a sunny window. Name-brand Li-ion keeps firmware 1.6 and needs the R20 change (~6 h). Cheap or salvaged Li-ion is fine for the bench only (it charges to ~3.6 V/cell until R20 is changed). Measure every cell first: matched within 0.05 V, none under 2.5 V.
+  **Next, in order:** choose the cells; flash or solder to match; adapter ≥13 V (15-19 V) and set `OUT_VOLTAGE` at or above it; bench run with cells (`ups_bench.py --low-cell 3.8`, unplug the adapter for mains lost/back), tune deadbands and check `RTE` units; add the unit to `install.sh` and a `docs/setup.md` section; install on `sunshine` with Steven's OK; then `ups_source`/`ups_charge_pct` in `sunset-meta.py` and the HA alert. Steps and status in issue #29.
 - **Wyze Cam v2** ×several — not for this project (no RAW/manual control). Possible Home Assistant
   cameras via Thingino firmware.
 - Sony NEX-5 and Samsung NX200: rejected (no USB remote control, mechanical shutter only).

@@ -34,6 +34,8 @@ The history of Project Sunset, newest first: every change (code, settings, hardw
 - Bench-tested the reader on this PC against the real UPS (WSL, USB passed through with usbipd-win), 7:47 to 7:51 pm (02:47 to 02:51 UTC Nov 16). With the board steady (USB only, no cells), 75 polls wrote only keyframes; size rotation and a clean stop worked. Unplugging the UPS mid-run wrote one `ups_lost` line, then one `ups_found` line when it came back. Battery, low-battery and pause behaviour are tested offline only, until R20 is changed and the cells are in.
 - Steven measured the three 18650-34T cells at about 8:10 pm (03:10 UTC Nov 16): 1.183, 1.144 and 1.166 V. That is deeply over-discharged for Li-ion (below 2.5 V), so they are not to be installed or charged. Remeasure directly on the cell terminals; if confirmed, recycle them and get a fresh matched set.
 - Added `tools/ups_bench.py`: runs the UPS reader on the bench (WSL as root) with test settings, files only in its own folder, the timer pause off, then summarises the log and warns about any present cell below 2.5 V. Tried for 30 s against the real board.
+- All of Steven's 18650 cells were found dead and recycled (Nov 15 evening). New cells are still to be chosen and bought. Recommended: LiFePO4, which means flashing the LiFePO4 firmware 1.5 back with no R20 change; name-brand Li-ion with the R20 change is the longer-runtime option. Options and next steps are on #29.
+- Merged `main` (PR #28, the project review fixes) into the UPS branch with no conflicts.
 
 ## 2026-11-14
 
