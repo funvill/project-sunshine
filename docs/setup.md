@@ -221,7 +221,7 @@ Alerts when no new production frame has reached the NAS for an hour. It reads th
 the Pi, so it also catches a dead Pi, a dead camera or a stuck sync. Written for Home Assistant OS.
 
 1. **Connect the share.** Settings > System > Storage > Add network storage. Name `camera`, usage
-   **Share**, server `<nas-host>` (the NAS's name or address), protocol Samba, remote share `camera`, user `camera`.
+   **Share**, server `<nas-host>` (the NAS's name or address), protocol Samba, remote share `camera`, user `<nas-user>`.
    It appears in Home Assistant as `/share/camera`. The script has no setting at the top. It reads
    two environment variables: `FRAME_BASE` (the folder that holds one folder per camera, default
    `/share/camera/project_sunshine`) and `FRAME_ROOT` (one camera's whole folder; it overrides
@@ -324,6 +324,9 @@ Before you start:
     `~/sunset/experiments/systemd/exp-weather.service` and `exp-weather.timer` to
     `/etc/systemd/system/`, change `User=` and the `/home/pi/` path in the service to your user and
     home, then `sudo systemctl daemon-reload` and `sudo systemctl enable --now exp-weather.timer`.
+    Until production shoots the sunset bracket (#10), do the same for `exp-sunset.service` (replace
+    `USER` and `HOME`) and `exp-sunset.timer`: it runs `sunset-nightly.sh` at 23:00 UTC, which waits
+    for tonight's sunset window and survives a reboot.
     Re-create any other `exp-*` timers from the notes you made before the wipe. They are transient,
     so a reboot clears them, and they are not part of the production capture.
 12. **Self-test.** `./sunset-selftest.sh`. It checks the camera, clock, disk, memory, capture time,

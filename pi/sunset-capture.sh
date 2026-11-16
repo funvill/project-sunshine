@@ -2,7 +2,7 @@
 # Project Sunset - single capture for Pi Zero W + IMX477 (Pi HQ / Arducam UC-517)
 # Captures locally first; sunset-sync.sh moves frames to the NAS.
 #   sunset-capture.sh           the regular 5-minute frame (+ night frame when dark)
-#   sunset-capture.sh --dense   an extra 1-a-minute frame around sunrise and sunset:
+#   sunset-capture.sh --dense   an extra 1-a-minute frame around sunset (and sunrise if DENSE_WINDOWS has it):
 #                               JPEG + JSON only, same auto exposure as the regular frame
 set -eEuo pipefail
 
@@ -36,6 +36,7 @@ DISK_MIN_FREE_MB="${DISK_MIN_FREE_MB:-100}"       # below this, skip everything 
 SLOT_EVERY_MIN="${SLOT_EVERY_MIN:-5}"             # regular slot spacing; dense mode leaves these minutes alone
 LOCK_WAIT_S="${LOCK_WAIT_S:-90}"                  # a regular capture waits this long for a dense one to finish
 DENSE_TIMEOUT_S="${DENSE_TIMEOUT_S:-30}"          # per rpicam-still call in dense mode, so a hang ends early
+DENSE_WINDOWS="${DENSE_WINDOWS:-sunset}"          # which dense windows shoot: "sunset" (decided 2026-11-16), "sunrise sunset" for both
 SUN_PY="${SUN_PY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sunset-sun.py}"
 ROTATION="${ROTATION:-0}"                         # 180 = camera mounted upside down (only 0 or 180)
 CAPTURE_RETRY_UNDER_S="${CAPTURE_RETRY_UNDER_S:-15}"   # a regular day shot that fails faster than this is tried once more
@@ -159,6 +160,8 @@ if [[ "$SCHEDULE" == dense ]]; then
     dense_warn "sun script failed rc=$SUN_RC: $WINDOW"
     exit 0
   fi
+  # A window left out of DENSE_WINDOWS is the same as being outside the windows: quiet.
+  [[ " $DENSE_WINDOWS " == *" $WINDOW "* ]] || exit 0
   TAG="dense window=$WINDOW "
   CAPTURE_TIMEOUT_S="$DENSE_TIMEOUT_S"
   SAVE_RAW=0

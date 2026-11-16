@@ -62,12 +62,34 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
 - Magnetic declination in Vancouver ~16° E (phone compass must use true north).
 
 ## Decisions made
+- **Decisions of 2026-11-16 (Steven, walked through the open issues; details on each issue):**
+  - **Storage (#5, #9):** keep every DNG from both cameras and buy disks (about 44 TB over five
+    years uncompressed; lossless DNG compression on the NAS would roughly halve it, not built).
+    No second copy of the archive (#13). Clearing NAS space now is still Steven's (#7).
+  - **Sunset profile (#10):** build option E into production (ev+0 + ev-2 each minute in the dense
+    window, daylight white balance handing over at about +10 min), tested offline, a week beside
+    production, live only with Steven's go-ahead. Until then the sunset program runs on both
+    cameras every evening (`exp-sunset.timer`, 23:00 UTC, a unit file so it survives a reboot;
+    runs `sunset-YYYYMMDD` / `cm4-sunset-YYYYMMDD`, from the evening of Nov 16). **Settings freeze Dec 14**, with a `PROFILE_ID` in `Capture`.
+  - **Series and setup (#12, #4):** the CM4 `cm4wide` is the official five-year series; `timelaps`
+    is the second, detailed view. Aim as in #4 (CM4 about 9.5° right, equinox sunset on the centre
+    line; #11 closed into #4). Wired Ethernet to the CM4 before Dec 21. The CM4 camera stays upside
+    down (`ROTATION=180`).
+  - **Video (#21, #20):** the daily video stays the whole day (no sunset-only main cut), no master
+    render, and **the sunrise dense frames stop**: `DENSE_WINDOWS=sunset` (default), patched into
+    both Pis' running capture script at about 04:45 UTC Nov 16. How the long film handles gaps is decided when it is edited.
+  - **Instagram (#2):** public posts are fine with the towers blurred and no location tag; captions
+    name the city only; a licensed music track; posting starts only once the sky score gates it, at
+    a threshold of **60** (retune later). Login method still open.
+  - **Monitoring (#22):** no outside heartbeat.
+  - **UPS cells (#29):** name-brand Li-ion, so firmware 1.6 stays and R20 must be changed to 576k.
 - Capture every **5 min, 24/7**, day and night (changed from 15 min on 2026-11-07 at Steven's
   request). Every frame keeps its DNG, and dark slots still add the night frame, so this is
   about 3x the data: an estimated 8-15 GB a day on the NAS, and a full SD card now holds about
   2-3 days if the NAS is down, not 10. `SLOT_S` in the experiment runner and the diag page must
   match the timer (a test checks it).
-- **Dense frames around sunrise and sunset (decided 2026-11-07, starts 02:30 UTC 2026-11-09):**
+- **Dense frames around sunrise and sunset (decided 2026-11-07, starts 02:30 UTC 2026-11-09;
+  sunrise dropped 2026-11-16, `DENSE_WINDOWS`):**
   Steven chose 1 a minute after comparing daily videos at 15, 5, 3 and 1 min. Windows: sun at -9°
   to 60 min after sunrise, and 60 min before sunset to -9°. On top of the 5-min frames, in the same
   folder and names, JPEG + JSON only, same auto exposure, `Capture.schedule: "dense"`. The regular
@@ -105,8 +127,9 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   capture. All logged. Does not change the 5-min schedule.
 - **Per-frame sun data:** each `.json` gets a `Sun` block (true-north azimuth, elevation, nearest
   sunset, minutes from sunset). Site coordinates live in `sunset.env` (`SITE_LAT`/`SITE_LON`,
-  currently approximate Burnaby, **set the real ones**) and are deliberately NOT written into
-  frame files, in case frames are ever published.
+  currently approximate Burnaby, **set the real ones**) and are not written into frame files.
+  But the `Sun` block itself locates the site to about 30 m (#25), so **frame JSON is private:
+  any path that publishes JSON must strip `Sun` first** (decided 2026-11-16).
 - **Per-frame `Capture` and `System` blocks, daily `system.json` (2026-11-04):** `sunset-meta.py`
   adds how the frame was taken and the machine's state at that moment, including image checksums,
   CPU temperature and disk space. What rarely changes (model, OS, kernel, versions, SD card, setup
@@ -163,7 +186,7 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   commented out; its newest frame before today was from 2025-05-27). That job is disabled in cron,
   not deleted. Its frames and the empty desktop folders in the home folder are gone. `~/readme.md`
   on the Pi explains what is there.
-- **NAS:** SMB share `//chipkin_nas.local/camera`, folder `project_sunshine`, user `camera`, not
+- **NAS:** SMB share `camera` on the NAS (host name kept out of the repo), folder `project_sunshine`, its own NAS user, not
   rsync over SSH (decision changed 2026-11-03). Automounted at `/mnt/nas-camera` via `/etc/fstab`;
   login in the root-only `/etc/sunset-nas.cred` on the Pi (never in this repo). Guest login was
   refused by the NAS. `sunset-sync.sh` refuses to run if the share is missing or on the SD card.
@@ -389,7 +412,7 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   (a halted Pi stays off if mains returns before the UPS cuts out); HA alert later; `ups_source` and
   `ups_charge_pct` in each frame's `System` block after the pending `sunset-meta.py` work merges. The flasher (`HIDBootLoader.exe`) comes from
   Mini-Box's OpenUPS (v1) firmware pack; never flash that pack's hex files. **Reader built 2026-11-16, not installed:** `pi/sunset-ups.py` (`--once`, `--raw`, `--run`), `pi/systemd/sunset-ups.service` (root, not yet in `install.sh`), `tests/test_ups.py`. Bench-tested on the PC in WSL (USB passed through with usbipd-win, busid 1-14) against the real board: steady values wrote only keyframes, and an unplug wrote one lost and one found line. Settings are `UPS_*` in `sunset.env` (defaults in the script). Deadbands to tune once the cells are in. Bench runs: `tools/ups_bench.py` (WSL as root; summarises the log, warns on cells under 2.5 V).
-  **No cells (2026-11-16):** the three 34Ts read 1.14-1.18 V (over-discharged) and were recycled with Steven's other 18650s. New cells are Steven's to buy. Recommended: **LiFePO4** (e.g. Lithium Werks APR18650M1B, ~1.1 Ah, ~1.5-2 h on the CM4): no R20 change, but reflash Mini-Box's LiFePO4 firmware 1.5 and set CAPACITY again; safer and longer-lived at a sunny window. Name-brand Li-ion keeps firmware 1.6 and needs the R20 change (~6 h). Cheap or salvaged Li-ion is fine for the bench only (it charges to ~3.6 V/cell until R20 is changed). Measure every cell first: matched within 0.05 V, none under 2.5 V.
+  **No cells (2026-11-16):** the three 34Ts read 1.14-1.18 V (over-discharged) and were recycled with Steven's other 18650s. New cells are Steven's to buy. **Decided 2026-11-16: name-brand Li-ion** (e.g. Samsung 35E or LG MJ1, matched set of three), so firmware 1.6 stays, R20 goes to 576k and `CAPACITY` is set to the cells' rating. The options were: **LiFePO4** (e.g. Lithium Werks APR18650M1B, ~1.1 Ah, ~1.5-2 h on the CM4): no R20 change, but reflash Mini-Box's LiFePO4 firmware 1.5 and set CAPACITY again; safer and longer-lived at a sunny window. Name-brand Li-ion keeps firmware 1.6 and needs the R20 change (~6 h). Cheap or salvaged Li-ion is fine for the bench only (it charges to ~3.6 V/cell until R20 is changed). Measure every cell first: matched within 0.05 V, none under 2.5 V.
   **Next, in order:** choose the cells; flash or solder to match; adapter ≥13 V (15-19 V) and set `OUT_VOLTAGE` at or above it; bench run with cells (`ups_bench.py --low-cell 3.8`, unplug the adapter for mains lost/back), tune deadbands and check `RTE` units; add the unit to `install.sh` and a `docs/setup.md` section; install on `sunshine` with Steven's OK; then `ups_source`/`ups_charge_pct` in `sunset-meta.py` and the HA alert. Steps and status in issue #29.
 - **Wyze Cam v2** ×several — not for this project (no RAW/manual control). Possible Home Assistant
   cameras via Thingino firmware.
@@ -463,14 +486,14 @@ Steven reviewed the Nov 12 `cm4wide` video (07:30 to dark, tighter crop, merged 
    `Sun` block per frame; `sunset-sun.py sunset [--epoch|--json]` gives the next sunset for burst
    scheduling (backlog #3).
 3. **Sunset burst mode**: 1/min done (dense frames, from 2026-11-09). The 3-shot bracket is not.
-4. **Sensor protection** for the telephoto camera based on sun azimuth vs. its FOV.
-5. **Fog detection**: flag low-contrast frames.
+4. **Sensor protection** for the telephoto camera based on sun azimuth vs. its FOV (#32).
+5. **Fog detection**: flag low-contrast frames (#33).
 6. Port capture to **Picamera2** if finer control is needed than `rpicam-still` gives.
-7. SHT4x + TSL2591 logging.
+7. SHT4x + TSL2591 logging (#34).
 8. ~~Home Assistant config for the stale-file alert~~ **Done** (`homeassistant/`, steps in `docs/setup.md`).
-9. Mount design: start from Printables model 250692 or design a keyed plate + foam hood.
+9. Mount design: start from Printables model 250692 or design a keyed plate + foam hood (#35).
 10. Post-processing pipeline: deflicker, stabilisation, "sunset along the horizon" sequence
-    (frame nearest each sunset), time slices, sky calendar.
+    (frame nearest each sunset), time slices, sky calendar (#20, #21).
 
 11. **Sky score to pick sunsets worth posting. Built 2026-11-12, provisional; the threshold and the
     tuning wait for more good sunsets.** Deterministic, no AI (stdlib plus ffmpeg, in
@@ -504,7 +527,8 @@ from pilot data.
 
 ## Unverified numbers
 Sunset azimuths, magnetic declination, lens FOVs and per-frame sizes above were estimated, not
-measured. Confirm during the pilot before printing the mount or buying lenses.
+measured. Confirm during the pilot before printing the mount or buying lenses: the FOV and edges
+on #4 (experiment 22), frame sizes on #9; due before the mount is glued (#35), checked by Claude Code.
 
 ## Related
 - A project doc also exists as a Claude Docs artifact titled "Project Sunset" (overview + shopping list).
