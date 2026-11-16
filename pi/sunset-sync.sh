@@ -126,6 +126,15 @@ while IFS= read -r -d '' rec; do
     fi
     continue
   fi
+  # An empty system.json is the same kind of leftover. The next frame's sunset-meta.py rewrites it
+  # from its state file, and the sync sends it then. Other empty files (a frame's JSON) ship as before.
+  if [[ "$size" == 0 && "$path" == */system.json ]]; then
+    if ! grep -qxF -- "$path" "$ZERO_SEEN" 2>/dev/null; then
+      echo "$path" >> "$ZERO_SEEN" 2>/dev/null || true
+      log "sync skipped zero-length system.json $path"
+    fi
+    continue
+  fi
   printf '%s\0' "$path" >> "$LIST"
   PENDING=$((PENDING + 1))
 done < "$ALL"

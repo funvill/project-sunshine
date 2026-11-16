@@ -347,6 +347,10 @@ def write_json(path, data, tmp_folder):
     with open(tmp, "w") as f:
         json.dump(data, f, indent=1)
         f.write("\n")
+        # On disk before the rename: a freeze on the CM4 (Nov 16) left system.json 0 bytes. These
+        # files change a few times a day, so the extra writes are negligible.
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, path)
 
 
@@ -373,15 +377,20 @@ def update_daily(outbox, camera, slot, fields, missing):
     day = "%s-%s-%s" % (slot[:4], slot[4:6], slot[6:8])
     if state.get("day_utc") != day:
         state = {"schema_version": SCHEMA_VERSION, "camera": camera, "day_utc": day, "records": []}
+    day_path = os.path.join(outbox, camera, slot[:4], slot[4:6], slot[6:8], "system.json")
+    partial = os.path.join(outbox, ".partial")
     if state["records"] and state["records"][-1].get("system_id") == system_id:
+        # Absent means the sync has copied it. Present but empty or unreadable means a freeze cut
+        # the write short (the sync holds an empty one back): write it again from the state.
+        if os.path.exists(day_path) and load_state(day_path) != state:
+            write_json(day_path, state, partial)
         return system_id
     record = {"system_id": system_id, "from_utc": slot_iso(slot)}
     record.update(merged)
     record["unavailable"] = [name for name in missing if merged.get(name) is None]
     state["records"].append(record)
-    partial = os.path.join(outbox, ".partial")
     # This order, so a failure between the two is retried by the next frame.
-    write_json(os.path.join(outbox, camera, slot[:4], slot[4:6], slot[6:8], "system.json"), state, partial)
+    write_json(day_path, state, partial)
     write_json(state_path, state, partial)
     return system_id
 

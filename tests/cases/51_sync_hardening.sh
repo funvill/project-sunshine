@@ -60,6 +60,20 @@ sync_
 check "second run does not log them again" test "$(grep -c 'zero-length image' "$SYNC_LOG_FILE")" = 2
 sync_; rc=$?
 check "third run, nothing to ship, exits 0" test "$rc" = 0
+
+section "sync: an empty system.json is kept for the next frame to rewrite"
+fresh_env; share_target
+d="$OUT_ROOT/wide/2026/01/01"
+mkfile "$d/system.json" '10 minutes ago' ""  # a freeze's leftover; sunset-meta.py rebuilds it from its state
+mkfile "$d/b.jpg" '10 minutes ago' "pixels"
+sync_; rc=$?
+check "exits 0" test "$rc" = 0
+check "empty system.json not shipped" test ! -e "$W/nas/wide/2026/01/01/system.json"
+check "empty system.json kept on the card" test -e "$d/system.json"
+check "skip logged" grep -q 'zero-length system.json ./wide/2026/01/01/system.json' "$SYNC_LOG_FILE"
+printf '{"records": []}\n' > "$d/system.json"; touch -d '10 minutes ago' "$d/system.json"
+sync_
+check "rewritten system.json ships" nas_has wide/2026/01/01/system.json
 fresh_env; share_target
 mkfile "$OUT_ROOT/wide/2026/01/01/only.jpg" '10 minutes ago' ""
 sync_; rc=$?
