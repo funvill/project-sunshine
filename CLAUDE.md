@@ -64,9 +64,13 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
 
 ## Decisions made
 - **Decisions of 2026-11-16 (Steven, walked through the open issues; details on each issue):**
-  - **Storage (#5, #9):** keep every DNG from both cameras and buy disks (about 44 TB over five
-    years uncompressed; lossless DNG compression on the NAS would roughly halve it, not built).
-    No second copy of the archive (#13). Clearing NAS space now is still Steven's (#7).
+  - **Storage (#5, #9), reversed the same day:** no DNGs. **`SAVE_RAW=0` on both Pis from 09:15 UTC
+    2026-11-16, and all 6,325 DNGs on the NAS deleted (~157 GB; Steven, #38).** The test
+    (`experiments/raw_value.py`) found the DNG holds only 0.3-0.6 stops more highlight than the JPEG,
+    nothing in the shadows, and at sunset the ev-2 bracket JPEG keeps about twice as much sky. JPEG only
+    is about 3.3 GB a day for both cameras. The script's default is still `SAVE_RAW=1`, so a rebuilt Pi
+    needs `SAVE_RAW=0` in `sunset.env` (as in `sunset.env.example`). No second copy (#13). NAS space (#7):
+    387 GB free after the delete; the rest of the 11 TB share is other data.
   - **Sunset profile (#10):** build option E into production (ev+0 + ev-2 each minute in the dense
     window, daylight white balance handing over at about +10 min), tested offline, a week beside
     production, live only with Steven's go-ahead. Until then the sunset program runs on both

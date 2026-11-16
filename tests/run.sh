@@ -53,7 +53,7 @@ for t in "$HERE"/test_*.py; do
   name="$(basename "$t")"
   grep -qs "HERE/$name" "$HERE"/cases/*.sh && continue
   case "$name" in
-    test_fuse_sunset.py|test_issue_blur.py|test_fog_scan.py)
+    test_fuse_sunset.py|test_issue_blur.py|test_fog_scan.py|test_raw_value.py)
       if ! have_py_mods cv2 || ! have_py_mods numpy; then
         echo "  SKIP: tests/$name (needs OpenCV and numpy: pip install numpy opencv-python-headless)"
         continue
