@@ -31,6 +31,7 @@ Give times in UTC and Vancouver. Add the entry when it happens, or as soon as it
 - `tools/`: PC-side helpers. **`build_video.py` builds one day's Instagram video with no AI** (it runs the
   NAS job for a chosen date, prints the sky score, posts nothing; command in `README.md`).
   `ups_bench.py` bench-tests the UPS reader (`pi/sunset-ups.py`) against the real board. `fuse_sunset.py` merges the sunset bracket (ev+0 and ev-2) into the frames the video uses.
+  `fog_scan.py` measures each frame's clarity against its time-of-day baseline (fog, condensation, #33; no alert yet).
   `issue_blur.py` blurs and labels the nearby buildings in images posted
   to GitHub issues, and nothing else. Style 1 (light Gaussian) is the default, chosen by Steven 2026-11-09.
 - `docs/`: setup guide and hardware notes.
