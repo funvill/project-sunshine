@@ -8,17 +8,22 @@
 # Tried and dropped: holding writes in RAM (vm.dirty_expire_centisecs=60000, commit=600) so a
 # frame could reach the NAS and be deleted before reaching the SD. On the Pi 3 B+ the frame
 # reached the SD anyway in 3 of 3 captures, so it cost power-cut safety and saved nothing.
+#
+# ROOT=<dir> (default empty) puts every file it touches under <dir>, for tests against fixture
+# copies of fstab and cmdline.txt; it needs no root and skips the swap handling. Leave it unset
+# on a real Pi.
 set -euo pipefail
-[[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; exit 1; }
+ROOT="${ROOT:-}"
+[[ -n "$ROOT" || $EUID -eq 0 ]] || { echo "run with sudo" >&2; exit 1; }
 
-FSTAB=/etc/fstab
-CMDLINE=/boot/firmware/cmdline.txt
+FSTAB="$ROOT/etc/fstab"
+CMDLINE="$ROOT/boot/firmware/cmdline.txt"
 cp -n "$FSTAB" "$FSTAB.before-lowwear"
 cp -n "$CMDLINE" "$CMDLINE.before-lowwear"
 
 # System journal in RAM, capped.
-mkdir -p /etc/systemd/journald.conf.d
-cat > /etc/systemd/journald.conf.d/sunset-lowwear.conf <<'EOF'
+mkdir -p "$ROOT/etc/systemd/journald.conf.d"
+cat > "$ROOT/etc/systemd/journald.conf.d/sunset-lowwear.conf" <<'EOF'
 [Journal]
 Storage=volatile
 RuntimeMaxUse=32M
@@ -40,7 +45,8 @@ add_tmpfs /tmp     defaults,noatime,nosuid,nodev,mode=1777,size=128M
 add_tmpfs /var/tmp defaults,noatime,nosuid,nodev,mode=1777,size=16M
 add_tmpfs /var/log defaults,noatime,nosuid,nodev,mode=0755,size=32M
 # Packages expect these under /var/log.
-echo 'd /var/log/apt 0755 root root -' > /etc/tmpfiles.d/sunset-lowwear.conf
+mkdir -p "$ROOT/etc/tmpfiles.d"
+echo 'd /var/log/apt 0755 root root -' > "$ROOT/etc/tmpfiles.d/sunset-lowwear.conf"
 
 # Background jobs that write to the card and that a frozen OS does not need.
 # fstrim stays: telling the card which blocks are free reduces its internal wear.
@@ -51,16 +57,16 @@ for u in apt-daily.timer apt-daily-upgrade.timer dpkg-db-backup.timer e2scrub_al
 done
 
 # Clock save: daily instead of hourly. Capture waits for NTP after boot in any case.
-if [[ -e /etc/cron.hourly/fake-hwclock ]]; then
-  mv /etc/cron.hourly/fake-hwclock /etc/cron.daily/fake-hwclock
+if [[ -e "$ROOT/etc/cron.hourly/fake-hwclock" ]]; then
+  mv "$ROOT/etc/cron.hourly/fake-hwclock" "$ROOT/etc/cron.daily/fake-hwclock"
 fi
 
 # No swap: ~900 MB of RAM, ~700 MB free while capturing.
-if command -v dphys-swapfile >/dev/null 2>&1; then
+if [[ -z "$ROOT" ]] && command -v dphys-swapfile >/dev/null 2>&1; then
   dphys-swapfile swapoff || true
   systemctl disable --now dphys-swapfile 2>/dev/null || true
 fi
-if [[ -e /var/swap ]] && ! /usr/sbin/swapon --show=NAME --noheadings | grep -qx /var/swap; then
+if [[ -z "$ROOT" && -e /var/swap ]] && ! /usr/sbin/swapon --show=NAME --noheadings | grep -qx /var/swap; then
   rm -f /var/swap
 fi
 
@@ -74,7 +80,7 @@ fi
 
 # Old on-disk logs. The journal moves to RAM above, so nothing reads these any more.
 systemctl restart systemd-journald
-rm -rf /var/log/journal
+rm -rf "$ROOT/var/log/journal"
 
 systemctl daemon-reload
 echo "done. Reboot to apply."

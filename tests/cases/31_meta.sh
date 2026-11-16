@@ -15,7 +15,7 @@ check "night records the lux that triggered it" test "$(field "$night" "d['Captu
 check "image checksums" grep -Eq '"sha256": "[0-9a-f]{64}"' "$json"
 check "dng recorded" test "$(field "$json" "d['Capture']['files']['dng']['bytes']")" = 7
 check "setup id" test "$(field "$json" "d['Capture']['setup_id']")" = pilot-1
-check "no site coordinates" bash -c "! grep -q '49.25' '$json'"
+check "no site coordinates" bash -c "! grep -qF '49.25' '$json'"
 daily="$(dirname "$json")/system.json"
 check "daily system.json next to the frames" test -s "$daily"
 check "one record for both frames" test "$(grep -c '"system_id"' "$daily")" = 1
@@ -23,7 +23,7 @@ check "frame points at the daily record" test "$(field "$json" "d['Capture']['sy
 check "night frame points at it too" test "$(field "$night" "d['Capture']['system_id']")" = "$(field "$daily" "d['records'][0]['system_id']")"
 check "setup note is in the daily file" test "$(field "$daily" "d['records'][0]['setup_note']")" = "test rig"
 check "setup note is not on the frame" test "$(field "$json" "'setup_note' in d['Capture']")" = False
-check "no coordinates in the daily file" bash -c "! grep -q '49.25' '$daily'"
+check "no coordinates in the daily file" bash -c "! grep -qF '49.25' '$daily'"
 check "meta=ok logged" grep -q ' meta=ok ' "$LOG_FILE"
 check "log line still ends in ok" grep -Eq 'sun=az=[0-9.]+,el=-?[0-9.]+ ok$' "$LOG_FILE"
 check "no temp files published" test -z "$(find "$OUT_ROOT" -name '*tmp*' -not -path '*/.partial/*')"
@@ -44,6 +44,33 @@ capture
 json="$(find "$OUT_ROOT" -name 'wide_*Z.json' | head -n1)"
 check "no checksum" test "$(field "$json" "'sha256' in d['Capture']['files']['jpg']")" = False
 unset FRAME_CHECKSUMS
+
+section "meta: a frame without rpicam metadata still gets its JSON (#27)"
+fresh_env; export STUB_RPICAM=nojson
+capture; rc=$?
+json="$(find "$OUT_ROOT" -name 'wide_*Z.json' | head -n1)"
+check "capture still succeeds" test "$rc" = 0
+check "json published" test -n "$json"
+check "flagged missing" test "$(field "$json" "d['rpicam_metadata']")" = missing
+check "Capture with checksums" grep -Eq '"sha256": "[0-9a-f]{64}"' "$json"
+check "System block" test "$(field "$json" "'System' in d")" = True
+check "meta=ok logged" grep -q ' meta=ok ' "$LOG_FILE"
+fresh_env; export STUB_RPICAM=nojson SITE_LAT=10.0 SITE_LON=20.0   # any site will do
+capture
+json="$(find "$OUT_ROOT" -name 'wide_*Z.json' | head -n1)"
+check "with a site: Sun computed anyway" test "$(field "$json" "'azimuth_deg' in d['Sun']")" = True
+check "with a site: flagged missing" test "$(field "$json" "d['rpicam_metadata']")" = missing
+check "sun line says so" grep -q 'rpicam=missing' "$LOG_FILE"
+unset STUB_RPICAM SITE_LAT SITE_LON
+
+section "meta: deadline from sunset.env (#27)"
+fresh_env; export META_DEADLINE_S=0
+capture; rc=$?
+json="$(find "$OUT_ROOT" -name 'wide_*Z.json' | head -n1)"
+check "capture still succeeds" test "$rc" = 0
+check "Capture written" test "$(field "$json" "d['Capture']['kind']")" = auto
+check "System marked cut short" test "$(field "$json" "d['System']['cut_short']")" = True
+unset META_DEADLINE_S
 
 section "meta module unit tests"
 check "tests/test_meta.py" python3 -I "$HERE/test_meta.py"

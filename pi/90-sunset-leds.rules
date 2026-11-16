@@ -1,0 +1,5 @@
+# Project Sunset: every LED off, because the camera shoots through a window and the LEDs
+# show up as reflections in the frames (checked 2026-11-12). Covers the Pi's PWR and ACT LEDs
+# and USB Wi-Fi dongle LEDs, including after a replug. Installed by install.sh; delete it
+# from /etc/udev/rules.d/ and reboot to get the LEDs back.
+ACTION=="add", SUBSYSTEM=="leds", ATTR{trigger}="none", ATTR{brightness}="0"

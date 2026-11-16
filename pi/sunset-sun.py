@@ -9,6 +9,8 @@ refraction. "Sunset" is the upper limb touching the horizon (zenith 90.833 deg).
     sunset-sun.py position  [--time T]
     sunset-sun.py sunset    [--after T] [--epoch|--json]
     sunset-sun.py annotate  FRAME.json [FRAME2.json ...] [--time T]
+                                          a missing or unreadable FRAME.json is started
+                                          from {} with "rpicam_metadata": "missing"/"invalid"
     sunset-sun.py dense     [--time T]    exit 0 and "sunrise"/"sunset" inside a
                                           1-a-minute window, exit 1 and "none" outside
 
@@ -28,6 +30,9 @@ UTC = timezone.utc
 SUNSET_ZENITH = 90.833
 DENSE_DARK_DEG = -9.0      # dense windows reach out to the sun at this elevation
 DENSE_DAY_MIN = 60         # and this far into the day from sunrise / sunset
+# Names the formula behind the Sun block. Change it whenever the numbers a frame would get change
+# (formula, sunset zenith, refraction), so frames from before and after can be told apart.
+ALGORITHM = "noaa-1"
 
 
 def parse_time(text):
@@ -187,7 +192,7 @@ def sun_block(dt, lat, lon):
     """The dict stored under "Sun" in each frame's JSON. Deliberately no lat/lon in it."""
     az, el = sun_position(dt, lat, lon)
     block = {"azimuth_deg": round(az, 2), "elevation_deg": round(el, 2),
-             "azimuth_ref": "true_north", "computed_for_utc": iso(dt)}
+             "azimuth_ref": "true_north", "computed_for_utc": iso(dt), "algorithm": ALGORITHM}
     near = nearest_sunset(dt, lat, lon)
     if near is not None:
         block["nearest_sunset_utc"] = iso(near)
@@ -195,18 +200,32 @@ def sun_block(dt, lat, lon):
     return block
 
 
-def annotate(path, dt, lat, lon):
-    with open(path) as f:
-        data = json.load(f)
+def load_frame_json(path):
+    """rpicam's metadata for a frame, and None or why it could not be used: "missing" or "invalid".
+    The Sun and Capture blocks don't need it, so a frame without it still gets a JSON file."""
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}, "missing"
+    except ValueError:      # includes a half-written file
+        return {}, "invalid"
     if not isinstance(data, dict):
-        raise ValueError("%s: top level is not a JSON object" % path)
+        return {}, "invalid"
+    return data, None
+
+
+def annotate(path, dt, lat, lon):
+    data, problem = load_frame_json(path)
+    if problem:
+        data["rpicam_metadata"] = problem
     data["Sun"] = sun_block(dt, lat, lon)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(data, f, indent=4)
         f.write("\n")
     os.replace(tmp, path)
-    return data["Sun"]
+    return data["Sun"], data.get("rpicam_metadata")
 
 
 def site(args):
@@ -265,10 +284,14 @@ def main(argv=None):
             return 0 if window else 1
         else:
             dt = parse_time(args.time)
+            problems = []
             for path in args.files:
-                b = annotate(path, dt, lat, lon)
+                b, problem = annotate(path, dt, lat, lon)
+                if problem and problem not in problems:
+                    problems.append(problem)
             # One short line for the capture log.
-            print("az=%.1f el=%.1f" % (b["azimuth_deg"], b["elevation_deg"]))
+            print("az=%.1f el=%.1f" % (b["azimuth_deg"], b["elevation_deg"])
+                  + "".join(" rpicam=%s" % p for p in problems))
     except (ValueError, OSError) as exc:
         print("sunset-sun.py: %s" % exc, file=sys.stderr)
         return 2

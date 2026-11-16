@@ -1,0 +1,38 @@
+# Project Sunset: hourly heartbeat to an outside dead-man service (issue #22, part 4).
+#
+# WHY: every alert in sunset.yaml runs inside Home Assistant. Home Assistant shares power and network
+# with the Pis and the NAS, so if it doesn't come back after a power cut, nothing alerts. A dead-man
+# service flips it round: Home Assistant pings a URL every hour, and the SERVICE messages you when the
+# pings stop.
+#
+# NOT DONE FOR YOU: this needs an external service that the owner picks and signs up for (one that
+# alerts when an expected ping is missing, with a grace period of about 2 hours, to your phone or email).
+# Nothing here chooses or contacts one. Until the secret below exists this file must NOT be installed:
+# Home Assistant refuses to load a configuration that names a missing secret, and with this file in
+# /config/packages it would take the other packages' alerts down with it.
+#
+# TO TURN ON:
+#   1. Choose a dead-man service and create a check with a 60-minute period and about 2 hours grace.
+#   2. Put its ping URL in /config/secrets.yaml:   sunset_heartbeat_url: "https://example.invalid/ping/your-id"
+#      (the URL is a credential: keep it out of this repo.)
+#   3. Copy this file to /config/packages/sunset_heartbeat.yaml, check the configuration, restart.
+#   4. Test it: stop Home Assistant for longer than the grace period and confirm the service tells you.
+
+rest_command:
+  sunset_heartbeat:
+    url: !secret sunset_heartbeat_url
+    method: get
+    timeout: 20
+
+automation:
+  - id: sunset_heartbeat
+    alias: Project Sunset heartbeat
+    description: Pings the dead-man service every hour at 7 past, whatever the cameras are doing.
+    # Unconditional on purpose: this proves Home Assistant itself is alive, which is the one thing its own
+    # alerts can't tell you. A ping that depended on the cameras being fine would turn a camera outage into
+    # a second, redundant alarm from the service.
+    trigger:
+      - platform: time_pattern
+        minutes: "7"
+    action:
+      - service: rest_command.sunset_heartbeat

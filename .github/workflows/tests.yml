@@ -1,0 +1,46 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg busybox rsync python3 python3-pip python3-numpy
+          python3 -m pip install --user opencv-python-headless
+      - name: Offline tests (stubbed camera and NAS, every tests/test_*.py)
+        run: bash tests/run.sh
+      - name: Home Assistant script under BusyBox
+        # Home Assistant runs sunset_frame_age.sh with BusyBox tools, not GNU ones.
+        run: |
+          set -eu
+          bb="$RUNNER_TEMP/bb"
+          mkdir -p "$bb"
+          for a in sh ls grep sort tail date sed; do ln -s "$(command -v busybox)" "$bb/$a"; done
+          busybox sh -n homeassistant/sunset_frame_age.sh
+          root="$RUNNER_TEMP/frames/wide/2026/11/05"
+          mkdir -p "$root"
+          : > "$root/wide_20261105T173000Z.jpg"
+          now=$(date -u -d "2026-11-05 18:00:00" +%s)
+          age=$(env -i PATH="$bb" FRAME_ROOT="$RUNNER_TEMP/frames/wide" FRAME_AGE_NOW="$now" "$bb/sh" homeassistant/sunset_frame_age.sh)
+          echo "age=$age"
+          test "$age" = 30
+
+  daily-video-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the NAS image
+        run: docker build -t sunset-daily:ci nas/
+      - name: Run tests/test_daily.py inside the image
+        # The image's entrypoint is the job itself, so override it. The image provides python3 and ffmpeg.
+        run: |
+          docker run --rm --entrypoint python3 \
+            -v "$PWD":/repo -w /repo \
+            sunset-daily:ci tests/test_daily.py

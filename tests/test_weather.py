@@ -12,7 +12,7 @@ SPEC = importlib.util.spec_from_file_location("sunset_weather", ROOT / "experime
 w = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(w)
 
-LAT, LON = 49.24681, -122.98765  # made up, near enough to be realistic
+LAT, LON = 10.04681, 20.08765  # made up: an obviously fake place, with the same 5 decimals
 NOW = 1794187200  # 2026-11-09T01:20:00Z
 
 
@@ -29,20 +29,20 @@ def fake_fetch(responses):
     return fetch
 
 
-FORECAST = {"latitude": 49.25, "longitude": -122.99, "elevation": 40.0, "timezone": "GMT",
+FORECAST = {"latitude": 10.05, "longitude": 20.09, "elevation": 40.0, "timezone": "GMT",
             "hourly": {"time": ["2026-11-09T00:00"], "cloud_cover_low_best_match": [12]}}
-AIR = {"latitude": 49.2, "longitude": -123.0, "elevation": 40.0,
+AIR = {"latitude": 10.0, "longitude": 20.1, "elevation": 40.0,
        "hourly": {"time": ["2026-11-09T00:00"], "pm2_5": [3.1]}}
 
 
 class ReadSite(unittest.TestCase):
     def test_reads_plain_and_quoted_values(self):
-        env = 'SETUP_ID=pilot-3\nSITE_LAT="49.24681"\nSITE_LON=-122.98765\n'
-        self.assertEqual(w.read_site(env), (49.24681, -122.98765))
+        env = 'SETUP_ID=pilot-3\nSITE_LAT="10.04681"\nSITE_LON=-20.08765\n'
+        self.assertEqual(w.read_site(env), (10.04681, -20.08765))
 
     def test_ignores_comments(self):
-        env = "# SITE_LAT=1\nSITE_LAT=49.1\nSITE_LON=-123.2\n"
-        self.assertEqual(w.read_site(env), (49.1, -123.2))
+        env = "# SITE_LAT=1\nSITE_LAT=10.1\nSITE_LON=-20.2\n"
+        self.assertEqual(w.read_site(env), (10.1, -20.2))
 
     def test_missing_coordinates_is_an_error(self):
         with self.assertRaises(ValueError):
@@ -53,10 +53,10 @@ class Urls(unittest.TestCase):
     def test_requests_use_the_position_rounded_to_a_tenth_of_a_degree(self):
         for url in w.build_urls(LAT, LON).values():
             q = query(url)
-            self.assertEqual(q["latitude"], ["49.2"])
-            self.assertEqual(q["longitude"], ["-123.0"])
-            self.assertNotIn("49.24", url)
-            self.assertNotIn("122.98", url)
+            self.assertEqual(q["latitude"], ["10.0"])
+            self.assertEqual(q["longitude"], ["20.1"])
+            self.assertNotIn("10.04", url)
+            self.assertNotIn("20.08", url)
 
     def test_forecast_asks_for_cloud_layers_from_both_models_in_utc(self):
         q = query(w.build_urls(LAT, LON)["forecast"])
@@ -99,8 +99,13 @@ class Fetch(unittest.TestCase):
         for block in (saved["forecast"], saved["air_quality"]):
             for key in ("latitude", "longitude", "elevation"):
                 self.assertNotIn(key, block)
-        for leak in ("49.2", "122.9", "123.0", "-123"):
+        for leak in ("10.0", "10.05", "20.09", "20.1"):
             self.assertNotIn(leak, text)
+
+    def test_saved_file_has_a_schema_version(self):
+        # #27: so a later change of layout can be told apart from these files.
+        _, files = self.run_once(fake_fetch({"/v1/forecast": FORECAST, "/v1/air-quality": AIR}))
+        self.assertEqual(json.loads(files[0].read_text())["schema_version"], 1)
 
     def test_air_quality_failure_still_saves_the_forecast(self):
         code, files = self.run_once(fake_fetch({"/v1/forecast": FORECAST}))

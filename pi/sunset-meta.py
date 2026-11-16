@@ -16,6 +16,14 @@ kept in a state file beside the outbox, and the file is written again only when 
 Rules:
 - Every probe may fail on its own: its value becomes null and its name goes in
   System.unavailable. The caller also treats any failure here as non-fatal.
+- One overall deadline (--deadline, default META_DEADLINE_S or 15 s), well inside the capture's
+  `timeout 30`. Probes not started by then are skipped, named in System.unavailable, and
+  System.cut_short is true. Capture is written to the file before System is probed, so a kill
+  can't take the checksums with it.
+- A missing or unreadable rpicam metadata file is started from {} and flagged with
+  "rpicam_metadata": "missing" or "invalid"; the frame still gets Capture and System.
+- The slow daily probes (`rpicam-still --version`, `vcgencmd version`) are cached beside the
+  outbox in .meta-cache.json, once per UTC day and boot.
 - Never touch the NAS path. A dead share can hang a stat() for minutes, and that would
   stall the capture. Its state comes only from /proc/mounts and the sync log.
 - Nothing that locates or identifies the site or the owner: no coordinates, IP or MAC
@@ -31,11 +39,15 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 
 SCHEMA_VERSION = 2
 UTC = timezone.utc
 RUN_TIMEOUT_S = 5
+DEADLINE_S = 15            # whole script; the capture kills it at 30
+CACHE_NAME = ".meta-cache.json"
+CACHED_COMMANDS = (("rpicam-still", "--version"), ("vcgencmd", "version"))
 SENSOR_OVERLAY = re.compile(r"^(imx|ov|arducam)", re.I)
 
 
@@ -43,13 +55,33 @@ def iso(epoch):
     return datetime.fromtimestamp(epoch, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def run_command(cmd):
+def run_command(cmd, timeout=RUN_TIMEOUT_S):
     """Stdout of a short command, or None. Bounded, because a capture is waiting on it."""
+    if timeout is not None and timeout <= 0:
+        return None
     try:
         return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                              timeout=RUN_TIMEOUT_S, check=True).stdout
+                              timeout=timeout, check=True).stdout
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+class Deadline:
+    """The time this script has left. Probes check it before they start; commands get no longer
+    than what is left."""
+
+    def __init__(self, seconds, clock=time.monotonic):
+        self._clock = clock
+        self._end = clock() + float(seconds)
+
+    def remaining(self):
+        return self._end - self._clock()
+
+    def expired(self):
+        return self.remaining() <= 0
+
+    def timeout(self, most):
+        return max(0, min(most, self.remaining()))
 
 
 def read(root, rel):
@@ -108,7 +140,8 @@ def sd_sectors(root):
 
 def sd_card(root):
     out = {}
-    for name in ("name", "manfid", "oemid", "date", "hwrev", "fwrev"):  # never serial or cid
+    # life_time and pre_eol_info: eMMC wear (the CM4), absent on an SD card. Never serial or cid.
+    for name in ("name", "manfid", "oemid", "date", "hwrev", "fwrev", "life_time", "pre_eol_info"):
         try:
             out[name] = read(root, "sys/block/mmcblk0/device/" + name).strip()
         except OSError:
@@ -192,8 +225,13 @@ def versions(run):
     return found.get("rpicam-apps"), found.get("libcamera")
 
 
-def prober(missing):
+def prober(missing, deadline=None, skipped=None):
     def probe(name, fn):
+        if deadline is not None and deadline.expired():
+            missing.append(name)
+            if skipped is not None:
+                skipped.append(name)
+            return None
         try:
             return fn()
         except Exception:  # one bad source must not lose the others, or the frame
@@ -202,17 +240,17 @@ def prober(missing):
     return probe
 
 
-def system_block(root, outbox, nas_target, sync_log, run=run_command):
+def system_block(root, outbox, nas_target, sync_log, run=run_command, deadline=None):
     """The machine at the moment of this frame. Slow-changing details are in daily_fields."""
-    missing = []
-    probe = prober(missing)
+    missing, skipped = [], []
+    probe = prober(missing, deadline, skipped)
 
     def vc(*args):
         return run(["vcgencmd"] + list(args))
 
     nas = {"mounted": probe("nas_mounted", lambda: nas_mounted(root, nas_target))}
     nas.update(probe("sync_log", lambda: sync_state(sync_log)) or {})
-    return {
+    block = {
         "uptime_s": probe("uptime_s", lambda: int(float(read(root, "proc/uptime").split()[0]))),
         "load": probe("load", lambda: [float(v) for v in read(root, "proc/loadavg").split()[:3]]),
         "memory_available_mb": probe("memory_available_mb", lambda: meminfo_mb(root)["available"]),
@@ -229,12 +267,15 @@ def system_block(root, outbox, nas_target, sync_log, run=run_command):
         "nas": nas,
         "unavailable": missing,
     }
+    if skipped:
+        block["cut_short"] = True   # the deadline passed; the probes in `unavailable` didn't run
+    return block
 
 
-def daily_fields(root, outbox, run, setup_id, setup_note, script):
+def daily_fields(root, outbox, run, setup_id, setup_note, script, deadline=None):
     """What rarely changes, for system.json. Returns the fields and the probes that failed."""
     missing = []
-    probe = prober(missing)
+    probe = prober(missing, deadline)
     rpicam, libcamera = probe("rpicam_apps", lambda: versions(run)) or (None, None)
     fields = {
         "hostname": probe("hostname", socket.gethostname),
@@ -261,6 +302,41 @@ def daily_fields(root, outbox, run, setup_id, setup_note, script):
     if script:
         fields["capture_script_sha256"] = probe("capture_script_sha256", lambda: sha256_file(script))
     return fields, missing
+
+
+def boot_id(root):
+    try:
+        return read(root, "proc/sys/kernel/random/boot_id").strip()
+    except OSError:
+        return None
+
+
+def cached_run(run, cache_path, key):
+    """`run`, except that the slow daily commands are answered from the cache file when it was
+    written for the same key (UTC day and boot). Only successful answers are kept."""
+    try:
+        with open(cache_path) as f:
+            cache = json.load(f)
+        if not isinstance(cache, dict) or cache.get("key") != key or not isinstance(cache.get("answers"), dict):
+            raise ValueError("stale")
+    except (OSError, ValueError):
+        cache = {"key": key, "answers": {}}
+
+    def run_cached(cmd):
+        if tuple(cmd) not in CACHED_COMMANDS:
+            return run(cmd)
+        name = " ".join(cmd)
+        if isinstance(cache["answers"].get(name), str):
+            return cache["answers"][name]
+        out = run(cmd)
+        if out:
+            cache["answers"][name] = out
+            try:
+                write_json(cache_path, cache, os.path.dirname(cache_path) or ".")
+            except OSError:
+                pass        # no cache costs a probe next frame, nothing more
+        return out
+    return run_cached
 
 
 def write_json(path, data, tmp_folder):
@@ -319,17 +395,22 @@ def parse_value(text):
     return text
 
 
-def file_entry(path, checksums):
+def file_entry(path, checksums, deadline=None):
     entry = {"bytes": os.path.getsize(path)}
     if checksums:
-        entry["sha256"] = sha256_file(path)
+        digest = sha256_file(path, deadline)
+        if digest:
+            entry["sha256"] = digest
     return entry
 
 
-def sha256_file(path):
+def sha256_file(path, deadline=None):
+    """Hex digest, or None if the deadline passed first (a 25 MB DNG on a stalled SD card)."""
     digest = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            if deadline is not None and deadline.expired():
+                return None
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -339,7 +420,7 @@ def slot_iso(slot):
 
 
 def capture_block(json_path, data, kind, camera, slot, started, finished, setup_id, system_id,
-                  settings, decision_lux, checksums, schedule="regular"):
+                  settings, decision_lux, checksums, schedule="regular", deadline=None):
     base = json_path[:-len(".json")] if json_path.endswith(".json") else json_path
     # schedule: "regular" for the 5-minute slots, "dense" for the extra 1-a-minute frames.
     block = {"schema_version": SCHEMA_VERSION, "camera": camera, "kind": kind, "schedule": schedule}
@@ -357,32 +438,58 @@ def capture_block(json_path, data, kind, camera, slot, started, finished, setup_
     files = {}
     for ext in ("jpg", "dng"):
         if os.path.exists(base + "." + ext):
-            files[ext] = file_entry(base + "." + ext, checksums)
+            files[ext] = file_entry(base + "." + ext, checksums, deadline)
     block["files"] = files
+    if checksums and any("sha256" not in entry for entry in files.values()):
+        block["unavailable"] = ["sha256"]     # the deadline passed before every file was hashed
     return block
 
 
-def annotate(args):
-    with open(args.file) as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError("%s: top level is not a JSON object" % args.file)
-    sync_log = args.sync_log or os.path.join(os.path.dirname(args.outbox.rstrip("/")), "sync.log")
+def load_frame_json(path):
+    """rpicam's metadata, and None or why it could not be used ("missing" or "invalid")."""
     try:
-        fields, missing = daily_fields(args.root, args.outbox, run_command, args.setup_id,
-                                       args.setup_note, args.script)
+        with open(path) as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}, "missing"
+    except ValueError:
+        return {}, "invalid"
+    if not isinstance(data, dict):
+        return {}, "invalid"
+    return data, None
+
+
+def annotate(args):
+    deadline = Deadline(args.deadline)
+    data, problem = load_frame_json(args.file)
+    if problem:
+        data.setdefault("rpicam_metadata", problem)
+    outbox = args.outbox.rstrip("/\\")
+    sync_log = args.sync_log or os.path.join(os.path.dirname(args.outbox.rstrip("/")), "sync.log")
+    # Hidden name: the capture's "publish" moves every <frame>.* it can match.
+    folder = os.path.dirname(args.file) or "."
+
+    def run(cmd):
+        return run_command(cmd, timeout=deadline.timeout(RUN_TIMEOUT_S))
+
+    try:
+        key = {"day_utc": args.slot[:8], "boot_id": boot_id(args.root)}
+        daily_run = cached_run(run, os.path.join(os.path.dirname(outbox), CACHE_NAME), key)
+        fields, missing = daily_fields(args.root, args.outbox, daily_run, args.setup_id,
+                                       args.setup_note, args.script, deadline)
         system_id = update_daily(args.outbox, args.camera, args.slot, fields, missing)
     except Exception:  # the day's file must never cost the frame
         system_id = None
     data["Capture"] = capture_block(
         args.file, data, kind=args.kind, camera=args.camera, slot=args.slot, started=args.started,
         finished=args.finished, setup_id=args.setup_id, system_id=system_id, settings=args.set,
-        decision_lux=args.decision_lux, checksums=not args.no_checksums, schedule=args.schedule)
-    data["System"] = system_block(args.root, args.outbox, args.nas_target or "", sync_log)
+        decision_lux=args.decision_lux, checksums=not args.no_checksums, schedule=args.schedule,
+        deadline=deadline)
+    # Capture goes to disk first, so a kill while probing the system can't lose it.
+    write_json(args.file, data, folder)
+    data["System"] = system_block(args.root, args.outbox, args.nas_target or "", sync_log, run, deadline)
     if system_id is None:
         data["System"]["unavailable"].append("system_json")
-    # Hidden name: the capture's "publish" moves every <frame>.* it can match.
-    folder = os.path.dirname(args.file) or "."
     write_json(args.file, data, folder)
 
 
@@ -407,7 +514,14 @@ def main(argv=None):
     a.add_argument("--script", help="capture script, to record which version took the frame")
     a.add_argument("--no-checksums", action="store_true")
     a.add_argument("--root", default="/", help="for tests: where /proc and /sys are")
+    a.add_argument("--deadline", type=float, default=None,
+                   help="seconds for the whole script (default META_DEADLINE_S, else %d)" % DEADLINE_S)
     args = parser.parse_args(argv)
+    if args.deadline is None:
+        try:
+            args.deadline = float(os.environ.get("META_DEADLINE_S") or DEADLINE_S)
+        except ValueError:
+            args.deadline = DEADLINE_S
     try:
         annotate(args)
     except (ValueError, OSError, KeyError) as exc:

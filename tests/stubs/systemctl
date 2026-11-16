@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Stub: records what would have been asked of systemd.
+echo "systemctl $*" >> "${STUB_CALLS:-/dev/null}"
+exit 0

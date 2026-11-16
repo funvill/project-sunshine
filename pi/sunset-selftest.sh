@@ -24,6 +24,8 @@ SLOW_CAPTURE_S="${SLOW_CAPTURE_S:-30}"           # estimate: WARN above this for
 LOW_MEM_MB="${LOW_MEM_MB:-60}"                   # estimate: WARN if MemAvailable dips below this mid-capture
 IRCUT_RG_WARN="${IRCUT_RG_WARN:-1.25}"           # estimate, uncalibrated: mean R / mean G above this looks IR-contaminated
 TMP_ROOT="$(dirname "$OUT_ROOT")/selftest-tmp"
+LOCK_FILE="${LOCK_FILE:-$(dirname "$OUT_ROOT")/.sunset-capture.lock}"   # sunset-capture.sh's camera lock
+LOCK_WAIT_S="${LOCK_WAIT_S:-90}"                 # wait this long for a running capture to finish
 
 QUICK=0; NO_NAS=0
 for a in "$@"; do
@@ -44,6 +46,16 @@ head_() { printf '\n== %s\n' "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 meminfo_mb() { awk -v k="$1:" '$1==k{printf "%d", $2/1024}' /proc/meminfo 2>/dev/null; }
 json_num() { sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\([-0-9.eE+]*\).*/\1/p" "$1" | head -n1; }
+
+# The camera is exclusive: hold sunset-capture.sh's lock around each use of it, so the
+# self-test waits for a capture instead of taking the camera from it (and the reverse).
+cam_lock() {
+  have flock || return 0
+  exec 9>"$LOCK_FILE" || return 1
+  flock -w "$LOCK_WAIT_S" 9
+}
+cam_unlock() { have flock || return 0; flock -u 9 2>/dev/null; exec 9>&-; }
+busy() { fail "$1: camera busy (a capture held $LOCK_FILE for over ${LOCK_WAIT_S}s)"; }
 
 cleanup() { rm -rf "$TMP_ROOT"; [[ -n "${SAMPLER_PID:-}" ]] && kill "$SAMPLER_PID" 2>/dev/null; return 0; }
 trap cleanup EXIT
@@ -76,8 +88,17 @@ else
 fi
 
 head_ "Camera"
-CAMLIST="$(timeout 30 rpicam-still --list-cameras 2>&1 || true)"
-if grep -qi 'imx477' <<<"$CAMLIST"; then
+CAM_BUSY=0
+if cam_lock; then
+  CAMLIST="$(timeout 30 rpicam-still --list-cameras 2>&1 9>&- || true)"
+  cam_unlock
+else
+  CAMLIST=""; CAM_BUSY=1
+  busy "camera list"
+fi
+if (( CAM_BUSY )); then
+  :
+elif grep -qi 'imx477' <<<"$CAMLIST"; then
   pass "IMX477 detected: $(grep -i imx477 <<<"$CAMLIST" | head -n1 | sed 's/^ *//')"
 elif grep -Eq '^ *[0-9]+ *:' <<<"$CAMLIST"; then
   warn "a camera is present but it is not an imx477: $(grep -E '^ *[0-9]+ *:' <<<"$CAMLIST" | head -n1)"
@@ -122,11 +143,13 @@ timed_shot() { # timed_shot <label> <rpicam args...>
   local min_mem t0 t1 rc=0 samp
   mkdir -p "$TMP_ROOT"; rm -f "$TMP_ROOT"/*
   samp="$TMP_ROOT/.memmin"
-  ( m=999999; while :; do v="$(meminfo_mb MemAvailable)"; [[ -n "$v" ]] && (( v < m )) && { m=$v; echo "$m" > "$samp"; }; sleep 0.25; done ) &
+  cam_lock || { busy "$label"; return 1; }
+  ( m=999999; while :; do v="$(meminfo_mb MemAvailable)"; [[ -n "$v" ]] && (( v < m )) && { m=$v; echo "$m" > "$samp"; }; sleep 0.25; done ) 9>&- &
   SAMPLER_PID=$!
   t0=$(date +%s.%N)
-  timeout "$CAPTURE_TIMEOUT_S" rpicam-still "$@" 2>"$TMP_ROOT/err" || rc=$?
+  timeout "$CAPTURE_TIMEOUT_S" rpicam-still "$@" 2>"$TMP_ROOT/err" 9>&- || rc=$?
   t1=$(date +%s.%N)
+  cam_unlock
   kill "$SAMPLER_PID" 2>/dev/null; wait "$SAMPLER_PID" 2>/dev/null; SAMPLER_PID=""
   CAP_S="$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.1f", b-a}')"
   min_mem="$(cat "$samp" 2>/dev/null || echo '?')"
@@ -143,6 +166,8 @@ timed_shot() { # timed_shot <label> <rpicam args...>
 
 if (( QUICK )); then
   head_ "Captures"; info "skipped (--quick)"
+elif (( CAM_BUSY )); then
+  head_ "Captures"; info "skipped: camera busy"
 elif ! have rpicam-still || ! grep -qi imx477 <<<"$CAMLIST"; then
   head_ "Captures"; warn "skipped: no usable camera"
 else

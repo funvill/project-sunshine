@@ -24,7 +24,7 @@ fresh_env() {
   export STUB_CALLS="$W/calls.txt"
   unset STUB_SAME_FS STUB_RPICAM STUB_LUX STUB_NTP STUB_DF_PCT STUB_DF_FREE_MB STUB_RSYNC
   unset SAVE_RAW SITE_LAT SITE_LON NAS_TARGET NIGHT_LUX CAPTURE_TIMEOUT_S REQUIRE_TIME_SYNC
-  unset SUN_PY SLOT_EVERY_MIN STUB_DENSE DENSE_TIMEOUT_S
+  unset SUN_PY SLOT_EVERY_MIN STUB_DENSE DENSE_TIMEOUT_S ROTATION
   mkdir -p "$W/nas"
 }
 capture() { bash "$SRC/sunset-capture.sh"; }
@@ -36,6 +36,26 @@ for t in "$HERE"/cases/*.sh; do
   [[ -e "$t" ]] || continue
   # shellcheck disable=SC1090
   source "$t"
+done
+
+# Every tests/test_*.py that no case already runs (a case runs one by naming "$HERE/test_x.py").
+# A test that needs OpenCV or numpy is skipped with a message when they are missing; ffmpeg-only
+# parts skip themselves inside the test file.
+section "python tests"
+have_py_mods() { python3 -I -c "import $1" >/dev/null 2>&1; }
+command -v ffmpeg >/dev/null 2>&1 || echo "  note: ffmpeg not found; encoding tests inside the Python files will skip themselves"
+for t in "$HERE"/test_*.py; do
+  [[ -e "$t" ]] || continue
+  name="$(basename "$t")"
+  grep -qs "HERE/$name" "$HERE"/cases/*.sh && continue
+  case "$name" in
+    test_fuse_sunset.py|test_issue_blur.py)
+      if ! have_py_mods cv2 || ! have_py_mods numpy; then
+        echo "  SKIP: tests/$name (needs OpenCV and numpy: pip install numpy opencv-python-headless)"
+        continue
+      fi ;;
+  esac
+  check "tests/$name" python3 -I "$t"
 done
 
 echo

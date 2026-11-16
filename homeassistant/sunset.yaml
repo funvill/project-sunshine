@@ -1,13 +1,94 @@
-# Project Sunset: alert when no new production frame has reached the NAS.
-# Install steps are in docs/setup.md. This reads the NAS directly, so it still works if the Pi is dead.
+# Project Sunset: alerts for frames reaching the NAS, the cameras' health, the NAS itself, the daily
+# video job and the archive checks. Install steps are in docs/setup.md.
+# This reads the NAS directly, so it still works if a Pi is dead.
+#
+# Conventions: one sensor per camera for each check; an unknown value (share unreadable, script
+# failed, no result yet) counts as bad, never as fine; the first notification waits (delay_on) so a
+# Home Assistant restart doesn't set anything off.
+# Needs the python3 that Home Assistant's own container has (the JSON scripts call it).
 
 command_line:
+  # ---- Frame age (the first check): the newest JPEG's name on the NAS ----
   - sensor:
       name: Sunset newest frame age
       unique_id: sunset_newest_frame_age
       command: "sh /config/sunset/sunset_frame_age.sh"
       unit_of_measurement: min
       scan_interval: 300
+      command_timeout: 30
+  # The CM4 (hostname sunshine), saving as cm4wide.
+  - sensor:
+      name: Sunset CM4 newest frame age
+      unique_id: sunset_cm4_newest_frame_age
+      command: "sh /config/sunset/sunset_frame_age.sh cm4wide"
+      unit_of_measurement: min
+      scan_interval: 300
+      command_timeout: 30
+
+  # ---- Free space on the NAS share (issue #7) ----
+  - sensor:
+      name: Sunset NAS free space
+      unique_id: sunset_nas_free_space
+      command: "sh /config/sunset/sunset_nas_free.sh"
+      unit_of_measurement: GB
+      scan_interval: 900
+      command_timeout: 30
+
+  # ---- Camera health from the newest frame's JSON (issue #22): "ok", or what is wrong ----
+  # Limits (undervoltage and throttle bits 0-3, 75 C, 50 frames waiting on the Pi, 80% disk, 400 kB JPEG)
+  # are defaults at the top of sunset_camera_health.sh. To change one for a camera, put it before
+  # the command, for example: command: "OUTBOX_MAX=100 sh /config/sunset/sunset_camera_health.sh wide"
+  - sensor:
+      name: Sunset camera health
+      unique_id: sunset_camera_health
+      command: "sh /config/sunset/sunset_camera_health.sh wide"
+      scan_interval: 300
+      command_timeout: 30
+  - sensor:
+      name: Sunset CM4 camera health
+      unique_id: sunset_cm4_camera_health
+      command: "sh /config/sunset/sunset_camera_health.sh cm4wide"
+      scan_interval: 300
+      command_timeout: 30
+
+  # ---- The daily video job: status and age of the newest daily/*.json ----
+  # "<status> <date> <age>d". Only "ok" (status encoded) is good; skipped, failed, stale, unreadable
+  # and any status this script doesn't know all count as bad.
+  - sensor:
+      name: Sunset daily video
+      unique_id: sunset_daily_video
+      command: "sh /config/sunset/sunset_daily_status.sh"
+      scan_interval: 1800
+      command_timeout: 30
+
+  # ---- The archive verifier (nas/sunset-verify.py): hashes checked against the frame JSON ----
+  # "ok", "bad missing=1 mismatched=2 ...", or "stale" if it hasn't run in 48 hours.
+  - sensor:
+      name: Sunset archive check
+      unique_id: sunset_archive_check
+      command: "sh /config/sunset/sunset_result.sh verify wide 48"
+      scan_interval: 1800
+      command_timeout: 30
+  - sensor:
+      name: Sunset CM4 archive check
+      unique_id: sunset_cm4_archive_check
+      command: "sh /config/sunset/sunset_result.sh verify cm4wide 48"
+      scan_interval: 1800
+      command_timeout: 30
+
+  # ---- The daily health record (nas/sunset-health.py): counts, gaps, missing blocks ----
+  # "ok", or the record's problem names, or "stale" if no new record in 48 hours.
+  - sensor:
+      name: Sunset daily health
+      unique_id: sunset_daily_health
+      command: "sh /config/sunset/sunset_result.sh health wide 48"
+      scan_interval: 1800
+      command_timeout: 30
+  - sensor:
+      name: Sunset CM4 daily health
+      unique_id: sunset_cm4_daily_health
+      command: "sh /config/sunset/sunset_result.sh health cm4wide 48"
+      scan_interval: 1800
       command_timeout: 30
 
 input_number:
@@ -19,6 +100,19 @@ input_number:
     max: 1440
     step: 1
     initial: 60 # Also restores this after a restart. Lower it briefly to test the alert.
+    mode: box
+  sunset_min_free_gb:
+    name: Sunset min free space
+    icon: mdi:harddisk
+    unit_of_measurement: GB
+    min: 0
+    max: 20000
+    step: 10
+    # About 14 days of runway. Both cameras together fill the share at roughly 25 GB a day: it went from
+    # 230 GB free on Nov 11 to 128 GB on Nov 15 (issue #7), and 14 days x 25 GB is 350 GB. That is time
+    # to clear space or add a disk before frames start backing up on the Pis, which hold only 2-3 days.
+    # Raise it if the daily rate goes up (dense frames, a third camera); lower it once the NAS has room.
+    initial: 350
     mode: box
 
 template:
@@ -32,6 +126,64 @@ template:
         state: >
           {% set age = states('sensor.sunset_newest_frame_age') %}
           {{ not is_number(age) or age | float > states('input_number.sunset_max_frame_age') | float(60) }}
+      - name: Sunset CM4 frames stale
+        unique_id: sunset_cm4_frames_stale
+        device_class: problem
+        delay_on: "00:10:00"
+        state: >
+          {% set age = states('sensor.sunset_cm4_newest_frame_age') %}
+          {{ not is_number(age) or age | float > states('input_number.sunset_max_frame_age') | float(60) }}
+
+      - name: Sunset NAS space low
+        unique_id: sunset_nas_space_low
+        device_class: problem
+        delay_on: "00:30:00"
+        # Unknown counts as low: an unreadable share is the same emergency as a full one.
+        state: >
+          {% set free = states('sensor.sunset_nas_free_space') %}
+          {{ not is_number(free) or free | float < states('input_number.sunset_min_free_gb') | float(350) }}
+
+      # Anything but exactly "ok" is bad, which includes unknown and unavailable.
+      # The 30 minutes let a brief throttle flag (soft temperature limit on a sunny afternoon) pass.
+      - name: Sunset camera unhealthy
+        unique_id: sunset_camera_unhealthy
+        device_class: problem
+        delay_on: "00:30:00"
+        state: "{{ states('sensor.sunset_camera_health') != 'ok' }}"
+      - name: Sunset CM4 camera unhealthy
+        unique_id: sunset_cm4_camera_unhealthy
+        device_class: problem
+        delay_on: "00:30:00"
+        state: "{{ states('sensor.sunset_cm4_camera_health') != 'ok' }}"
+
+      # The first word of the daily video state is the status.
+      - name: Sunset daily video failed
+        unique_id: sunset_daily_video_failed
+        device_class: problem
+        delay_on: "01:00:00"
+        state: "{{ states('sensor.sunset_daily_video').split(' ')[0] != 'ok' }}"
+
+      - name: Sunset archive check failed
+        unique_id: sunset_archive_check_failed
+        device_class: problem
+        delay_on: "00:10:00"
+        state: "{{ states('sensor.sunset_archive_check') != 'ok' }}"
+      - name: Sunset CM4 archive check failed
+        unique_id: sunset_cm4_archive_check_failed
+        device_class: problem
+        delay_on: "00:10:00"
+        state: "{{ states('sensor.sunset_cm4_archive_check') != 'ok' }}"
+
+      - name: Sunset daily health failed
+        unique_id: sunset_daily_health_failed
+        device_class: problem
+        delay_on: "00:10:00"
+        state: "{{ states('sensor.sunset_daily_health') != 'ok' }}"
+      - name: Sunset CM4 daily health failed
+        unique_id: sunset_cm4_daily_health_failed
+        device_class: problem
+        delay_on: "00:10:00"
+        state: "{{ states('sensor.sunset_cm4_daily_health') != 'ok' }}"
 
 alert:
   sunset_frames_stale:
@@ -43,10 +195,168 @@ alert:
     message: >
       {% set age = states('sensor.sunset_newest_frame_age') %}
       {% if is_number(age) %}The newest frame on the NAS is {{ age }} minutes old.
-      {% else %}Home Assistant can't find a recent frame on the NAS: no frames in two days, or the share is unreadable.{% endif %}
+      {% else %}Home Assistant can't find a recent frame on the NAS: no frames in two days, the share is unreadable, or the newest frame is named in the future.{% endif %}
       Open the diag page on timelaps to see why.
     done_message: Project Sunset frames are reaching the NAS again.
     notifiers:
       - persistent_notification
       # Add your phone here so an alert reaches you overnight, for example:
       # - mobile_app_your_phone
+
+  sunset_cm4_frames_stale:
+    name: Project Sunset CM4 has no new frames
+    entity_id: binary_sensor.sunset_cm4_frames_stale
+    state: "on"
+    repeat: 360
+    can_acknowledge: true
+    message: >
+      {% set age = states('sensor.sunset_cm4_newest_frame_age') %}
+      {% if is_number(age) %}The CM4's newest frame on the NAS is {{ age }} minutes old.
+      {% else %}Home Assistant can't find a recent CM4 frame on the NAS: no frames in two days, the share is unreadable, or the newest frame is named in the future.{% endif %}
+      Open the diag page on sunshine to see why.
+    done_message: Project Sunset CM4 frames are reaching the NAS again.
+    notifiers:
+      - persistent_notification
+      # Same phone as above, for example:
+      # - mobile_app_your_phone
+
+  sunset_nas_space_low:
+    name: Project Sunset NAS is running out of space
+    entity_id: binary_sensor.sunset_nas_space_low
+    state: "on"
+    repeat: 720
+    can_acknowledge: true
+    message: >
+      {% set free = states('sensor.sunset_nas_free_space') %}
+      {% if is_number(free) %}The NAS share has {{ free }} GB free, under the {{ states('input_number.sunset_min_free_gb') }} GB limit (about 14 days of frames).
+      {% else %}Home Assistant can't read the free space on the NAS share.{% endif %}
+      Clear space before the Pis' disks start filling.
+    done_message: The NAS share has enough free space again.
+    notifiers:
+      - persistent_notification
+      # - mobile_app_your_phone
+
+  sunset_camera_unhealthy:
+    name: Project Sunset camera Pi is unhealthy
+    entity_id: binary_sensor.sunset_camera_unhealthy
+    state: "on"
+    repeat: 360
+    can_acknowledge: true
+    message: >
+      timelaps, from its newest frame: {{ states('sensor.sunset_camera_health') }}.
+      (undervoltage, throttled, temp, outbox, disk, small_jpeg, repeat_frame, no_meta. Unknown means no readable frame JSON.)
+    done_message: The timelaps health check is clear.
+    notifiers:
+      - persistent_notification
+      # - mobile_app_your_phone
+
+  sunset_cm4_camera_unhealthy:
+    name: Project Sunset CM4 is unhealthy
+    entity_id: binary_sensor.sunset_cm4_camera_unhealthy
+    state: "on"
+    repeat: 360
+    can_acknowledge: true
+    message: >
+      The CM4 (sunshine), from its newest frame: {{ states('sensor.sunset_cm4_camera_health') }}.
+      (undervoltage, throttled, temp, outbox, disk, small_jpeg, repeat_frame, no_meta. Unknown means no readable frame JSON.)
+    done_message: The CM4 health check is clear.
+    notifiers:
+      - persistent_notification
+      # - mobile_app_your_phone
+
+  sunset_daily_video_failed:
+    name: Project Sunset daily video job is not succeeding
+    entity_id: binary_sensor.sunset_daily_video_failed
+    state: "on"
+    repeat: 720
+    can_acknowledge: true
+    message: >
+      The newest daily video record says: {{ states('sensor.sunset_daily_video') }}
+      (status, date, age in days). Look at daily/ on the NAS and the job's log.
+    done_message: The daily video job is succeeding again.
+    notifiers:
+      - persistent_notification
+      # - mobile_app_your_phone
+
+  sunset_archive_check_failed:
+    name: Project Sunset archive check found a problem
+    entity_id: binary_sensor.sunset_archive_check_failed
+    state: "on"
+    repeat: 720
+    can_acknowledge: true
+    message: >
+      The wide camera's archive check says: {{ states('sensor.sunset_archive_check') }}.
+      Paths are in health/wide/verify.json on the NAS. Stale means the verifier has not run.
+    done_message: The wide camera's archive check is clear.
+    notifiers:
+      - persistent_notification
+      # - mobile_app_your_phone
+
+  sunset_cm4_archive_check_failed:
+    name: Project Sunset CM4 archive check found a problem
+    entity_id: binary_sensor.sunset_cm4_archive_check_failed
+    state: "on"
+    repeat: 720
+    can_acknowledge: true
+    message: >
+      The CM4's archive check says: {{ states('sensor.sunset_cm4_archive_check') }}.
+      Paths are in health/cm4wide/verify.json on the NAS. Stale means the verifier has not run.
+    done_message: The CM4's archive check is clear.
+    notifiers:
+      - persistent_notification
+      # - mobile_app_your_phone
+
+  sunset_daily_health_failed:
+    name: Project Sunset daily health record has problems
+    entity_id: binary_sensor.sunset_daily_health_failed
+    state: "on"
+    repeat: 720
+    can_acknowledge: true
+    message: >
+      The wide camera's last full day: {{ states('sensor.sunset_daily_health') }}.
+      Details are in health/wide/latest.json on the NAS. Stale means no new record in 48 hours.
+    done_message: The wide camera's daily health record is clear.
+    notifiers:
+      - persistent_notification
+      # - mobile_app_your_phone
+
+  sunset_cm4_daily_health_failed:
+    name: Project Sunset CM4 daily health record has problems
+    entity_id: binary_sensor.sunset_cm4_daily_health_failed
+    state: "on"
+    repeat: 720
+    can_acknowledge: true
+    message: >
+      The CM4's last full day: {{ states('sensor.sunset_cm4_daily_health') }}.
+      Details are in health/cm4wide/latest.json on the NAS. Stale means no new record in 48 hours.
+    done_message: The CM4's daily health record is clear.
+    notifiers:
+      - persistent_notification
+      # - mobile_app_your_phone
+
+automation:
+  # An acknowledged alert (state "idle") would otherwise stay silent for the whole outage. After 12 hours
+  # of still being acknowledged, switch it back on, which sends the alert again and restarts its repeats.
+  # Add this package's alerts to the list if you add more. The alert's own `alert.turn_on` does the reset.
+  - id: sunset_unacknowledge_alerts
+    alias: Project Sunset re-arm acknowledged alerts
+    mode: parallel
+    trigger:
+      - platform: state
+        entity_id:
+          - alert.sunset_frames_stale
+          - alert.sunset_cm4_frames_stale
+          - alert.sunset_nas_space_low
+          - alert.sunset_camera_unhealthy
+          - alert.sunset_cm4_camera_unhealthy
+          - alert.sunset_daily_video_failed
+          - alert.sunset_archive_check_failed
+          - alert.sunset_cm4_archive_check_failed
+          - alert.sunset_daily_health_failed
+          - alert.sunset_cm4_daily_health_failed
+        to: "idle"
+        for: "12:00:00"
+    action:
+      - service: alert.turn_on
+        target:
+          entity_id: "{{ trigger.entity_id }}"
