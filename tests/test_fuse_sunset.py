@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 
 try:
@@ -254,6 +255,54 @@ class TemporalBlend(unittest.TestCase):
         self.assertEqual([n for n in os.listdir(self.out)], [])
         self.assertEqual(self.fs.blend_minutes(self.frames, self.out, self.at(0), self.at(4)), 3)
 
+    def test_undo_puts_back_the_fused_frames_it_blended(self):
+        self.minutes([100, 100, 100, 100, 100])
+        os.makedirs(self.out)
+        fused = os.path.join(self.out, "cam_%s.jpg" % self.stamp(self.at(2)))
+        cv2.imwrite(fused, np.full((8, 8, 3), 180, np.uint8))
+        self.fs.blend_minutes(self.frames, self.out, self.at(0), self.at(4))
+        self.fs.undo_blend(self.out)
+        self.assertEqual(os.listdir(self.out), [os.path.basename(fused)], "only the fused frame, nothing else")
+        self.assertAlmostEqual(cv2.imread(fused).mean(), 180, delta=1, msg="as it was before the blend")
+
+    def crash_after(self, writes):
+        """Run blend_minutes over minutes 0 to 4, failing on JPEG write number `writes` + 1."""
+        real, count = cv2.imwrite, [0]
+
+        def imwrite(path, *a, **k):
+            if path.endswith(".jpg"):
+                count[0] += 1
+                if count[0] > writes:
+                    raise KeyboardInterrupt("power cut")
+            return real(path, *a, **k)
+
+        with mock.patch.object(self.fs.cv2, "imwrite", side_effect=imwrite):
+            with self.assertRaises(KeyboardInterrupt):
+                self.fs.blend_minutes(self.frames, self.out, self.at(0), self.at(4))
+
+    def with_fused_middle(self):
+        self.minutes([100, 100, 100, 100, 100])
+        os.makedirs(self.out)
+        cv2.imwrite(os.path.join(self.out, "cam_%s.jpg" % self.stamp(self.at(2))), np.full((8, 8, 3), 180, np.uint8))
+
+    def test_a_blend_cut_off_part_way_is_not_blended_twice_when_run_again(self):
+        # The crash comes after minute 2 (the fused frame) was overwritten with its blend. Reading that
+        # back as the source would blend it a second time: (100 + 2*140 + 100) / 4 = 120, not 140.
+        self.with_fused_middle()
+        self.crash_after(2)
+        self.fs.blend_minutes(self.frames, self.out, self.at(0), self.at(4))
+        self.assertAlmostEqual(self.out_mean(self.at(2)), 140, delta=3)
+        self.assertAlmostEqual(self.out_mean(self.at(1)), 120, delta=3)
+        self.assertAlmostEqual(self.out_mean(self.at(3)), 120, delta=3)
+
+    def test_undo_after_a_blend_cut_off_part_way_restores_the_fused_frame(self):
+        self.with_fused_middle()
+        self.crash_after(2)
+        self.fs.undo_blend(self.out)
+        name = "cam_%s.jpg" % self.stamp(self.at(2))
+        self.assertEqual(os.listdir(self.out), [name])
+        self.assertAlmostEqual(self.out_mean(self.at(2)), 180, delta=1)
+
     def test_blend_run_covers_the_bracket_and_15_minutes_either_side(self):
         for i in range(30):
             self.add_minute(self.start + timedelta(minutes=i), prod=100 + 20 * (i % 2), pair=(10 <= i < 15))
@@ -261,6 +310,77 @@ class TemporalBlend(unittest.TestCase):
         self.assertEqual(made, 28, "minutes 1 to 28: the bracket (10 to 14) is well inside 15 minutes")
         with open(os.path.join(self.out, self.fs.BLEND_MARK)) as f:
             self.assertEqual(len(json.load(f)["blended"]), 28)
+
+
+def load_build_video():
+    spec = importlib.util.spec_from_file_location("build_video", os.path.join(os.path.dirname(HERE), "tools", "build_video.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@unittest.skipIf(np is None, "needs numpy and OpenCV")
+class Redo(unittest.TestCase):
+    """tools/build_video.py --redo after a change to the merge code: the fused frames must be made
+    again, not reused (it printed "fused 0 frames" and encoded the old pictures)."""
+
+    stamp, add_minute, out_mean = Run.stamp, Run.add_minute, Run.out_mean
+
+    def setUp(self):
+        Run.setUp(self)
+        self.bv = load_build_video()
+        self.start = SUNSET - timedelta(minutes=30)
+        for i in range(12):
+            self.add_minute(self.start + timedelta(minutes=i))
+
+    def prepare(self, redo):
+        return self.bv.prepare_fused(self.fs, self.run_dir, self.frames, self.out, redo=redo)
+
+    def new_merge(self):
+        return mock.patch.object(self.fs, "fuse", lambda bright, dark: np.full_like(bright, 250))
+
+    def test_without_redo_the_frames_already_made_are_kept(self):
+        made, blended = self.prepare(False)
+        self.assertGreater(made, 0)
+        self.assertGreater(blended, 0)
+        before = self.out_mean(self.start + timedelta(minutes=7))
+        with self.new_merge():
+            self.assertEqual(self.prepare(False), (0, 0))
+        self.assertAlmostEqual(self.out_mean(self.start + timedelta(minutes=7)), before, delta=0.5)
+
+    def test_redo_makes_the_fused_frames_again_with_the_new_merge(self):
+        self.prepare(False)
+        with self.new_merge():
+            made, blended = self.prepare(True)
+        self.assertGreater(made, 0)
+        self.assertGreater(blended, 0, "and blends them again")
+        self.assertAlmostEqual(self.out_mean(self.start + timedelta(minutes=7)), 250, delta=3)
+
+    def test_redo_twice_gives_the_same_frames(self):
+        self.prepare(False)
+        self.prepare(True)
+        once = [self.out_mean(self.start + timedelta(minutes=i)) for i in range(2, 11)]
+        self.prepare(True)
+        twice = [self.out_mean(self.start + timedelta(minutes=i)) for i in range(2, 11)]
+        for a, b in zip(once, twice):
+            self.assertAlmostEqual(a, b, delta=0.5)
+
+    def test_redo_drops_fused_frames_the_new_merge_does_not_make(self):
+        # A narrower merge window would leave the old build's frames outside it, still swapped in.
+        self.prepare(False)
+        stray = os.path.join(self.out, "cam_%s.jpg" % self.stamp(self.start - timedelta(minutes=60)))
+        cv2.imwrite(stray, np.full((8, 8, 3), 7, np.uint8))
+        other = os.path.join(self.out, "notes.txt")
+        open(other, "w").close()
+        self.prepare(True)
+        self.assertFalse(os.path.exists(stray))
+        self.assertTrue(os.path.exists(other), "only frame-named JPEGs are removed")
+
+    def test_no_blend_leaves_the_fused_frames_unblended(self):
+        made, blended = self.bv.prepare_fused(self.fs, self.run_dir, self.frames, self.out, blend=False)
+        self.assertGreater(made, 0)
+        self.assertEqual(blended, 0)
+        self.assertFalse(os.path.exists(os.path.join(self.out, self.fs.BLEND_MARK)))
 
 
 if __name__ == "__main__":
