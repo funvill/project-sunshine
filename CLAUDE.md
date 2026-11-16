@@ -371,6 +371,20 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
 - Cables: Pi Zero camera cable (Adafruit #3157, 22-pin — also fits Pi 5), standard 15-pin ribbon.
 - SD cards: SanDisk Ultra 16 GB A1 (pilot), ADATA 32 GB (backup choice), Kingston SDCS 16 GB
   (spare/images), Kingston SDC10G2 16 GB (retire).
+- **UPS: Mini-Box OpenUPS2** (USB `04D8:D005`, identified 2026-11-15), 11-24 V in, 12-24 V out, 3S 18650.
+  For the CM4 `sunshine` (MyPi XT, 9-28 V in), not `timelaps`. Built for LiFePO4; the three 18650-34T
+  Li-ion cells need R20 changed to 576k plus Li-ion firmware 1.6 to charge fully. **Decided 2026-11-15: run
+  the 34T Li-ion cells with the R20 change and firmware 1.6**, charge temperatures limited to 5-45 °C. As found,
+  the board was unconfigured LiFePO4 firmware v1.1; flashed to v1.6 Li-ion on 2026-11-15 (R20 not yet changed),
+  then set `CAPACITY` 3400 mAh and `CHG_TEMP_WARM`/`HOT` 40/45 °C.
+  **Integration decided 2026-11-16 (plan on #29):** status read by our own stdlib Python reader over
+  `/dev/hidraw` (Mini-Box's `0x81`/`0x83` status messages, read-only), not NUT; `~/sunset/ups.log`
+  written only when a value changes beyond its deadband, on events, and a keyframe every 4 h (minimal SD
+  writes; live status only in `/run`), rotated by the script daily or at 256 KB, 14 files kept;
+  tested on the bench before it goes on `sunshine`; on low battery pause the capture/dense/sync timers rather than halt
+  (a halted Pi stays off if mains returns before the UPS cuts out); HA alert later; `ups_source` and
+  `ups_charge_pct` in each frame's `System` block after the pending `sunset-meta.py` work merges. The flasher (`HIDBootLoader.exe`) comes from
+  Mini-Box's OpenUPS (v1) firmware pack; never flash that pack's hex files. **Reader built 2026-11-16, not installed:** `pi/sunset-ups.py` (`--once`, `--raw`, `--run`), `pi/systemd/sunset-ups.service` (root, not yet in `install.sh`), `tests/test_ups.py`. Bench-tested on the PC in WSL (USB passed through with usbipd-win, busid 1-14) against the real board: steady values wrote only keyframes, and an unplug wrote one lost and one found line. Settings are `UPS_*` in `sunset.env` (defaults in the script). Deadbands to tune once the cells are in. Steps and status in issue #29.
 - **Wyze Cam v2** ×several — not for this project (no RAW/manual control). Possible Home Assistant
   cameras via Thingino firmware.
 - Sony NEX-5 and Samsung NX200: rejected (no USB remote control, mechanical shutter only).
