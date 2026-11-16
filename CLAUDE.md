@@ -115,7 +115,10 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   on the frame (`schema_version` 1). It never touches the NAS path, and it leaves out anything
   identifying (see `docs/setup.md`). **Change `SETUP_ID` in `sunset.env` whenever the camera, lens,
   focus, iris, mount or hood changes**, including at the bracket move.
-- **Local-first storage**, rsync to NAS, delete local only after confirmed copy.
+- **Local-first storage**, rsync to NAS, delete local only after confirmed copy: on the mounted share the
+  sync reads the NAS copy back first (size, SHA-256 up to 8 MB, the DNG's ends; 2026-11-16, #13). Capture
+  refuses to run without `sunset.env` (`REQUIRE_ENV_FILE`, #23), and the sync backs up `sunset.env`, `fstab`
+  and `config.txt` to `project_sunshine_config/<host>/` on the share.
   (Writing straight to the NAS was rejected: a prior year-long Pi project lost frames when the
   NAS share didn't return after a power cut.)
 - Monitoring: **Home Assistant alerts on the age of the newest file on the NAS** (> ~1 h).
@@ -133,7 +136,7 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
 ## Current phase: pilot on a Pi 3 B+ (decision changed 2026-11-03)
 - **Pilot moved from the Pi Zero W to a Pi 3 B+ Rev 1.3**, hostname `timelaps`, user `funvill`,
   because that is the setup where the UC-517 is known to work. Raspberry Pi OS Bookworm 32-bit
-  (armv7l), not reflashed. On Ethernet and Wi-Fi. Clock zone is America/Vancouver (changed from America/Adak 2026-11-04;
+  (armv7l), not reflashed. On its built-in Wi-Fi (no Ethernet link since about Nov 5). Clock zone is America/Vancouver (changed from America/Adak 2026-11-04;
   `tzdata` 2026c gives UTC-7 all year, shown as `MST`); filenames are UTC and nothing depends on the zone.
 - **Camera: Arducam UC-517** in the CAMERA port, `camera_auto_detect=0` + `dtoverlay=imx477`
   (auto-detect does not find it). Manually focused on the distant view.
@@ -181,8 +184,9 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   first 7 minutes after the reboot. Not ruled out: a kernel or camera-stack bug.
 - **Timers on (2026-11-04), before the new supply:** Steven's other tools read the frames on the NAS,
   so sync and capture are enabled despite the undervoltage. Expect possible gaps until it's fixed.
-- **NAS space (2026-11-04):** the share reports 311 GB free of 11 TB (98% full). Steven can clear
-  10 TB when needed and is handling it, so space doesn't limit the capture plan.
+- **NAS space:** the share had 311 GB free of 11 TB on 2026-11-04 and 126 GB on 2026-11-16. With two
+  cameras saving DNGs it fills at about 25 GB a day, so it is days from full until Steven clears space
+  (#7). Over five years two cameras with DNGs need about 44 TB (#9), so space now limits the plan.
 - **Experiments (#3):** `experiments/sunset-experiment.py`, copied to `~/sunset/experiments/`, shoots
   between the real captures. Results go to `project_sunshine_experiments/` on the NAS, never the outbox
   or the production folder. Scheduled by transient systemd timers (`exp-*`), which a reboot clears.
@@ -328,7 +332,7 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   capture through `sunset-capture.service` (2026-11-11 23:44 UTC) went through cleanly and synced to
   `project_sunshine/cm4wide/`.
   **At the window from 2026-11-12 ~00:30 UTC** (`SETUP_ID=cm4-window-1`), on Wi-Fi through an old
-  Buffalo 2.4 GHz USB dongle (192.168.3.60, about 2.4 Mbit/s to the NAS). **Capturing since
+  Buffalo 2.4 GHz USB dongle (about 2.4 Mbit/s to the NAS). **Capturing since
   2026-11-12 00:35 UTC** (Steven's go-ahead): the 5-minute, dense and sync timers, same schedule as
   `timelaps`. HA has a separate CM4 alert (`cm4wide`) from 2026-11-12, same 60-minute limit, also
   sent to the phone.
@@ -340,7 +344,7 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
   **The camera is mounted upside down.** `ROTATION=180` in its `sunset.env` (new setting, 2026-11-12)
   makes rpicam flip the readout, so frames from **01:08 UTC** on are upright, DNG included, and say
   `rotation: 180` in `Capture.settings`. Frames from 00:35 to 01:07 UTC are upside down. `timelaps`
-  still runs the previous capture script (no change for it: the setting defaults to 0). It points down more than `timelaps`: the horizon is about 44% from the top, with the
+  runs the same script with the setting left at its default of 0 (both Pis on the same code since 2026-11-13). It points down more than `timelaps`: the horizon is about 44% from the top, with the
   street and the deck railing (lower left, out of focus) below. Focus is good: sharp in the centre and
   even left to right (no tilt), a little softer towards the edges.
   **Field of view, estimated by matching features against the 6 mm frame (not measured on the sun):**
