@@ -16,6 +16,12 @@ from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(os.path.dirname(HERE), "windowtracking", "sunset-windowlight.py")
+# windowtracking/ is gitignored, so a fresh clone has no script to test: skip, don't fail.
+if not os.path.exists(SCRIPT):
+    if __name__ == "__main__":
+        print("SKIP: windowtracking/sunset-windowlight.py is not in this checkout")
+        sys.exit(0)
+    raise unittest.SkipTest("windowtracking/sunset-windowlight.py is not in this checkout")
 spec = importlib.util.spec_from_file_location("sunset_windowlight", SCRIPT)
 wl = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wl)
