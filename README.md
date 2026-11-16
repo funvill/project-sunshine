@@ -149,7 +149,9 @@ Set `SUNSET_NAS` once on the PC to the `project_sunshine` folder on the share (f
 (0 to 100, from how much of the sky is lit warm around sunset; provisional, see
 [nas/README.md](nas/README.md#sky-score)). `--start 07:30` starts at that local time, `--fuse-run` merges
 that experiment run's sunset bracket first and blends each sunset minute with its neighbours (1:2:1, to
-calm the cloud flicker; `--no-blend` to skip it), and `--redo` builds a day again. The camera's `crop.json`
+calm the cloud flicker; `--no-blend` to skip it), `--fuse-production` does the same with the production
+bracket (the `_ev0`/`_ev-2` frames that `BRACKET=1` saves beside each sunset frame, #10) instead of an
+experiment run, and `--redo` builds a day again. The camera's `crop.json`
 (calibration, tighter view, tower blur) is `nas/crop.cm4wide.json`.
 
 ## Rules

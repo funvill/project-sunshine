@@ -19,7 +19,7 @@ import json
 import re
 import os
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -36,11 +36,21 @@ FONTS = ("C:/Windows/Fonts/arialbd.ttf", "/usr/share/fonts/truetype/dejavu/DejaV
 FUSED_NAME = re.compile(r"^[A-Za-z0-9]+_\d{8}T\d{6}Z\.jpg$")   # a fused frame: <cam>_<UTC>.jpg
 
 
-def prepare_fused(fuse, run_dir, frames_dir, fused_dir, redo=False, blend=True):
+def evening_window(day, tz=None):
+    """UTC start and end of the local evening of `day` (noon to 06:00 the next morning), which holds
+    that day's sunset and its bracket on both sides of midnight UTC."""
+    from zoneinfo import ZoneInfo
+    tz = tz or ZoneInfo("America/Vancouver")
+    noon = datetime(day.year, day.month, day.day, 12, tzinfo=tz)
+    return noon.astimezone(timezone.utc), (noon + timedelta(hours=18)).astimezone(timezone.utc)
+
+
+def prepare_fused(fuse, run_dir, frames_dir, fused_dir, redo=False, blend=True, brackets=None):
     """Merge the sunset bracket into fused_dir, then blend each minute with its neighbours.
     Returns (frames fused, frames blended). Without redo, frames already there are kept. With redo
     the blend is undone (fused frames put back, the rest removed) and every frame fused again, so
-    the video never encodes pictures made by older merge code."""
+    the video never encodes pictures made by older merge code. brackets: the production pairs from
+    fuse.production_bracket(), used instead of an experiment run (run_dir is then ignored)."""
     if redo:
         fuse.undo_blend(fused_dir)
         # Drop every fused frame, so frames the new merge no longer makes (a narrower window) are
@@ -49,8 +59,8 @@ def prepare_fused(fuse, run_dir, frames_dir, fused_dir, redo=False, blend=True):
             for name in os.listdir(fused_dir):
                 if FUSED_NAME.match(name):
                     os.remove(os.path.join(fused_dir, name))
-    made = fuse.fuse_run(run_dir, frames_dir, fused_dir, force=redo)
-    blended = fuse.blend_run(run_dir, frames_dir, fused_dir) if blend else 0
+    made = fuse.fuse_run(run_dir, frames_dir, fused_dir, force=redo, brackets=brackets)
+    blended = fuse.blend_run(run_dir, frames_dir, fused_dir, brights=brackets[0] if brackets else None) if blend else 0
     return made, blended
 
 
@@ -66,6 +76,8 @@ def main():
     ap.add_argument("--expected", type=int, default=daily.EXPECTED_FRAMES)
     ap.add_argument("--font", help="bold TTF for the text")
     ap.add_argument("--fuse-run", help="experiment run with the sunset bracket, e.g. cm4-sunset-1: merge it first")
+    ap.add_argument("--fuse-production", action="store_true",
+                    help="merge the production bracket (the _ev0/_ev-2 frames from BRACKET=1) instead of an experiment run")
     ap.add_argument("--fused", help="a folder of already-fused frames (what --fuse-run makes in <out>/fused)")
     ap.add_argument("--no-blend", action="store_true", help="with --fuse-run: skip the 1:2:1 blend of each sunset minute with its neighbours")
     ap.add_argument("--redo", action="store_true",
@@ -83,14 +95,20 @@ def main():
                        crop_file=args.crop or str(out / "crop.json"), tz=ZoneInfo("America/Vancouver"),
                        start_date=date.fromisoformat("2026-12-21"), expected_frames=args.expected,
                        lookback_days=2, font_file=font, start_local=args.start, location=args.location)
-    if args.fuse_run:
+    if args.fuse_run and args.fuse_production:
+        ap.error("--fuse-run and --fuse-production: pick one")
+    if args.fuse_run or args.fuse_production:
         spec = importlib.util.spec_from_file_location("fuse_sunset", HERE / "fuse_sunset.py")
         fuse = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fuse)   # needs numpy and OpenCV, so only loaded when asked for
-        run_dir = Path(args.nas).parent / "project_sunshine_experiments" / args.fuse_run
         args.fused = str(out / "fused")
-        made, blended = prepare_fused(fuse, str(run_dir), cfg.frames_dir, args.fused, redo=args.redo,
-                                      blend=not args.no_blend)
+        if args.fuse_production:
+            run_dir, brackets = None, fuse.production_bracket(cfg.frames_dir, *evening_window(day, cfg.tz))
+            print("production bracket: %d ev0, %d ev-2" % (len(brackets[0]), len(brackets[1])))
+        else:
+            run_dir, brackets = str(Path(args.nas).parent / "project_sunshine_experiments" / args.fuse_run), None
+        made, blended = prepare_fused(fuse, run_dir, cfg.frames_dir, args.fused, redo=args.redo,
+                                      blend=not args.no_blend, brackets=brackets)
         print("fused %d frames" % made)
         if not args.no_blend:
             print("blended %d frames with their neighbours" % blended)

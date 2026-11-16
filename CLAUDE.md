@@ -71,6 +71,10 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
     production, live only with Steven's go-ahead. Until then the sunset program runs on both
     cameras every evening (`exp-sunset.timer`, 23:00 UTC, a unit file so it survives a reboot;
     runs `sunset-YYYYMMDD` / `cm4-sunset-YYYYMMDD`, from the evening of Nov 16). **Settings freeze Dec 14**, with a `PROFILE_ID` in `Capture`.
+    **Built 2026-11-16, repo only, off (`BRACKET=0`):** `BRACKET=1` adds ev+0/ev-2 after every frame
+    within 45 min of sunset (`<frame>_ev0.*`, `_ev-2.*`, `Capture.kind` `bracket`), daylight WB to +10 min,
+    a DNG on ev-2 within 30 min; merged by `fuse_sunset.py` (`build_video.py --fuse-production`).
+    Tested offline only (stub camera, synthetic images). Going live disables `exp-sunset.timer`.
   - **Series and setup (#12, #4):** the CM4 `cm4wide` is the official five-year series; `timelaps`
     is the second, detailed view. Aim as in #4 (CM4 about 9.5° right, equinox sunset on the centre
     line; #11 closed into #4). Wired Ethernet to the CM4 before Dec 21. The CM4 camera stays upside

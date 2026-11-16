@@ -98,6 +98,24 @@ def production_frames(frames_dir, start, end):
     return sorted(found)
 
 
+BRACKET_NAME = re.compile(r"^(?P<prefix>.+)_(?P<t>\d{8}T\d{6}Z)_(?P<ev>ev0|ev-2)\.jpg$")
+
+
+def production_bracket(frames_dir, start, end):
+    """(brights, darks) from the production bracket (BRACKET=1 in sunset.env, #10): the ev+0 and ev-2
+    shots saved beside each frame in the sunset window as <cam>_<UTC>_ev0.jpg and _ev-2.jpg, timed
+    by the frame they belong to. Same shape as list_run() gives for an experiment run."""
+    found, day = {"ev0": [], "ev-2": []}, start.date()
+    while day <= end.date():
+        folder = os.path.join(frames_dir, "%04d" % day.year, "%02d" % day.month, "%02d" % day.day)
+        for name in (os.listdir(folder) if os.path.isdir(folder) else []):
+            m = BRACKET_NAME.match(name)
+            if m and start <= parse_time(m.group("t")) <= end:
+                found[m.group("ev")].append((parse_time(m.group("t")), os.path.join(folder, name)))
+        day += timedelta(days=1)
+    return sorted(found["ev0"]), sorted(found["ev-2"])
+
+
 def minutes_from_sunset(jpg_path):
     try:
         with open(os.path.splitext(jpg_path)[0] + ".json") as f:
@@ -131,15 +149,17 @@ def apply_ratio(production, ratio):
 
 
 def fuse_run(run_dir, frames_dir, out_dir, bright_name="ev+0-daylight", dark_name="ev-2-daylight", force=False,
-             smooth=SMOOTH_FRAMES):
+             smooth=SMOOTH_FRAMES, brackets=None):
     """Write the fused frames. Returns how many were written.
 
     The runner skips the first minute of every 5-minute slot, and sometimes loses a longer stretch,
     so some production frames have no bracket of their own. Such a frame keeps its own picture and
     takes the fusion's change in exposure and colour from the pairs either side (worked out as a
     smooth gain and interpolated in time, or held from the one side within FILL_MAX_MIN). Repeating
-    or blending the neighbours' pictures instead froze the video, then jumped, at the sunset."""
-    brights, darks = list_run(run_dir, bright_name), list_run(run_dir, dark_name)
+    or blending the neighbours' pictures instead froze the video, then jumped, at the sunset.
+
+    brackets: (brights, darks) from production_bracket(), used instead of the experiment run."""
+    brights, darks = brackets if brackets else (list_run(run_dir, bright_name), list_run(run_dir, dark_name))
     if not brights or not darks:
         return 0
     first, last = brights[0][0], brights[-1][0]
@@ -355,9 +375,10 @@ def undo_blend(out_dir):
     os.remove(mark)
 
 
-def blend_run(run_dir, frames_dir, out_dir, bright_name="ev+0-daylight", weights=BLEND_WEIGHTS):
-    """blend_minutes() over the experiment run's bracket and BLEND_MARGIN_MIN either side."""
-    brights = list_run(run_dir, bright_name)
+def blend_run(run_dir, frames_dir, out_dir, bright_name="ev+0-daylight", weights=BLEND_WEIGHTS, brights=None):
+    """blend_minutes() over the bracket (the experiment run's, or `brights` from production_bracket())
+    and BLEND_MARGIN_MIN either side."""
+    brights = brights if brights is not None else list_run(run_dir, bright_name)
     if not brights:
         return 0
     margin = timedelta(minutes=BLEND_MARGIN_MIN)

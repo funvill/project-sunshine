@@ -5,12 +5,13 @@
 if [[ -n "${STUB_LOCK_PROBE:-}" ]] && command -v flock >/dev/null 2>&1; then
   if flock -n "$STUB_LOCK_PROBE" true 2>/dev/null; then echo free; else echo held; fi >> "${STUB_CALLS:-/dev/null}.lock"
 fi
-# More modes: hang_term (ignores SIGTERM, like a child stuck in a driver call), nodng (exits 0
+# More modes: failev (only calls with --ev fail, for the sunset bracket), hang_term (ignores SIGTERM, like a child stuck in a driver call), nodng (exits 0
 # but writes no DNG), nojson (no metadata file), failonce (the first call fails at once, as when
 # another program holds the camera; later calls work), orphan (works, but leaves a child running
 # that keeps every inherited file descriptor open for STUB_ORPHAN_S seconds).
 case "${STUB_RPICAM:-ok}" in
   fail) echo "ERROR: *** no cameras available ***" >&2; exit 1 ;;
+  failev) [[ "$*" == *--ev* ]] && { echo "ERROR: *** bracket shot failed ***" >&2; exit 1; } ;;
   hang) sleep 30; exit 0 ;;
   hang_term) trap '' TERM; sleep 30; exit 0 ;;
   failonce)

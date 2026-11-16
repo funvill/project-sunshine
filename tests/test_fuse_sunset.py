@@ -383,5 +383,96 @@ class Redo(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.out, self.fs.BLEND_MARK)))
 
 
+@unittest.skipIf(np is None, "needs numpy and OpenCV")
+class ProductionBracket(unittest.TestCase):
+    """With BRACKET=1 the capture script saves the pair beside each frame in the sunset window:
+    <cam>_<UTC>_ev0.jpg and <cam>_<UTC>_ev-2.jpg in the frame's own day folder (#10)."""
+
+    stamp = Run.stamp
+
+    def setUp(self):
+        Run.setUp(self)
+        self.start = SUNSET - timedelta(minutes=40)
+
+    def add_minute(self, t, bright=200, dark=60, prod=120, pair=True):
+        folder = os.path.join(self.frames, t.strftime("%Y/%m/%d"))
+        os.makedirs(folder, exist_ok=True)
+        base = os.path.join(folder, "cam_%s" % self.stamp(t))
+        cv2.imwrite(base + ".jpg", np.full((8, 8, 3), prod, np.uint8))
+        if pair:
+            cv2.imwrite(base + "_ev0.jpg", np.full((8, 8, 3), bright, np.uint8))
+            cv2.imwrite(base + "_ev-2.jpg", np.full((8, 8, 3), dark, np.uint8))
+        minutes = (t - SUNSET).total_seconds() / 60
+        for path in (base + ".json",) + ((base + "_ev0.json", base + "_ev-2.json") if pair else ()):
+            with open(path, "w") as f:
+                json.dump({"Sun": {"minutes_from_sunset": round(minutes, 1)}}, f)
+
+    def window(self):
+        return SUNSET - timedelta(hours=2), SUNSET + timedelta(hours=2)
+
+    def test_lists_the_pairs_at_their_frame_time(self):
+        for i in range(3):
+            self.add_minute(self.start + timedelta(minutes=i))
+        brights, darks = self.fs.production_bracket(self.frames, *self.window())
+        self.assertEqual([t for t, _ in brights], [self.start + timedelta(minutes=i) for i in range(3)])
+        self.assertEqual([t for t, _ in darks], [t for t, _ in brights])
+        self.assertTrue(all(p.endswith("_ev0.jpg") for _, p in brights))
+        self.assertTrue(all(p.endswith("_ev-2.jpg") for _, p in darks))
+
+    def test_pairs_are_not_taken_for_production_frames(self):
+        self.add_minute(self.start)
+        found = self.fs.production_frames(self.frames, *self.window())
+        self.assertEqual([os.path.basename(p) for _, p in found], ["cam_%s.jpg" % self.stamp(self.start)])
+
+    def test_pairs_either_side_of_midnight_utc(self):
+        # the Vancouver sunset is about 00:20 UTC, so its window spans two UTC day folders
+        for i in range(0, 60, 5):
+            self.add_minute(self.start + timedelta(minutes=i))
+        brights, _ = self.fs.production_bracket(self.frames, *self.window())
+        self.assertEqual({t.day for t, _ in brights}, {12, 13})
+
+    def test_fuses_the_production_pairs_into_frames_named_like_the_production_frame(self):
+        for i in range(10):
+            self.add_minute(self.start + timedelta(minutes=i))
+        made = self.fs.fuse_run(None, self.frames, self.out, brackets=self.fs.production_bracket(self.frames, *self.window()))
+        self.assertEqual(made, 9, "the very first minute has no weight, so the production frame stays")
+        self.assertEqual(sorted(os.listdir(self.out)),
+                         ["cam_%s.jpg" % self.stamp(self.start + timedelta(minutes=i)) for i in range(1, 10)])
+
+    def test_a_frame_without_its_pair_takes_the_change_from_its_neighbours(self):
+        for i in range(10):
+            self.add_minute(self.start + timedelta(minutes=i), pair=(i != 6))
+        made = self.fs.fuse_run(None, self.frames, self.out, brackets=self.fs.production_bracket(self.frames, *self.window()))
+        self.assertEqual(made, 9)
+
+    def test_no_pairs_makes_nothing(self):
+        self.add_minute(self.start, pair=False)
+        self.assertEqual(self.fs.fuse_run(None, self.frames, self.out, brackets=self.fs.production_bracket(self.frames, *self.window())), 0)
+
+    def test_blend_covers_the_production_pairs(self):
+        for i in range(10):
+            self.add_minute(self.start + timedelta(minutes=i))
+        brackets = self.fs.production_bracket(self.frames, *self.window())
+        self.fs.fuse_run(None, self.frames, self.out, brackets=brackets)
+        self.assertGreater(self.fs.blend_run(None, self.frames, self.out, brights=brackets[0]), 0)
+
+    def test_build_video_uses_the_production_pairs(self):
+        for i in range(10):
+            self.add_minute(self.start + timedelta(minutes=i))
+        bv = load_build_video()
+        made, blended = bv.prepare_fused(self.fs, None, self.frames, self.out,
+                                         brackets=self.fs.production_bracket(self.frames, *self.window()))
+        self.assertEqual(made, 9)
+        self.assertGreater(blended, 0)
+
+    def test_build_video_window_is_the_local_evening(self):
+        from datetime import date
+        bv = load_build_video()
+        start, end = bv.evening_window(date(2026, 11, 12))
+        self.assertLess(start, SUNSET - timedelta(hours=1))
+        self.assertGreater(end, SUNSET + timedelta(hours=1))
+        self.assertLess(end - start, timedelta(hours=24))
+
+
 if __name__ == "__main__":
     unittest.main()
