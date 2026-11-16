@@ -13,7 +13,8 @@ check "netwatch reboots" grep -q 'systemctl reboot' "$STUB_CALLS"
 check "leaves the clock marker on the SD" test -s "$marker"
 check "marker holds the epoch" bash -c "[[ \$(cat '$marker') =~ ^[0-9]+\$ ]]"
 check "says so in its log" grep -q 'clock trusted at [0-9]*: kept for the capture after the reboot' "$NETWATCH_LOG"
-reboot_pi; export STUB_NTP=no
+# Frame names are to the second: wait one, or a fast machine names both frames alike.
+reboot_pi; export STUB_NTP=no; sleep 1
 capture; rc=$?
 check "first capture after the reboot runs without NTP" test "$rc" = 0 -a "$(count 'wide_*Z.jpg')" = 2
 check "logged" grep -q 'clock trusted without NTP: netwatch rebooted [0-9]* s ago' "$LOG_FILE"
