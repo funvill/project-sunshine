@@ -71,6 +71,24 @@ else
   check "empty image left in place" test -e "$d/a.jpg"
   check "skip logged" grep -q 'zero-length image' "$SYNC_LOG_FILE"
 
+  section "real rsync: read-back catches a bad copy that rsync's quick check skips (#13)"
+  # A copy already on the share with the same size and time but other bytes: rsync sees nothing
+  # to send and exits 0. The read-back must keep the frame, remove the bad copy, and the next
+  # run must send the real one.
+  real_env
+  real_file "$d/a.jpg" '10 minutes ago' "good-bytes"
+  mkdir -p "$NAS_TARGET/wide/2026/01/01"
+  printf 'evil-bytes' > "$NAS_TARGET/wide/2026/01/01/a.jpg"; touch -r "$d/a.jpg" "$NAS_TARGET/wide/2026/01/01/a.jpg"
+  sync_; rc=$?
+  check "exits non-zero" test "$rc" != 0
+  check "frame kept on the Pi" test -e "$d/a.jpg"
+  check "mismatch logged" grep -q 'readback kept ./wide/2026/01/01/a.jpg: sha256' "$SYNC_LOG_FILE"
+  check "bad copy removed from the share" test ! -e "$NAS_TARGET/wide/2026/01/01/a.jpg"
+  sync_; rc=$?
+  check "next run exits 0" test "$rc" = 0
+  check "next run: the right bytes on the share" test "$(cat "$NAS_TARGET/wide/2026/01/01/a.jpg")" = good-bytes
+  check "next run: frame removed locally" test ! -e "$d/a.jpg"
+
   section "real rsync: a share path that is not there keeps every frame"
   real_env; rm -rf "$NAS_TARGET"
   real_file "$d/a.jpg"

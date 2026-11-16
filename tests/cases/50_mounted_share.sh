@@ -3,7 +3,7 @@ share_env() {
   export NAS_TARGET="$W/mnt/share/"
   capture; touch -d '10 minutes ago' $(frames)
 }
-nas_count() { find "$W/nas" -type f | wc -l | tr -d ' '; }
+nas_count() { find "$W/mnt/share" -type f 2>/dev/null | wc -l | tr -d ' '; }  # the stub copies into the share
 
 section "mounted share: normal sync"
 share_env; mkdir -p "$NAS_TARGET"
