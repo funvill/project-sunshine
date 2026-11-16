@@ -191,6 +191,15 @@ The history of Project Sunset, newest first: every change (code, settings, hardw
 - The experiment runner no longer starts a shot in the first 12 seconds of a minute or one that would run into the next minute, and treats a running dense capture as the camera being busy. Before this, an experiment shot at the end of a minute could have made that minute's dense frame skip itself.
 - **Pi:** deployed, and scheduled `sunset-1` to `sunset-6` for the sunsets of Nov 9 to Nov 14 (from about 4:51 pm each day). They are transient timers, so a reboot clears them.
 
+## 2026-11-09
+
+### Capture
+- **Pi:** the dense frames never started. The one-off job meant to switch on `sunset-dense.timer` at 7:32 pm Nov 8 (02:32 UTC Nov 9) ran as the normal user and was refused ("Interactive authentication required"), so the sunrise window on Nov 9 got no 1-a-minute frames. Switched on by hand at 10:12 am (17:12 UTC); the first check ran cleanly, and the first dense window is the sunset on Nov 9 from about 4:38 pm.
+
+### Window-light tracking
+- Added `windowtracking/`, an anonymised NAS job (`sunset-windowlight.py` + `Dockerfile` + `README.md`) that measures how lit the towers in the centre of the view are, as aggregate signals only. For each tower it reports the share of windows lit per night frame (against a max-composite reference that counts windows without labelling any), the lit-window count per frame, and lit/unlit transitions per hour. No window IDs, floors or per-unit history. The plan is `windowtracking/plan.md`; it supersedes the earlier per-window occupancy idea.
+- Added `tests/test_windowlight.py` for it. Detection and aggregation are tested on synthetic greys; the ffmpeg loader is tested with the real ffmpeg and skipped without it.
+
 ## 2026-11-08
 
 ### Daily video

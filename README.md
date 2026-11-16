@@ -1,6 +1,6 @@
 # Project Sunset
 
-A five-year time-lapse of the western sky from a 23rd-floor window in Burnaby, BC, looking toward
+A five-year time-lapse of the western sky from a tower window in Burnaby, BC, looking toward
 downtown Vancouver. **Sunset is the subject.** Real capture starts on the winter solstice,
 **2026-12-21**. Until then a pilot runs on a Raspberry Pi 3 B+ to tune the camera, the sync and the
 daily video.
