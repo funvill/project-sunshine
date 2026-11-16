@@ -189,7 +189,11 @@ def nearest_sunset(dt, lat, lon):
 
 
 def sun_block(dt, lat, lon):
-    """The dict stored under "Sun" in each frame's JSON. Deliberately no lat/lon in it."""
+    """The dict stored under "Sun" in each frame's JSON.
+
+    It holds no lat/lon, but its exact angles and times locate the site to about 30 m (#25),
+    so frame JSON is private: strip this block before publishing any JSON.
+    """
     az, el = sun_position(dt, lat, lon)
     block = {"azimuth_deg": round(az, 2), "elevation_deg": round(el, 2),
              "azimuth_ref": "true_north", "computed_for_utc": iso(dt), "algorithm": ALGORITHM}
