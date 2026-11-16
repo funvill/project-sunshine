@@ -1,0 +1,14 @@
+[Unit]
+Description=Project Sunset UPS monitor (Mini-Box OpenUPS2 over USB HID)
+After=local-fs.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/home/pi/sunset/sunset.env
+Environment=UPS_LOG_FILE=/home/pi/sunset/ups.log
+ExecStart=/usr/bin/python3 -I /home/pi/sunset/sunset-ups.py --run
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
