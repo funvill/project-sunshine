@@ -22,9 +22,13 @@ fresh_env() {
   export SYNC_LOG_FILE="$W/sync.log" SYNC_LOCK_FILE="$W/.sync.lock"
   export CLOCK_OK_FILE="$W/clock-ok" STUB_NAS_DIR="$W/nas" CAM_NAME=wide
   export STUB_CALLS="$W/calls.txt"
+  # The sync backs up /etc/fstab and the boot config: point it at an empty folder, never this machine's.
+  export SYNC_CONFIG_ROOT="$W/sysroot"; mkdir -p "$W/sysroot"
   unset STUB_SAME_FS STUB_RPICAM STUB_LUX STUB_NTP STUB_DF_PCT STUB_DF_FREE_MB STUB_RSYNC
   unset SAVE_RAW SITE_LAT SITE_LON NAS_TARGET NIGHT_LUX CAPTURE_TIMEOUT_S REQUIRE_TIME_SYNC
-  unset SUN_PY SLOT_EVERY_MIN STUB_DENSE DENSE_TIMEOUT_S ROTATION
+  unset SUN_PY SLOT_EVERY_MIN STUB_DENSE STUB_UTC_MINUTE DENSE_TIMEOUT_S DENSE_WINDOWS ROTATION
+  unset NIGHTLY_ENV_FILE NIGHTLY_RUNNER NIGHTLY_SLEEP NIGHTLY_NOW FAKE_SUNSET
+  unset BRACKET BRACKET_WINDOW_MIN BRACKET_AWB_HANDOVER_MIN BRACKET_RAW_MIN STUB_MINUTES PROFILE_ID
   mkdir -p "$W/nas"
 }
 capture() { bash "$SRC/sunset-capture.sh"; }
@@ -49,7 +53,7 @@ for t in "$HERE"/test_*.py; do
   name="$(basename "$t")"
   grep -qs "HERE/$name" "$HERE"/cases/*.sh && continue
   case "$name" in
-    test_fuse_sunset.py|test_issue_blur.py)
+    test_fuse_sunset.py|test_issue_blur.py|test_fog_scan.py|test_raw_value.py)
       if ! have_py_mods cv2 || ! have_py_mods numpy; then
         echo "  SKIP: tests/$name (needs OpenCV and numpy: pip install numpy opencv-python-headless)"
         continue

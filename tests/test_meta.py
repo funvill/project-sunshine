@@ -284,6 +284,27 @@ class DailyFile(Tree):
         self.update(slot="20261104T191500Z")
         self.assertEqual(len(self.daily()["records"]), 1)
 
+    def test_an_empty_day_file_is_written_again_from_the_state(self):
+        # A freeze can leave the day file 0 bytes while the state file survives (CM4, Nov 16).
+        first = self.update()
+        for damage in ("", "{broken"):
+            with open(os.path.join(self.outbox, self.DAY), "w") as f:
+                f.write(damage)
+            self.assertEqual(self.update(slot="20261104T191500Z"), first)
+            records = self.daily()["records"]
+            self.assertEqual([r["system_id"] for r in records], [first])
+            self.assertEqual(records[0]["from_utc"], "2026-11-04T19:00:00Z")
+
+    def test_the_files_are_flushed_to_disk_before_they_replace_the_old_ones(self):
+        calls = []
+        real = meta.os.fsync
+        meta.os.fsync = lambda fd: calls.append(fd)
+        try:
+            self.update()
+        finally:
+            meta.os.fsync = real
+        self.assertGreaterEqual(len(calls), 2)       # the day file and the state file
+
     def test_leaves_no_temp_file_the_sync_could_ship(self):
         self.update()
         names = os.listdir(os.path.dirname(os.path.join(self.outbox, self.DAY)))

@@ -14,13 +14,17 @@ answer, so one odd frame can't set it:
 Each frame is measured twice:
 
     phase correlation with a Hann window: dx, dy and a response (how sharp the peak is,
-    0 to 1). Frames under --min-response are left out of the median.
+    0 to 1). If the plain peak is under 0.3 (Settings.search_below), turns of the camera up to
+    --search-max-rotation (5 deg) either way are tried as well, since a turn smears the peak
+    away (the real reseat and refocus turned the camera 1 and 2 deg). Frames under
+    --min-response are left out of the median.
     ORB features and a RANSAC similarity fit (a second opinion): dx, dy at the middle of the
     band, rotation and scale. Night frames rarely give it enough matches.
 
-dx and dy are in full-resolution pixels: how far the scene has moved in the frame since the
-reference (positive dx is to the right, positive dy is down). Rotation is in degrees,
-counter-clockwise as seen in the frame. Scale above 1 means the scene looks bigger.
+Signs: dx and dy are in full-resolution pixels and say how the SCENE has moved in the frame
+since the reference: positive dx is to the right, positive dy is down. So a camera that turns
+right (pans right) gives a negative dx, and one that tips up gives a positive dy. Rotation is in
+degrees, counter-clockwise as seen in the frame. Scale above 1 means the scene looks bigger.
 
     python tools/register_day.py --make-reference <NAS>/project_sunshine/cm4wide/2026/11/14/cm4wide_20261114T200000Z.jpg \
         --reference refs/cm4wide-cm4-window-1.jpg
@@ -31,16 +35,30 @@ counter-clockwise as seen in the frame. Scale above 1 means the scene looks bigg
 Capture.setup_id and the image's sha256. Each day goes to <out>/<camera>/<YYYY-MM-DD>.json
 (written to a .tmp file, then renamed), and one line per day is printed. Frames are only read.
 
-What has been checked, and what hasn't: only synthetic scenes (tests/test_register_day.py): a
-random skyline with window grids, shifted by up to 600 px, sub-pixel shifts, turned up to 1 deg,
-scaled by 1%, with the sky replaced by gradients, noise and blurred noise, the brightness changed
-and a bright sun disc added. There a fractional shift came back within 0.3 px, a whole-pixel one
-(up to 600 px) within 0.05 px, rotation within 0.05 deg and scale within 0.0005; an unrelated
-skyline gave a response of 0.01 (the limit is 0.15) instead of a confident answer, and the
-synthetic night frames 0.2 to 0.3. It has not been run on a real frame. Every threshold here (band, response, spread, the moved limits, the daytime
-elevation) is an estimate to tune on real frames, and night against a daytime reference is
-expected to be weak: double glazing, lit windows that change, and the 3.2 mm lens's barrel
-distortion are not in the synthetic scenes. Needs numpy and OpenCV.
+What has been checked, and what hasn't (2026-11-15, issue #20): synthetic scenes
+(tests/test_register_day.py) and real frames of the wide camera, Nov 4 to 14, against the known
+moves. Every known move was found, with the sign above, and quiet days read under 2 px:
+
+    reseat, Nov 5 ~07:17      camera turned right    dx -1415  dy +74   rot -1.0 deg  (day)
+    refocus, Nov 8 ~05:35     skyline 650 left, 200 up  dx -687  dy -205  rot +1.9 deg  (day and night)
+    nudge, Nov 12 00:11-00:18 view 37 px left       dx -35   dy -5    (00:05 against 00:25)
+    quiet days Nov 9-11, 13-14                     |dx|, |dy| under 2 px; rot under 0.02 deg
+
+They also found moves nobody had written down (signs as above, scene motion): at Nov 5
+23:15-23:30 UTC the scene went ~1,690 px right and ~185 px down (the camera turned back left,
+~280 px past where it started on Nov 4); at Nov 12 00:30-00:35, just after the nudge, ~65 px down
+(the camera tipped up), so Nov 11 against Nov 12 at midday reads dx -32 dy +65; then ~8 px more
+over Nov 12, with a step of ~6 px at about 21:00-22:00. After the Nov 5 reseat the scene crept
+~20 px down through the afternoon (the camera was loose on the shelf). Before the rotation
+search the reseat and refocus days came out "unknown" (peaks of 0.015 to 0.07). The searched
+turn is only good to 0.3-0.6 deg on real frames (the peak is flat in the turn, and the near
+towers shift against the skyline when the camera itself moves); ORB's rotation is the finer one. cm4wide against a
+Nov 13 20:00 reference: Nov 13 and 14 read under 0.3 px by day, but Nov 12 reads dx -9.6 by day
+and -8.2 at night (a move or settling nobody wrote down), and the Nov 14 night frames read
+dy +4.1 against +0.1 by day (not explained). Not checked: cm4wide against a known move (it has
+had none since it was turned upright), the moves above at night
+against a night reference before the move except the refocus, fog, condensation and snow.
+Needs numpy and OpenCV.
 """
 import argparse
 import dataclasses
@@ -56,7 +74,7 @@ from datetime import date, datetime, timedelta, timezone
 import cv2
 import numpy as np
 
-TOOL_VERSION = "2026-11-15.1"
+TOOL_VERSION = "2026-11-15.2"
 SCHEMA_VERSION = 1
 UTC = timezone.utc
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
@@ -71,16 +89,22 @@ class Settings:
     day_min_elevation: float = 5.0  # Sun.elevation_deg above this is a daytime frame
     day_frames: int = 6
     night_frames: int = 4
-    min_response: float = 0.15      # phase-correlation peak under this: the frame is left out
+    min_response: float = 0.10      # phase-correlation peak under this: the frame is left out
+    search_below: float = 0.3       # plain peak under this: also try turns of the camera
+    search_max_deg: float = 5.0     # turns tried, either way (0: no search)
+    search_step_deg: float = 0.25
+    search_gain: float = 2.0        # a searched turn is taken only if its peak is this many times the plain one
     min_used: int = 2               # frames needed for a reliable median
     max_spread_px: float = 2.0      # median absolute deviation of dx or dy above this: not reliable
     orb: bool = True
     orb_features: int = 4000
     orb_min_inliers: int = 40
-    agree_px: float = 2.0           # phase and ORB further apart than this: flagged
+    agree_px: float = 2.0           # phase and ORB further apart than this (plus agree_share): flagged
+    agree_share: float = 0.01       # ... plus this share of the shift: a turn found to ~0.3 deg moves the band middle
     moved_px: float = 3.0           # |dx| or |dy| above this is a move
     moved_rotation_deg: float = 0.1
     moved_scale: float = 0.002      # |scale - 1| above this is a move
+    clear_move_spreads: float = 3.0  # an unreliable day still moved if its shift is over moved_px + this many spreads
 
 
 def utc_now():
@@ -140,19 +164,73 @@ def edges(gray_band):
     return mag - cv2.GaussianBlur(mag, (0, 0), 15.0)
 
 
-def phase_shift(ref_small, img_small, settings):
-    """Phase correlation of the band: dx, dy in full-size pixels and the peak response."""
-    y0, y1, x0, x1 = band_box(ref_small.shape, settings)
-    a, b = edges(ref_small[y0:y1, x0:x1]), edges(img_small[y0:y1, x0:x1])
-    window = cv2.createHanningWindow((a.shape[1], a.shape[0]), cv2.CV_32F)
-    # Zero-padded to twice the size, so a shift of more than half the band (a camera knocked
-    # 300 px up) isn't read as the same shift the other way round.
+def correlate(a, b):
+    """Phase correlation of two equal-size edge images with a Hann window: (dx, dy, response).
+    Zero-padded to twice the size, so a shift of more than half the band (a camera knocked
+    300 px up) isn't read as the same shift the other way round."""
     h, w = a.shape
+    window = cv2.createHanningWindow((w, h), cv2.CV_32F)
     a = cv2.copyMakeBorder(a * window, 0, h, 0, w, cv2.BORDER_CONSTANT, value=0)
     b = cv2.copyMakeBorder(b * window, 0, h, 0, w, cv2.BORDER_CONSTANT, value=0)
     (dx, dy), response = cv2.phaseCorrelate(a, b)
+    return dx, dy, float(response)
+
+
+def turned_shift(ref_small, img_small, settings, rotation_deg, tx, ty):
+    """Undo a guessed move (a turn of rotation_deg about the middle of the band, then a shift of
+    tx, ty, in the pixels of these images), match what is left, and return the corrected shift
+    and the response. Only the part of the band that both images cover is matched."""
+    y0, y1, x0, x1 = band_box(ref_small.shape, settings)
+    h, w = img_small.shape[:2]
+    m = cv2.getRotationMatrix2D(((x0 + x1) / 2.0, (y0 + y1) / 2.0), rotation_deg, 1.0)
+    m[0, 2] += tx
+    m[1, 2] += ty
+    back = cv2.warpAffine(img_small, m, (w, h), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
+                          borderMode=cv2.BORDER_REPLICATE)
+    covered = cv2.warpAffine(np.ones((h, w), np.uint8), m, (w, h), flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP,
+                             borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+    covered = cv2.erode(covered, np.ones((9, 9), np.uint8))[y0:y1, x0:x1].astype(np.float32)
+    covered = cv2.GaussianBlur(covered, (0, 0), 4.0)
+    dx, dy, response = correlate(edges(ref_small[y0:y1, x0:x1]) * covered, edges(back[y0:y1, x0:x1]) * covered)
+    # The residual is measured in the turned-back image; turn it forward again.
+    rx, ry = m[:, :2] @ np.array([dx, dy])
+    return tx + float(rx), ty + float(ry), response
+
+
+def phase_shift(ref_small, img_small, settings):
+    """Phase correlation of the band: dx, dy in full-size pixels, the peak response, and the turn.
+
+    A plain match first. If its peak is under settings.search_below, the camera may have turned
+    as well as moved (the reseat on 2026-11-05 turned it 1 deg, the refocus on 2026-11-08 2 deg),
+    and a turn smears the peak away: then turns up to settings.search_max_deg either way are
+    tried on images half the size, and the best is refined at full working size. rotation_deg
+    is that turn (counter-clockwise as seen in the frame). The peak is flat in the turn, so it is
+    only good to about 0.15 deg on the synthetic scenes and 0.3 to 0.6 deg on real frames: ORB's
+    rotation_deg is the finer one. dx, dy are then where the middle of the band moved to, as
+    for ORB."""
     s = settings.work_scale
-    return {"dx_px": round(dx / s, 3), "dy_px": round(dy / s, 3), "response": round(float(response), 4)}
+    y0, y1, x0, x1 = band_box(ref_small.shape, settings)
+    dx, dy, response = correlate(edges(ref_small[y0:y1, x0:x1]), edges(img_small[y0:y1, x0:x1]))
+    out = {"dx_px": round(dx / s, 3), "dy_px": round(dy / s, 3), "response": round(response, 4),
+           "rotation_deg": 0.0, "searched": False}
+    if response >= settings.search_below or settings.search_max_deg <= 0:
+        return out
+    out["searched"] = True
+    ref_half, img_half = shrink(ref_small, 0.5), shrink(img_small, 0.5)
+    step = settings.search_step_deg
+    turns = np.arange(-settings.search_max_deg, settings.search_max_deg + step / 2, step)
+    best = max((turned_shift(ref_half, img_half, settings, float(t), 0.0, 0.0) + (float(t),) for t in turns),
+               key=lambda r: r[2])
+    tx, ty, _, turn = best
+    fine = max((turned_shift(ref_small, img_small, settings, t, 2 * tx, 2 * ty) + (t,)
+                for t in (turn - step / 2, turn, turn + step / 2)), key=lambda r: r[2])
+    # Taken only when the peak is clearly sharper than the plain one: a weak match of a still
+    # camera can score a hair higher at some small turn by chance (real moves: 0.02-0.07 plain,
+    # 0.17-0.29 searched).
+    if fine[2] > settings.search_gain * response:
+        out.update(dx_px=round(fine[0] / s, 3), dy_px=round(fine[1] / s, 3), response=round(fine[2], 4),
+                   rotation_deg=round(fine[3], 3))
+    return out
 
 
 def orb_similarity(ref_small, img_small, settings):
@@ -205,9 +283,14 @@ def measure_pair(ref_gray, gray, settings):
     used = phase["response"] >= settings.min_response
     disagree = None
     if used and orb and orb["ok"]:
-        disagree = bool(abs(orb["dx_px"] - phase["dx_px"]) > settings.agree_px
-                        or abs(orb["dy_px"] - phase["dy_px"]) > settings.agree_px)
+        disagree = methods_disagree(phase["dx_px"], phase["dy_px"], orb["dx_px"], orb["dy_px"], settings)
     return {"used": bool(used), "error": None, "phase": phase, "orb": orb, "methods_disagree": disagree}
+
+
+def methods_disagree(dx, dy, orb_dx, orb_dy, settings):
+    """Phase and ORB further apart than agree_px plus agree_share of the shift, in x or y."""
+    limit = settings.agree_px + settings.agree_share * math.hypot(dx, dy)
+    return bool(abs(orb_dx - dx) > limit or abs(orb_dy - dy) > limit)
 
 
 def median(values):
@@ -230,7 +313,8 @@ def summarise(measurements, settings):
     orbs = [m["orb"] for m in used if m.get("orb") and m["orb"].get("ok")]
     out = {"frames_measured": len(measurements), "frames_used": len(used),
            "dx_px": None, "dy_px": None, "spread_px": None, "response_median": None,
-           "rotation_deg": None, "scale": None, "orb_frames": len(orbs),
+           "rotation_deg": None, "scale": None, "phase_rotation_deg": None, "frames_searched": 0,
+           "orb_frames": len(orbs),
            "orb_dx_px": None, "orb_dy_px": None, "methods_disagree": None,
            "confidence": 0.0, "reliable": False}
     if not used:
@@ -238,14 +322,15 @@ def summarise(measurements, settings):
     dx, dy = median(dxs), median(dys)
     spread = max(mad(dxs), mad(dys))
     response = median([m["phase"]["response"] for m in used])
-    out.update(dx_px=round(dx, 2), dy_px=round(dy, 2), spread_px=round(spread, 2), response_median=round(response, 4))
+    out.update(dx_px=round(dx, 2), dy_px=round(dy, 2), spread_px=round(spread, 2), response_median=round(response, 4),
+               phase_rotation_deg=round(median([m["phase"].get("rotation_deg", 0.0) for m in used]), 3),
+               frames_searched=sum(1 for m in used if m["phase"].get("searched")))
     if orbs:
         out.update(rotation_deg=round(median([o["rotation_deg"] for o in orbs]), 4),
                    scale=round(median([o["scale"] for o in orbs]), 5),
                    orb_dx_px=round(median([o["dx_px"] for o in orbs]), 2),
                    orb_dy_px=round(median([o["dy_px"] for o in orbs]), 2))
-        out["methods_disagree"] = bool(abs(out["orb_dx_px"] - dx) > settings.agree_px
-                                       or abs(out["orb_dy_px"] - dy) > settings.agree_px)
+        out["methods_disagree"] = methods_disagree(dx, dy, out["orb_dx_px"], out["orb_dy_px"], settings)
     # A relative 0-1 number for sorting days, not a probability: the peak's sharpness (0.5 or more
     # counts as full), times the share of frames used, cut down when the frames scatter.
     tight = 1.0 if spread <= settings.max_spread_px else settings.max_spread_px / spread
@@ -260,19 +345,39 @@ def is_moved(summary, settings):
         return None
     if abs(summary["dx_px"]) > settings.moved_px or abs(summary["dy_px"]) > settings.moved_px:
         return True
-    if summary["rotation_deg"] is not None and abs(summary["rotation_deg"]) > settings.moved_rotation_deg:
+    # ORB's rotation where it held; else the turn the phase search found (only searched frames
+    # have one; a searched turn is only kept when it at least doubles the peak, so a still
+    # camera with a weak match doesn't gain one by chance).
+    rotation = summary["rotation_deg"]
+    if rotation is None:
+        rotation = summary.get("phase_rotation_deg")
+    if rotation is not None and abs(rotation) > settings.moved_rotation_deg:
         return True
     if summary["scale"] is not None and abs(summary["scale"] - 1.0) > settings.moved_scale:
         return True
     return False
 
 
+def clearly_moved(summary, settings):
+    """A day too scattered to be reliable can still have plainly moved: enough frames, and the
+    median shift further from 0 than moved_px plus clear_move_spreads times their spread. On
+    2026-11-05 the reseat put the frames ~1,415 px over, but the loose camera sagged ~10 px
+    through the afternoon (spread 5.6 px)."""
+    if not summary or summary["dx_px"] is None or summary["frames_used"] < settings.min_used:
+        return False
+    shift = max(abs(summary["dx_px"]), abs(summary["dy_px"]))
+    return shift > settings.moved_px + settings.clear_move_spreads * summary["spread_px"]
+
+
 def decide_moved(day, night, settings):
-    """(moved, from which group): the daytime result if it is reliable, else the night one, else
-    (None, None): not known."""
+    """(moved, from which group): the daytime result if it is reliable, else the night one; else
+    a group that has clearly moved even though it isn't reliable; else (None, None): not known."""
     for name, summary in (("day", day), ("night", night)):
         if summary and summary["reliable"]:
             return is_moved(summary, settings), name
+    for name, summary in (("day", day), ("night", night)):
+        if clearly_moved(summary, settings):
+            return True, name
     return None, None
 
 
@@ -433,6 +538,9 @@ def main(argv=None):
     ap.add_argument("--moved-px", type=float, default=d.moved_px)
     ap.add_argument("--moved-rotation", type=float, default=d.moved_rotation_deg)
     ap.add_argument("--moved-scale", type=float, default=d.moved_scale)
+    ap.add_argument("--search-max-rotation", type=float, default=d.search_max_deg,
+                    help="turns tried when the plain match is poor, degrees either way (0: none; default %s)"
+                    % d.search_max_deg)
     ap.add_argument("--no-orb", action="store_true", help="phase correlation only (faster, no rotation or scale)")
     args = ap.parse_args(argv)
     try:
@@ -446,7 +554,8 @@ def main(argv=None):
                             day_min_elevation=args.day_min_elevation, day_frames=args.day_frames,
                             night_frames=args.night_frames, min_response=args.min_response,
                             max_spread_px=args.max_spread, moved_px=args.moved_px,
-                            moved_rotation_deg=args.moved_rotation, moved_scale=args.moved_scale, orb=not args.no_orb)
+                            moved_rotation_deg=args.moved_rotation, moved_scale=args.moved_scale, orb=not args.no_orb,
+                            search_max_deg=args.search_max_rotation)
         camera = args.camera or os.path.basename(os.path.normpath(args.frames))
         first = date.fromisoformat(args.day)
         last = date.fromisoformat(args.to) if args.to else first

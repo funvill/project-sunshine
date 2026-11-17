@@ -26,6 +26,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -97,6 +98,24 @@ def production_frames(frames_dir, start, end):
     return sorted(found)
 
 
+BRACKET_NAME = re.compile(r"^(?P<prefix>.+)_(?P<t>\d{8}T\d{6}Z)_(?P<ev>ev0|ev-2)\.jpg$")
+
+
+def production_bracket(frames_dir, start, end):
+    """(brights, darks) from the production bracket (BRACKET=1 in sunset.env, #10): the ev+0 and ev-2
+    shots saved beside each frame in the sunset window as <cam>_<UTC>_ev0.jpg and _ev-2.jpg, timed
+    by the frame they belong to. Same shape as list_run() gives for an experiment run."""
+    found, day = {"ev0": [], "ev-2": []}, start.date()
+    while day <= end.date():
+        folder = os.path.join(frames_dir, "%04d" % day.year, "%02d" % day.month, "%02d" % day.day)
+        for name in (os.listdir(folder) if os.path.isdir(folder) else []):
+            m = BRACKET_NAME.match(name)
+            if m and start <= parse_time(m.group("t")) <= end:
+                found[m.group("ev")].append((parse_time(m.group("t")), os.path.join(folder, name)))
+        day += timedelta(days=1)
+    return sorted(found["ev0"]), sorted(found["ev-2"])
+
+
 def minutes_from_sunset(jpg_path):
     try:
         with open(os.path.splitext(jpg_path)[0] + ".json") as f:
@@ -130,15 +149,17 @@ def apply_ratio(production, ratio):
 
 
 def fuse_run(run_dir, frames_dir, out_dir, bright_name="ev+0-daylight", dark_name="ev-2-daylight", force=False,
-             smooth=SMOOTH_FRAMES):
+             smooth=SMOOTH_FRAMES, brackets=None):
     """Write the fused frames. Returns how many were written.
 
     The runner skips the first minute of every 5-minute slot, and sometimes loses a longer stretch,
     so some production frames have no bracket of their own. Such a frame keeps its own picture and
     takes the fusion's change in exposure and colour from the pairs either side (worked out as a
     smooth gain and interpolated in time, or held from the one side within FILL_MAX_MIN). Repeating
-    or blending the neighbours' pictures instead froze the video, then jumped, at the sunset."""
-    brights, darks = list_run(run_dir, bright_name), list_run(run_dir, dark_name)
+    or blending the neighbours' pictures instead froze the video, then jumped, at the sunset.
+
+    brackets: (brights, darks) from production_bracket(), used instead of the experiment run."""
+    brights, darks = brackets if brackets else (list_run(run_dir, bright_name), list_run(run_dir, dark_name))
     if not brights or not darks:
         return 0
     first, last = brights[0][0], brights[-1][0]
@@ -240,6 +261,23 @@ BLEND_WEIGHTS = (1, 2, 1)  # each minute with the minutes either side
 BLEND_MARGIN_MIN = 15      # blended this far either side of the bracket, which covers the dense frames
 BLEND_SPACING_S = 20       # a neighbour must be one minute away, give or take this
 BLEND_MARK = ".blended"    # what the blend wrote, so it is never blended twice
+BLEND_SAVED = ".preblend"  # the fused frames as they were before the blend, read from here and put back by undo
+
+
+def write_mark(mark, record):
+    """Write the blend's mark in one step (a temporary file, then a rename), so it is never half written."""
+    tmp = mark + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(record, f)
+    os.replace(tmp, mark)
+
+
+def read_mark(mark):
+    try:
+        with open(mark) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
 
 
 def blend_minutes(frames_dir, out_dir, start, end, weights=BLEND_WEIGHTS):
@@ -253,25 +291,45 @@ def blend_minutes(frames_dir, out_dir, start, end, weights=BLEND_WEIGHTS):
     The picture for each minute is the fused one in out_dir if there is one, otherwise the production
     frame, and the result goes to out_dir under the production name. Only frames one minute apart
     are blended, so the 5-minute frames outside the dense window are left alone. Done once per
-    out_dir: undo_blend() clears it to do it again."""
+    out_dir: undo_blend() clears it to do it again.
+
+    A run cut off part way can't blend anything twice. Before anything is overwritten, the fused
+    frames in the window are copied to out_dir/.preblend and read from there, and the mark (saying
+    "not complete") names each frame just before it is written. Run again, it undoes the part-done
+    blend (putting the fused frames back) and starts over."""
     mark = os.path.join(out_dir, BLEND_MARK)
     if os.path.exists(mark):
-        return 0
+        record = read_mark(mark)
+        if record is not None and record.get("complete", True):   # marks from before 2026-11-15 were only written when done
+            return 0
+        undo_blend(out_dir)
+        if os.path.exists(mark):   # an unreadable mark: what was blended is unknown, so leave it
+            return 0
     frames = production_frames(frames_dir, start, end)
-    sources = []
+    saved_dir = os.path.join(out_dir, BLEND_SAVED)
+    os.makedirs(out_dir, exist_ok=True)
+    shutil.rmtree(saved_dir, ignore_errors=True)   # with no mark, nothing in out_dir was overwritten yet
+    os.makedirs(saved_dir)
+    sources, saved = [], []
     for t, path in frames:
-        fused = os.path.join(out_dir, os.path.basename(path))
-        sources.append((t, fused if os.path.exists(fused) else path))
+        name = os.path.basename(path)
+        fused = os.path.join(out_dir, name)
+        if os.path.exists(fused):
+            shutil.copy2(fused, os.path.join(saved_dir, name))
+            saved.append(name)
+            sources.append((t, os.path.join(saved_dir, name)))
+        else:
+            sources.append((t, path))
+    record = {"weights": list(weights), "complete": False, "saved": saved, "blended": []}
+    write_mark(mark, record)
     reach = len(weights) // 2
-    originals = {}   # read before anything is overwritten, so a neighbour is never already blended
+    originals = {}   # the sources are never overwritten; this only saves reading each one three times
 
     def picture(i):
         if i not in originals:
             originals[i] = cv2.imread(sources[i][1])
         return originals[i]
 
-    os.makedirs(out_dir, exist_ok=True)
-    written = []
     for i, (t, _) in enumerate(sources):
         around = range(i - reach, i + reach + 1)
         if all(0 <= j < len(sources) for j in around) and all(
@@ -280,35 +338,47 @@ def blend_minutes(frames_dir, out_dir, start, end, weights=BLEND_WEIGHTS):
             if all(img is not None and img.shape == images[reach].shape for img in images):
                 mixed = sum(img.astype(np.float32) * w for img, w in zip(images, weights)) / float(sum(weights))
                 name = os.path.basename(frames[i][1])
+                record["blended"].append(name)
+                write_mark(mark, record)   # named before it is written, so undo always knows about it
                 cv2.imwrite(os.path.join(out_dir, name), np.clip(mixed + 0.5, 0, 255).astype(np.uint8),
                             [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
-                written.append(name)
         originals.pop(i - reach, None)
-    with open(mark, "w") as f:
-        json.dump({"weights": list(weights), "blended": written}, f)
-    return len(written)
+    record["complete"] = True
+    write_mark(mark, record)
+    return len(record["blended"])
 
 
 def undo_blend(out_dir):
-    """Remove the frames the blend wrote, and its mark. Fused frames it blended are removed too,
-    so run fuse_run again (with force) before blending again."""
+    """Undo the blend, finished or cut off part way: put back the fused frames it blended (from
+    .preblend), remove the frames it made from production frames, then its mark. Safe to repeat if
+    it is itself cut off. Marks from before 2026-11-15 saved no fused frames, so those are removed;
+    run fuse_run again (with force) before blending again."""
     mark = os.path.join(out_dir, BLEND_MARK)
-    try:
-        with open(mark) as f:
-            names = json.load(f).get("blended", [])
-    except (OSError, ValueError):
+    saved_dir = os.path.join(out_dir, BLEND_SAVED)
+    record = read_mark(mark)
+    if record is None:
+        if not os.path.exists(mark):
+            shutil.rmtree(saved_dir, ignore_errors=True)   # left by a blend cut off before its mark
         return
-    for name in names:
-        try:
-            os.remove(os.path.join(out_dir, name))
-        except OSError:
-            pass
+    saved = set(record.get("saved", []))
+    for name in saved:
+        copy = os.path.join(saved_dir, name)
+        if os.path.exists(copy):   # gone if an earlier undo already put it back
+            os.replace(copy, os.path.join(out_dir, name))
+    for name in record.get("blended", []):
+        if name not in saved:
+            try:
+                os.remove(os.path.join(out_dir, name))
+            except OSError:
+                pass
+    shutil.rmtree(saved_dir, ignore_errors=True)
     os.remove(mark)
 
 
-def blend_run(run_dir, frames_dir, out_dir, bright_name="ev+0-daylight", weights=BLEND_WEIGHTS):
-    """blend_minutes() over the experiment run's bracket and BLEND_MARGIN_MIN either side."""
-    brights = list_run(run_dir, bright_name)
+def blend_run(run_dir, frames_dir, out_dir, bright_name="ev+0-daylight", weights=BLEND_WEIGHTS, brights=None):
+    """blend_minutes() over the bracket (the experiment run's, or `brights` from production_bracket())
+    and BLEND_MARGIN_MIN either side."""
+    brights = brights if brights is not None else list_run(run_dir, bright_name)
     if not brights:
         return 0
     margin = timedelta(minutes=BLEND_MARGIN_MIN)

@@ -221,7 +221,7 @@ Alerts when no new production frame has reached the NAS for an hour. It reads th
 the Pi, so it also catches a dead Pi, a dead camera or a stuck sync. Written for Home Assistant OS.
 
 1. **Connect the share.** Settings > System > Storage > Add network storage. Name `camera`, usage
-   **Share**, server `<nas-host>` (the NAS's name or address), protocol Samba, remote share `camera`, user `camera`.
+   **Share**, server `<nas-host>` (the NAS's name or address), protocol Samba, remote share `camera`, user `<nas-user>`.
    It appears in Home Assistant as `/share/camera`. The script has no setting at the top. It reads
    two environment variables: `FRAME_BASE` (the folder that holds one folder per camera, default
    `/share/camera/project_sunshine`) and `FRAME_ROOT` (one camera's whole folder; it overrides
@@ -261,7 +261,7 @@ Not installed in Home Assistant yet. To install: copy `sunset_frame_age.sh`, `su
 copy: it holds the phone notifier. Add the phone line under each new alert's `notifiers`.
 
 The new blocks add alerts for:
-- NAS free space (default 350 GB, about 14 days of frames at 25 GB a day);
+- NAS free space (default 100 GB, about a month of frames at about 3 GB a day with no DNGs);
 - each Pi's health from its newest frame's JSON: undervoltage and throttle bits, temperature,
   frames waiting to sync, disk use, tiny or repeated JPEGs;
 - the daily video job's status;
@@ -324,6 +324,11 @@ Before you start:
     `~/sunset/experiments/systemd/exp-weather.service` and `exp-weather.timer` to
     `/etc/systemd/system/`, change `User=` and the `/home/pi/` path in the service to your user and
     home, then `sudo systemctl daemon-reload` and `sudo systemctl enable --now exp-weather.timer`.
+    Until production shoots the sunset bracket (#10), do the same for `exp-sunset.service` (replace
+    `USER` and `HOME`) and `exp-sunset.timer`: it runs `sunset-nightly.sh` at 23:00 UTC, which waits
+    for tonight's sunset window and survives a reboot. Once `BRACKET=1` is set in `sunset.env`
+    (the production bracket, see `sunset.env.example`), disable it:
+    `sudo systemctl disable --now exp-sunset.timer`, so the two don't fight over the camera.
     Re-create any other `exp-*` timers from the notes you made before the wipe. They are transient,
     so a reboot clears them, and they are not part of the production capture.
 12. **Self-test.** `./sunset-selftest.sh`. It checks the camera, clock, disk, memory, capture time,

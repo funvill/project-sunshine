@@ -2,8 +2,10 @@
 # Project Sunset - single capture for Pi Zero W + IMX477 (Pi HQ / Arducam UC-517)
 # Captures locally first; sunset-sync.sh moves frames to the NAS.
 #   sunset-capture.sh           the regular 5-minute frame (+ night frame when dark)
-#   sunset-capture.sh --dense   an extra 1-a-minute frame around sunrise and sunset:
+#   sunset-capture.sh --dense   an extra 1-a-minute frame around sunset (and sunrise if DENSE_WINDOWS has it):
 #                               JPEG + JSON only, same auto exposure as the regular frame
+# With BRACKET=1, any frame near sunset is followed by an ev+0 and an ev-2 shot (<name>_ev0,
+# <name>_ev-2): the sunset bracket that tools/fuse_sunset.py merges (#10, option E).
 set -eEuo pipefail
 
 SCHEDULE=regular
@@ -15,6 +17,7 @@ for arg in "$@"; do
 done
 
 CAM_NAME="${CAM_NAME:-wide}"                     # wide | tight
+OUT_ROOT_GIVEN="${OUT_ROOT:+1}"                   # the caller chose the outbox (the offline tests do)
 OUT_ROOT="${OUT_ROOT:-$HOME/sunset/outbox}"
 LOG_FILE="${LOG_FILE:-$(dirname "$OUT_ROOT")/capture.log}"
 LOCK_FILE="${LOCK_FILE:-$(dirname "$OUT_ROOT")/.sunset-capture.lock}"
@@ -23,6 +26,7 @@ NIGHT_SHUTTER_US="${NIGHT_SHUTTER_US:-4000000}"   # 4 s
 NIGHT_GAIN="${NIGHT_GAIN:-1}"
 NIGHT_AWB="${NIGHT_AWB:-2.25,2.40}"               # red,blue colour gains, measured at night
 SAVE_RAW="${SAVE_RAW:-1}"                         # 1 = also save DNG
+BRACKET_SAVE_RAW="$SAVE_RAW"                      # dense frames turn SAVE_RAW off; the ev-2 bracket frame follows this
 CAPTURE_TIMEOUT_S="${CAPTURE_TIMEOUT_S:-60}"      # per rpicam-still call
 CAPTURE_KILL_S="${CAPTURE_KILL_S:-10}"            # then SIGKILL, if rpicam-still ignored the SIGTERM
 REQUIRE_TIME_SYNC="${REQUIRE_TIME_SYNC:-1}"       # 1 = refuse to capture until the clock has synced this boot
@@ -35,8 +39,14 @@ DISK_MIN_FREE_MB="${DISK_MIN_FREE_MB:-100}"       # below this, skip everything 
 SLOT_EVERY_MIN="${SLOT_EVERY_MIN:-5}"             # regular slot spacing; dense mode leaves these minutes alone
 LOCK_WAIT_S="${LOCK_WAIT_S:-90}"                  # a regular capture waits this long for a dense one to finish
 DENSE_TIMEOUT_S="${DENSE_TIMEOUT_S:-30}"          # per rpicam-still call in dense mode, so a hang ends early
+DENSE_WINDOWS="${DENSE_WINDOWS:-sunset}"          # which dense windows shoot: "sunset" (decided 2026-11-16), "sunrise sunset" for both
 SUN_PY="${SUN_PY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sunset-sun.py}"
 ROTATION="${ROTATION:-0}"                         # 180 = camera mounted upside down (only 0 or 180)
+BRACKET="${BRACKET:-0}"                           # 1 = the sunset bracket: ev+0 and ev-2 after each frame near sunset
+BRACKET_WINDOW_MIN="${BRACKET_WINDOW_MIN:-45}"    # within this many minutes either side of sunset
+BRACKET_AWB_HANDOVER_MIN="${BRACKET_AWB_HANDOVER_MIN:-10}"  # daylight white balance until this long after sunset, then auto
+BRACKET_RAW_MIN="${BRACKET_RAW_MIN:-30}"          # DNG on the ev-2 frame within this many minutes of sunset (SAVE_RAW=1)
+BRACKET_SETTLE_MS="${BRACKET_SETTLE_MS:-1000}"    # settle time of each bracket shot, as in the experiment pair
 CAPTURE_RETRY_UNDER_S="${CAPTURE_RETRY_UNDER_S:-15}"   # a regular day shot that fails faster than this is tried once more
 CAPTURE_RETRY_WAIT_S="${CAPTURE_RETRY_WAIT_S:-5}"      # pause before that retry
 CAPTURE_FAIL_REBOOT="${CAPTURE_FAIL_REBOOT:-0}"        # 1 = reboot after CAPTURE_FAIL_REBOOT_N regular failures in a row
@@ -46,6 +56,9 @@ RUN_DIR="$(dirname "$CLOCK_OK_FILE")"                  # tmpfs: counters that sh
 CAPTURE_FAIL_FILE="$RUN_DIR/sunset-capture-failures"
 CAPTURE_REBOOT_MARK="$(dirname "$OUT_ROOT")/.capture-reboot"   # on the SD: survives the reboot
 CAPTURE_LOG_MAX_BYTES="${CAPTURE_LOG_MAX_BYTES:-10485760}"   # then capture.log moves to capture.log.1 (logrotate is masked)
+ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sunset.env"   # what the systemd units load
+if [[ -n "$OUT_ROOT_GIVEN" ]]; then ENV_DEFAULT=0; else ENV_DEFAULT=1; fi
+REQUIRE_ENV_FILE="${REQUIRE_ENV_FILE:-$ENV_DEFAULT}"   # 1 = refuse to capture without sunset.env next to this script
 
 TAG=""
 log() {
@@ -67,6 +80,18 @@ case "$ROTATION" in
 esac
 
 mkdir -p "$(dirname "$LOG_FILE")" "$OUT_ROOT"
+
+# Site settings (issue #23). The units load sunset.env with EnvironmentFile=-, so systemd
+# runs this happily without it. A Pi rebuilt without the file would then default to
+# CAM_NAME=wide with no ROTATION: its frames would join the wide/ series, and keep the wide
+# alert fresh while the real wide camera might be dead. A gap is better. Required by default
+# only when the caller has not set OUT_ROOT (the Pis never do; the offline tests do).
+# The dense frame exits quietly: the regular frame logs it every 5 minutes.
+if [[ "$REQUIRE_ENV_FILE" == "1" && ! -s "$ENV_FILE" ]]; then
+  [[ "$SCHEDULE" == dense ]] && exit 0
+  log "SKIPPED: $ENV_FILE missing or empty (CAM_NAME would default to wide; restore it, or set REQUIRE_ENV_FILE=0)"
+  exit 1
+fi
 
 # Clock. The Zero has no RTC: after a power cut it boots with the time fake-hwclock
 # last saved, which is hours or days wrong until NTP answers. UTC filenames from a
@@ -143,6 +168,8 @@ if [[ "$SCHEDULE" == dense ]]; then
     dense_warn "sun script failed rc=$SUN_RC: $WINDOW"
     exit 0
   fi
+  # A window left out of DENSE_WINDOWS is the same as being outside the windows: quiet.
+  [[ " $DENSE_WINDOWS " == *" $WINDOW "* ]] || exit 0
   TAG="dense window=$WINDOW "
   CAPTURE_TIMEOUT_S="$DENSE_TIMEOUT_S"
   SAVE_RAW=0
@@ -211,7 +238,7 @@ rescue_partial() {
   for f in "$STAGE/${CAM_NAME}"_*.jpg; do
     [[ -f "$f" ]] || continue
     base="${f%.jpg}"; name="${base##*/}"
-    [[ "$name" =~ ^${CAM_NAME}_([0-9]{8}T[0-9]{6}Z)(_night)?$ ]] || continue
+    [[ "$name" =~ ^${CAM_NAME}_([0-9]{8}T[0-9]{6}Z)(_night|_ev0|_ev-2)?$ ]] || continue
     ts="${BASH_REMATCH[1]}"
     [[ -s "$f" && -s "$base.json" ]] || continue
     [[ -n "$(find "$f" -mmin +1 2>/dev/null)" ]] || continue
@@ -297,7 +324,7 @@ add_meta() { # add_meta <json> <auto|night> <started> <finished> <decision lux o
   local args=(annotate "$json" --kind "$kind" --camera "$CAM_NAME" --schedule "$SCHEDULE" --slot "$TS"
     --started "$started" --finished "$finished" --outbox "$OUT_ROOT"
     --script "${BASH_SOURCE[0]}" --decision-lux "$lux"
-    --setup-id "${SETUP_ID:-}" --setup-note "${SETUP_NOTE:-}"
+    --setup-id "${SETUP_ID:-}" --setup-note "${SETUP_NOTE:-}" --profile-id "${PROFILE_ID:-}"
     --nas-target "${NAS_TARGET:-}" --sync-log "${SYNC_LOG_FILE:-$(dirname "$OUT_ROOT")/sync.log}")
   for setting in "$@"; do args+=(--set "$setting"); done
   [[ "${FRAME_CHECKSUMS:-1}" == "1" ]] || args+=(--no-checksums)
@@ -328,6 +355,54 @@ check_dng() {
     echo "$2"
   fi
 }
+
+# The sunset bracket (#10, option E). After a frame within BRACKET_WINDOW_MIN of sunset, an ev+0
+# and an ev-2 shot, daylight white balance until BRACKET_AWB_HANDOVER_MIN after sunset (it turns
+# the sky brown later, as the city lights the cloud), then auto. A DNG on the ev-2 frame within
+# BRACKET_RAW_MIN. The frame is already published: a failed bracket shot is logged, never fatal.
+BRACKET_N=0
+frame_minutes() { # frame_minutes <json>: Sun.minutes_from_sunset, or nothing
+  python3 -c 'import json,sys; print(float(json.load(open(sys.argv[1]))["Sun"]["minutes_from_sunset"]))' "$1" \
+    2>/dev/null 9>&- | tr -d '\r' || true
+}
+within() { awk -v m="$1" -v w="$2" 'BEGIN{exit !(m >= -w && m <= w)}'; }   # within <minutes> <limit>
+bracket_pair() { # bracket_pair <published json of the frame>
+  [[ "$BRACKET" == 1 ]] || return 0
+  local mins sun_was="$SUN" ev b rc raw start end awb=daylight
+  mins="$(frame_minutes "$1")"
+  [[ -n "$mins" ]] && within "$mins" "$BRACKET_WINDOW_MIN" || return 0
+  local awb_args=(--awb daylight)
+  awk -v m="$mins" -v h="$BRACKET_AWB_HANDOVER_MIN" 'BEGIN{exit !(m > h)}' && { awb=auto; awb_args=(); }
+  for ev in 0 -2; do
+    b="${BASE}_ev${ev}"
+    raw=0; local raw_args=()
+    if [[ "$ev" == -2 && "$BRACKET_SAVE_RAW" == 1 && "$DISK_KNOWN" == 1 ]] && (( DISK_PCT < DISK_DROP_RAW_PCT )) \
+       && within "$mins" "$BRACKET_RAW_MIN"; then
+      raw=1; raw_args=(--raw)
+    fi
+    rc=0
+    start="$(date +%s.%N)"
+    run_cam -n -t "$BRACKET_SETTLE_MS" ${raw_args[@]+"${raw_args[@]}"} --ev "$ev" ${awb_args[@]+"${awb_args[@]}"} \
+      --metadata "$b.json" --metadata-format json -o "$b.jpg" || rc=$?
+    end="$(date +%s.%N)"
+    if [[ "$rc" != 0 || ! -s "$b.jpg" ]]; then
+      log "WARN bracket ev$ev failed rc=$rc err=$(tail -n 2 "$ERR_FILE" 2>/dev/null | tr '\n' '|')"
+      rm -f "$b".* 2>/dev/null || true
+      break
+    fi
+    raw="$(check_dng "$b" "$raw" "(bracket ev$ev)")"
+    add_sun "$b.json"
+    add_meta "$b.json" bracket "$start" "$end" "" "settle_ms=$BRACKET_SETTLE_MS" "ev=$ev" "awb=$awb" \
+      "raw=$raw" "bracket_of=$NAME" ${ROT_SET[@]+"${ROT_SET[@]}"}
+    if ! { mkdir -p "$DAY_DIR" && mv -f "$b".* "$DAY_DIR/"; } 2>"$ERR_FILE"; then
+      log "WARN bracket ev$ev publish failed (kept in .partial)"
+      break
+    fi
+    BRACKET_N=$(( BRACKET_N + 1 ))
+  done
+  SUN="$sun_was"
+}
+bracket_note() { [[ "$BRACKET" == 1 ]] && echo " bracket=$BRACKET_N" || true; }
 
 # 1) Auto-exposure shot; -t gives AE/AWB time to settle on the slow Zero.
 #    A regular shot that fails quickly (another program holding the camera, say) is
@@ -360,8 +435,9 @@ rm -f "$CAPTURE_FAIL_FILE" 2>/dev/null || true
 
 # A dense frame is only this one shot: no night frame, so it stays short.
 if [[ "$SCHEDULE" == dense ]]; then
+  bracket_pair "$DAY_DIR/$NAME.json"
   TEMP="$( (vcgencmd measure_temp 2>/dev/null 9>&- || true) | cut -d= -f2)"
-  log "soc=${TEMP:-na} disk=${DISK_PCT}% raw=0 meta=$META sun=$SUN ok"
+  log "soc=${TEMP:-na} disk=${DISK_PCT}% raw=0$(bracket_note) meta=$META sun=$SUN ok"
   exit 0
 fi
 
@@ -406,6 +482,9 @@ elif (( DARK )); then
   fi
 fi
 
-# 4) Log SoC temperature and capture status for the long-term data layer.
+# 4) The sunset bracket, after the night frame.
+bracket_pair "$DAY_DIR/$NAME.json"
+
+# 5) Log SoC temperature and capture status for the long-term data layer.
 TEMP="$( (vcgencmd measure_temp 2>/dev/null 9>&- || true) | cut -d= -f2)"
-log "lux=$LUX soc=${TEMP:-na} disk=${DISK_PCT}% raw=$RAW_DAY night=$NIGHT meta=$META sun=$SUN ok"
+log "lux=$LUX soc=${TEMP:-na} disk=${DISK_PCT}% raw=$RAW_DAY night=$NIGHT$(bracket_note) meta=$META sun=$SUN ok"

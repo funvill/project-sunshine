@@ -108,11 +108,12 @@ input_number:
     min: 0
     max: 20000
     step: 10
-    # About 14 days of runway. Both cameras together fill the share at roughly 25 GB a day: it went from
-    # 230 GB free on Nov 11 to 128 GB on Nov 15 (issue #7), and 14 days x 25 GB is 350 GB. That is time
-    # to clear space or add a disk before frames start backing up on the Pis, which hold only 2-3 days.
-    # Raise it if the daily rate goes up (dense frames, a third camera); lower it once the NAS has room.
-    initial: 350
+    # About a month of runway. With no DNGs (since 2026-11-16, issue #38) both cameras together use
+    # about 3 GB a day: 0.76 GB in the 8 hours after 09:15 UTC Nov 16, plus the dense and bracket frames
+    # around sunset. 100 GB is about 30 days: time to clear space or add a disk before frames back up on
+    # the Pis. Was 350 (14 days at 25 GB a day) while the DNGs were kept. Raise it if the daily rate goes
+    # up (DNGs back on, a third camera). Other data on the share uses the same space.
+    initial: 100
     mode: box
 
 template:
@@ -141,7 +142,7 @@ template:
         # Unknown counts as low: an unreadable share is the same emergency as a full one.
         state: >
           {% set free = states('sensor.sunset_nas_free_space') %}
-          {{ not is_number(free) or free | float < states('input_number.sunset_min_free_gb') | float(350) }}
+          {{ not is_number(free) or free | float < states('input_number.sunset_min_free_gb') | float(100) }}
 
       # Anything but exactly "ok" is bad, which includes unknown and unavailable.
       # The 30 minutes let a brief throttle flag (soft temperature limit on a sunny afternoon) pass.
@@ -228,7 +229,7 @@ alert:
     can_acknowledge: true
     message: >
       {% set free = states('sensor.sunset_nas_free_space') %}
-      {% if is_number(free) %}The NAS share has {{ free }} GB free, under the {{ states('input_number.sunset_min_free_gb') }} GB limit (about 14 days of frames).
+      {% if is_number(free) %}The NAS share has {{ free }} GB free, under the {{ states('input_number.sunset_min_free_gb') }} GB limit (about a month of frames).
       {% else %}Home Assistant can't read the free space on the NAS share.{% endif %}
       Clear space before the Pis' disks start filling.
     done_message: The NAS share has enough free space again.

@@ -110,7 +110,7 @@ result(covered == {"alert." + k for k in alerts}, "the re-arm automation covers 
 result(auto["trigger"][0]["to"] == "idle" and auto["trigger"][0]["for"] == "12:00:00", "re-arm after 12 h acknowledged")
 result(auto["action"][0]["service"] == "alert.turn_on", "re-arm calls alert.turn_on")
 
-result(main["input_number"]["sunset_min_free_gb"]["initial"] == 350, "free-space limit starts at 350 GB")
+result(main["input_number"]["sunset_min_free_gb"]["initial"] == 100, "free-space limit starts at 100 GB")
 result(beat["rest_command"]["sunset_heartbeat"]["url"].startswith("<secret "), "heartbeat URL comes from a secret")
 hb = beat["automation"][0]
 result(hb["trigger"][0]["platform"] == "time_pattern" and hb["trigger"][0]["minutes"] == "7"

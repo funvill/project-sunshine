@@ -347,6 +347,10 @@ def write_json(path, data, tmp_folder):
     with open(tmp, "w") as f:
         json.dump(data, f, indent=1)
         f.write("\n")
+        # On disk before the rename: a freeze on the CM4 (Nov 16) left system.json 0 bytes. These
+        # files change a few times a day, so the extra writes are negligible.
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, path)
 
 
@@ -373,15 +377,20 @@ def update_daily(outbox, camera, slot, fields, missing):
     day = "%s-%s-%s" % (slot[:4], slot[4:6], slot[6:8])
     if state.get("day_utc") != day:
         state = {"schema_version": SCHEMA_VERSION, "camera": camera, "day_utc": day, "records": []}
+    day_path = os.path.join(outbox, camera, slot[:4], slot[4:6], slot[6:8], "system.json")
+    partial = os.path.join(outbox, ".partial")
     if state["records"] and state["records"][-1].get("system_id") == system_id:
+        # Absent means the sync has copied it. Present but empty or unreadable means a freeze cut
+        # the write short (the sync holds an empty one back): write it again from the state.
+        if os.path.exists(day_path) and load_state(day_path) != state:
+            write_json(day_path, state, partial)
         return system_id
     record = {"system_id": system_id, "from_utc": slot_iso(slot)}
     record.update(merged)
     record["unavailable"] = [name for name in missing if merged.get(name) is None]
     state["records"].append(record)
-    partial = os.path.join(outbox, ".partial")
     # This order, so a failure between the two is retried by the next frame.
-    write_json(os.path.join(outbox, camera, slot[:4], slot[4:6], slot[6:8], "system.json"), state, partial)
+    write_json(day_path, state, partial)
     write_json(state_path, state, partial)
     return system_id
 
@@ -420,12 +429,14 @@ def slot_iso(slot):
 
 
 def capture_block(json_path, data, kind, camera, slot, started, finished, setup_id, system_id,
-                  settings, decision_lux, checksums, schedule="regular", deadline=None):
+                  settings, decision_lux, checksums, schedule="regular", deadline=None, profile_id=None):
     base = json_path[:-len(".json")] if json_path.endswith(".json") else json_path
     # schedule: "regular" for the 5-minute slots, "dense" for the extra 1-a-minute frames.
     block = {"schema_version": SCHEMA_VERSION, "camera": camera, "kind": kind, "schedule": schedule}
     if setup_id:
         block["setup_id"] = setup_id
+    if profile_id:
+        block["profile_id"] = profile_id   # changes with any exposure or white-balance change (#10)
     block["system_id"] = system_id
     block["slot_utc"] = slot_iso(slot)
     block["shot_started_utc"] = iso(float(started))
@@ -484,7 +495,7 @@ def annotate(args):
         args.file, data, kind=args.kind, camera=args.camera, slot=args.slot, started=args.started,
         finished=args.finished, setup_id=args.setup_id, system_id=system_id, settings=args.set,
         decision_lux=args.decision_lux, checksums=not args.no_checksums, schedule=args.schedule,
-        deadline=deadline)
+        deadline=deadline, profile_id=args.profile_id)
     # Capture goes to disk first, so a kill while probing the system can't lose it.
     write_json(args.file, data, folder)
     data["System"] = system_block(args.root, args.outbox, args.nas_target or "", sync_log, run, deadline)
@@ -498,7 +509,7 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("annotate")
     a.add_argument("file")
-    a.add_argument("--kind", required=True, choices=["auto", "night"])
+    a.add_argument("--kind", required=True, choices=["auto", "night", "bracket"])
     a.add_argument("--camera", required=True)
     a.add_argument("--schedule", default="regular", choices=["regular", "dense"])
     a.add_argument("--slot", required=True, help="the frame's UTC filename time")
@@ -508,6 +519,7 @@ def main(argv=None):
     a.add_argument("--set", action="append", metavar="KEY=VALUE", help="a setting used for this shot")
     a.add_argument("--decision-lux", help="the auto shot's lux that triggered a night frame")
     a.add_argument("--setup-id")
+    a.add_argument("--profile-id")
     a.add_argument("--setup-note")
     a.add_argument("--nas-target")
     a.add_argument("--sync-log")

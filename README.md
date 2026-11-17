@@ -2,8 +2,8 @@
 
 A five-year time-lapse of the western sky from a tower window in Burnaby, BC, looking toward
 downtown Vancouver. **Sunset is the subject.** Real capture starts on the winter solstice,
-**2026-12-21**. Until then a pilot runs on a Raspberry Pi 3 B+ to tune the camera, the sync and the
-daily video.
+**2026-12-21**. Until then a pilot runs on two cameras, a Raspberry Pi 3 B+ and a Raspberry Pi CM4, to tune the
+cameras, the sync and the daily video.
 
 This README is the handoff: it says what exists, what state it is in, and where to start. The full
 brief, with every decision and the reason for it, is [`CLAUDE.md`](CLAUDE.md). Changes are listed by
@@ -13,8 +13,8 @@ more likely to be current.
 ## How it works
 
 1. **Capture (Pi):** a frame every 5 minutes, day and night, plus one a minute around sunrise and
-   sunset. Each regular frame is a JPEG, a DNG and a JSON metadata file; a 4 s night frame is added
-   when it is dark. Frames are written to the SD card first.
+   sunset. Each regular frame is a JPEG, a DNG and a JSON metadata file; a night frame (4 s on `wide`,
+   8 s on `cm4wide` since 2026-11-12) is added when it is dark. Frames are written to the SD card first.
 2. **Sync (Pi to NAS):** frames are copied to an SMB share on the NAS and deleted from the SD card
    only once the copy is confirmed, so a NAS or network outage loses nothing.
 3. **Alert (Home Assistant):** warns when the newest frame on the NAS is more than about an hour old.
@@ -24,19 +24,24 @@ more likely to be current.
    publisher is not written. You can build any day's video on a PC with `tools/build_video.py`
    ([how](#building-a-days-video-by-hand)).
 
+How the parts connect: power in solid orange, data dashed. Dashed boxes are planned, not fitted yet
+(the UPS is #29). Redraw it with `python tools/system_diagram.py` when the wiring changes.
+
+<img src="docs/system-diagram.svg" alt="Power and data diagram: mains, DC adapter, planned OpenUPS2 and MyPi XT carrier with the CM4 sunshine and camera cm4wide; the Pi 3 B+ timelaps on its own 5 V supply with camera wide; both over Wi-Fi to the NAS, the daily video job, Home Assistant and the phone" width="900">
+
 Frame layout on the NAS, with UTC names:
 
 ```
 project_sunshine/<camera>/YYYY/MM/DD/<camera>_<UTC>.{jpg,dng,json}   (+ <camera>_<UTC>_night.*)
 ```
 
-`<camera>` is `wide` (Pi 3 B+ with the 6 mm lens) or `cm4wide` (CM4 with the 3.2 mm lens, since 2026-11-11).
+`<camera>` is `wide` (Pi 3 B+ with the 6 mm lens) or `cm4wide` (CM4 with the 3.2 mm lens, capturing since 2026-11-12).
 
 Each `.json` holds the camera settings, a `Sun` block (azimuth, elevation, minutes from sunset), a
 `Capture` block (how and why the frame was taken) and a `System` block (temperature, disk, checksums).
 A `system.json` in each day folder holds what rarely changes.
 
-## Current state (2026-11-13)
+## Current state (2026-11-15)
 
 | Part | State |
 |---|---|
@@ -47,16 +52,19 @@ A `system.json` in each day folder holds what rarely changes.
 | Sunset video quality | **Not good enough to post.** The Nov 12 `cm4wide` video still flickers around sunset (about 15 to 20 min before). See "Next steps" |
 | Instagram posting | Not started: no account, Meta app or publishing code |
 | Pilot experiments | Running on the Pi between captures; results on issue #3 |
-| Final mount, foam hood, wide lens | Not done |
+| Final mount, foam hood | Not done. Both cameras sit loose behind the glass; the CM4's 3.2 mm lens is the wide one |
 
 Known problems:
 
-- **Lens too narrow.** The camera has the official Pi 6 mm CS lens, about 58° wide. The sunset swings
-  about 75° over a year, so it is predicted to be out of frame from about Nov 21 to Jan 19 and from
-  about May 7 to Aug 4. That includes the solstice start. See issue #4.
-- **Power:** the Pi had undervoltage and one hard freeze. A new supply went in on 2026-11-08 with no
-  warnings since; keep watching before calling it fixed.
-- **Heat:** the Pi runs at 55 to 60 °C at capture, at its soft limit. A heatsink is on the to-do list.
+- **`wide` lens too narrow.** The `wide` camera has the official Pi 6 mm CS lens, about 58° wide. The
+  sunset swings about 75° over a year. Measured on the Nov 8 sunset, it is out of frame on the left
+  from about Nov 24 to Jan 16 (the solstice start is about 4.7° past the edge) and, predicted, on the
+  right from about May 12 to Jul 30. `cm4wide` (3.2 mm) should cover the whole swing, but that is
+  estimated from landmarks, not yet measured on the sun, and the June end is tight. See issue #4.
+- **Power:** `timelaps` had undervoltage and one hard freeze. A new supply went in on 2026-11-08; the
+  only warnings since were three on 2026-11-12 while the cameras were moved. Keep watching before
+  calling it fixed.
+- **Heat:** `timelaps` runs at 55 to 60 °C at capture, at its soft limit. A heatsink is on the to-do list.
 - **Sunset flicker (blocks posting).** Between about 00:12 and 00:19 UTC on Nov 12 the sun and its glow
   brighten and dim minute to minute, in the raw frames too. Measured on 2026-11-15: it is real cloud crossing
   the glow (the same minutes on both cameras), not auto exposure. `fuse_sunset.py` now blends each sunset
@@ -65,22 +73,18 @@ Known problems:
 - **Few clear sunsets.** Nov 8 and Nov 12 were the good ones. The 9° dusk cut-off, the `cm4wide`
   calibration and the tower blur boxes haven't been checked on a clear sunset yet.
 
-## Next steps (from 2026-11-13)
+## Next steps (from 2026-11-15)
 
 1. **Sunset flicker:** Steven to judge the blended Nov 12 video. Still open: the 5-minute frames inside the
    merge window are not real merges (the runner skips that minute), and no clear sunset yet. Notes in
    `CLAUDE.md` under "Next session" and on issue #3.
 2. ~~Look at the 7-minute hole~~ in the sunset bracket on Nov 12: the runner's NAS upload, fixed 2026-11-13.
-3. **Commit the video work** (see git status below) on a branch, and put `nas/crop.cm4wide.json` on the NAS
-   as `daily/crop.json` when the NAS job is set up.
+3. Put `nas/crop.cm4wide.json` on the NAS as `daily/crop.json` when the NAS job is set up.
 4. **Steven's calls:** the sky score threshold for posting; Instagram login and public posting (issue #2);
    DNG yes or no (issue #5); a production sunset bracket (backlog #3), which removes the dependency on
    experiment frames for the merged exposure.
 5. **Later:** build the Docker image and run the job on the NAS, the publisher, the heatsink and the final
    mount, hood and wide-lens decisions.
-
-Uncommitted at the time of writing: the video work above, plus the Pi network watchdog (`pi/sunset-netwatch.*`,
-`tests/cases/66_netwatch.sh`, the stubs it uses), `docs/setup.md` and `pi/install.sh` edits.
 
 ## Open issues
 
@@ -101,7 +105,7 @@ and the final mount and hood. The longer backlog is at the end of `CLAUDE.md`.
 | `pi/` | Everything that runs on the Pi: capture, sync, metadata, sun position, self-test, focus and diagnostics page, systemd units. Copied flat into `~/sunset` | [Pi setup guide](docs/setup.md) |
 | `nas/` | The daily sunset video job (Python + ffmpeg in Docker) | [nas/README.md](nas/README.md) |
 | `experiments/` | Pilot experiment runner and the hourly weather log. Not part of production capture | Issue #3 |
-| `tools/` | PC-side helpers: `build_video.py` (builds one day's Instagram video and prints its sky score, no AI), `fuse_sunset.py` (merges the sunset bracket so the sunset isn't blown out), `issue_blur.py` (blurs the nearby buildings in images posted to issues) | [Building a video](#building-a-days-video-by-hand) |
+| `tools/` | PC-side helpers: `build_video.py` (builds one day's Instagram video and prints its sky score, no AI), `fuse_sunset.py` (merges the sunset bracket so the sunset isn't blown out), `issue_blur.py` (blurs the nearby buildings in images posted to issues), `fog_scan.py` (measures how clear each frame is, to find fog or condensation, #33; measuring only, no alert) | [Building a video](#building-a-days-video-by-hand) |
 | `homeassistant/` | The stale-frame alert, copied into Home Assistant by hand | [Pi setup guide](docs/setup.md#home-assistant-alert) |
 | `tests/` | Offline tests with a stubbed camera and NAS | Below |
 | `docs/` | Pi setup guide and hardware notes | [hardware notes](docs/hardware/README.md) |
@@ -141,11 +145,13 @@ job as the NAS for a chosen sunset date, reads the frames from the NAS share and
 python tools/build_video.py --camera cm4wide --date 2026-11-12 --start 07:30 --redo --crop nas/crop.cm4wide.json --fuse-run cm4-sunset-1
 ```
 
-It needs ffmpeg, and numpy and OpenCV for `--fuse-run`. It prints the video path and the **sky score**
+Set `SUNSET_NAS` once on the PC to the `project_sunshine` folder on the share (for example `//<nas-host>/camera/project_sunshine`; the host is kept out of this repo), or pass `--nas`. It needs ffmpeg, and numpy and OpenCV for `--fuse-run`. It prints the video path and the **sky score**
 (0 to 100, from how much of the sky is lit warm around sunset; provisional, see
 [nas/README.md](nas/README.md#sky-score)). `--start 07:30` starts at that local time, `--fuse-run` merges
 that experiment run's sunset bracket first and blends each sunset minute with its neighbours (1:2:1, to
-calm the cloud flicker; `--no-blend` to skip it), and `--redo` builds a day again. The camera's `crop.json`
+calm the cloud flicker; `--no-blend` to skip it), `--fuse-production` does the same with the production
+bracket (the `_ev0`/`_ev-2` frames that `BRACKET=1` saves beside each sunset frame, #10) instead of an
+experiment run, and `--redo` builds a day again. The camera's `crop.json`
 (calibration, tighter view, tower blur) is `nas/crop.cm4wide.json`.
 
 ## Rules
@@ -164,8 +170,8 @@ calm the cloud flicker; `--no-blend` to skip it), and `--redo` builds a day agai
 ## Hardware
 
 Two cameras, both IMX477: `wide` is a Raspberry Pi 3 B+ (`timelaps`) with an Arducam UC-517 and the Pi
-6 mm CS lens, and `cm4wide` is a CM4 on a MyPi board with an Arducam B0240E and a 3.2 mm lens (about 94°
-on the lens model, much wider), both loose behind the glass. The plan for the real run is a 3D-printed
+6 mm CS lens, and `cm4wide` is a CM4 on a MyPi board with an Arducam B0240E and a 3.2 mm lens (about 93°
+estimated, likely wider; sold as 120°), both loose behind the glass. The plan for the real run is a 3D-printed
 keyed mount stuck to the glass, a black foam hood against reflections, and the CM4 camera as the wide
-sunset camera with the other as the tighter downtown one. Details and the shopping list are in `CLAUDE.md` and
+sunset camera with the other, on a 16 mm lens, as the tighter downtown one. Details and the shopping list are in `CLAUDE.md` and
 [docs/hardware/README.md](docs/hardware/README.md).

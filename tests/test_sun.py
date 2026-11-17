@@ -316,5 +316,118 @@ class Cli(unittest.TestCase):
         self.assertEqual(self.run_cli("dense").returncode, 2)   # no site
 
 
+TELE = {"bearing": 281.0, "hfov": 22.2, "vfov": 16.8, "tilt": 2.0, "margin": 0.0}   # 16 mm estimate (#32)
+VIEW_ENV = {"VIEW_BEARING": "281", "VIEW_HFOV": "22.2", "VIEW_VFOV": "16.8", "VIEW_TILT": "2"}
+
+
+class View(unittest.TestCase):
+    """Is the sun inside a camera's view (#32)."""
+
+    def test_centre_of_the_view_is_zero_offset(self):
+        x, y = sun.view_offset(281.0, 2.0, 281.0, 2.0)
+        self.assertAlmostEqual(x, 0.0, places=6)
+        self.assertAlmostEqual(y, 0.0, places=6)
+
+    def test_offsets_are_right_and_up_positive(self):
+        # Facing west, a larger azimuth is to the right (towards north); higher is up.
+        x, y = sun.view_offset(286.0, 2.0, 281.0, 2.0)
+        self.assertAlmostEqual(x, 5.0, delta=0.05)
+        self.assertAlmostEqual(y, 0.0, delta=0.05)
+        x, y = sun.view_offset(281.0, 6.0, 281.0, 2.0)
+        self.assertAlmostEqual(x, 0.0, delta=0.05)
+        self.assertAlmostEqual(y, 4.0, delta=0.05)
+        x, _ = sun.view_offset(276.0, 2.0, 281.0, 2.0)
+        self.assertLess(x, 0)
+
+    def test_behind_the_camera_has_no_offset(self):
+        self.assertIsNone(sun.view_offset(101.0, 2.0, 281.0, 2.0))
+        self.assertFalse(sun.in_view(101.0, 2.0, TELE))
+
+    def test_the_margin_widens_the_view(self):
+        self.assertTrue(sun.in_view(281.0 + 11.0, 2.0, TELE))            # half of 22.2 is 11.1
+        self.assertFalse(sun.in_view(281.0 + 12.0, 2.0, TELE))
+        self.assertTrue(sun.in_view(281.0 + 12.0, 2.0, dict(TELE, margin=3.0)))
+        self.assertFalse(sun.in_view(281.0, 2.0 + 9.0, TELE))            # above the top (8.4 up)
+        self.assertTrue(sun.in_view(281.0, 2.0 + 9.0, dict(TELE, margin=3.0)))
+
+    def test_a_sun_below_the_horizon_is_never_in_view(self):
+        # Under the ground or behind the far horizon it can't reach the lens, even inside the frame.
+        self.assertFalse(sun.in_view(281.0, -2.0, TELE))
+
+    def test_view_from_env(self):
+        self.assertIsNone(sun.view_from_env({}))
+        v = sun.view_from_env(VIEW_ENV)
+        self.assertEqual(v, {"bearing": 281.0, "hfov": 22.2, "vfov": 16.8, "tilt": 2.0, "margin": 3.0})
+        self.assertEqual(sun.view_from_env(dict(VIEW_ENV, VIEW_MARGIN="0"))["margin"], 0.0)
+        for bad in ({"VIEW_HFOV": "0"}, {"VIEW_VFOV": "190"}, {"VIEW_BEARING": "west"},
+                    {"VIEW_HFOV": ""}, {"VIEW_MARGIN": "-1"}):
+            with self.assertRaises(ValueError):
+                sun.view_from_env(dict(VIEW_ENV, **bad))
+
+    def test_calendar_finds_the_equinox_and_not_the_solstice(self):
+        days = sun.view_calendar(datetime(2027, 3, 20).date(), 1, LAT, LON, TELE)
+        self.assertEqual(len(days), 1)
+        d = days[0]
+        self.assertEqual(d["date"], "2027-03-20")
+        self.assertGreater(d["minutes"], 0)
+        # In view only before it sets: the last minute is before sunset and low.
+        sunset = sun.next_sunset(utc(2027, 3, 20, 18, 0), LAT, LON)
+        self.assertLessEqual(sun.parse_time(d["last_utc"]), sunset)
+        self.assertLess(d["max_el"], 9.0)
+        self.assertGreaterEqual(d["min_el"], -1.0)
+        self.assertEqual(sun.view_calendar(datetime(2026, 12, 21).date(), 1, LAT, LON, TELE)[0]["minutes"], 0)
+
+    def test_sun_block_gets_the_view_only_when_one_is_set(self):
+        dt = utc(2027, 3, 21, 2, 0)
+        self.assertNotIn("in_view", sun.sun_block(dt, LAT, LON))
+        b = sun.sun_block(dt, LAT, LON, TELE)
+        self.assertIn(b["in_view"], (True, False))
+        self.assertIn("view_x_deg", b)
+        self.assertIn("view_y_deg", b)
+        behind = sun.sun_block(utc(2027, 3, 21, 16, 0), LAT, LON, TELE)    # morning sun, in the east
+        self.assertFalse(behind["in_view"])
+        self.assertIsNone(behind["view_x_deg"])
+
+
+class ViewCli(unittest.TestCase):
+    run_cli = Cli.run_cli
+
+    def env(self, **more):
+        return dict({"SITE_LAT": str(LAT), "SITE_LON": str(LON)}, **VIEW_ENV, **more)
+
+    def test_view_exit_codes(self):
+        s = sun.next_sunset(utc(2027, 3, 20, 18, 0), LAT, LON)
+        inside = (s - timedelta(minutes=10)).strftime("%Y%m%dT%H%M%SZ")
+        r = self.run_cli("view", "--time", inside, env=self.env())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.startswith("in "), r.stdout)
+        r = self.run_cli("view", "--time", "20261221T200000Z", env=self.env())
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertTrue(r.stdout.startswith("out "), r.stdout)
+        r = self.run_cli("view", "--time", inside, env={"SITE_LAT": str(LAT), "SITE_LON": str(LON)})
+        self.assertEqual(r.returncode, 2)                     # no view set
+        self.assertIn("VIEW_BEARING", r.stderr)
+
+    def test_view_calendar_lists_only_days_with_the_sun_in_view(self):
+        r = self.run_cli("view-calendar", "--from", "2027-03-18", "--days", "5", env=self.env())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = [l for l in r.stdout.splitlines() if l.startswith("2027-")]
+        self.assertTrue(rows)
+        self.assertTrue(all("UTC" in l and "Vancouver" in l for l in rows), r.stdout)
+        r = self.run_cli("view-calendar", "--from", "2026-12-18", "--days", "5", env=self.env())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse([l for l in r.stdout.splitlines() if l.startswith("2026-")])
+
+    def test_annotate_adds_the_view_when_set(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "f.json")
+            with open(p, "w") as f:
+                json.dump({"Lux": 1}, f)
+            r = self.run_cli("annotate", p, "--time", "20270321T020000Z", env=self.env())
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(p) as f:
+                self.assertIn("in_view", json.load(f)["Sun"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

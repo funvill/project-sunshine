@@ -9,7 +9,8 @@ nas_has() { test -e "$W/nas/$1"; }
 no_ssh_opt() { grep -q '^rsync ' "$STUB_CALLS" && ! grep -q -- ' -e ' "$STUB_CALLS"; }
 no_fsync() { grep -q '^rsync ' "$STUB_CALLS" && ! grep -q -- '--fsync' "$STUB_CALLS"; }
 has_fsync() { grep '^rsync ' "$STUB_CALLS" | grep -q -- ' --fsync'; }
-share_target() { export NAS_TARGET="$W/mnt/share/"; mkdir -p "$NAS_TARGET"; }
+# The stub copies into a local target, so the share is the folder the checks look in.
+share_target() { export NAS_TARGET="$W/nas/"; mkdir -p "$NAS_TARGET"; }
 
 section "sync: --fsync only when rsync supports it"
 fresh_env; share_target
@@ -59,6 +60,20 @@ sync_
 check "second run does not log them again" test "$(grep -c 'zero-length image' "$SYNC_LOG_FILE")" = 2
 sync_; rc=$?
 check "third run, nothing to ship, exits 0" test "$rc" = 0
+
+section "sync: an empty system.json is kept for the next frame to rewrite"
+fresh_env; share_target
+d="$OUT_ROOT/wide/2026/01/01"
+mkfile "$d/system.json" '10 minutes ago' ""  # a freeze's leftover; sunset-meta.py rebuilds it from its state
+mkfile "$d/b.jpg" '10 minutes ago' "pixels"
+sync_; rc=$?
+check "exits 0" test "$rc" = 0
+check "empty system.json not shipped" test ! -e "$W/nas/wide/2026/01/01/system.json"
+check "empty system.json kept on the card" test -e "$d/system.json"
+check "skip logged" grep -q 'zero-length system.json ./wide/2026/01/01/system.json' "$SYNC_LOG_FILE"
+printf '{"records": []}\n' > "$d/system.json"; touch -d '10 minutes ago' "$d/system.json"
+sync_
+check "rewritten system.json ships" nas_has wide/2026/01/01/system.json
 fresh_env; share_target
 mkfile "$OUT_ROOT/wide/2026/01/01/only.jpg" '10 minutes ago' ""
 sync_; rc=$?
@@ -110,11 +125,12 @@ check "frames still local" test "$(count '*.jpg')" = 3
 unset STUB_RSYNC_PID; export STUB_RSYNC=ok
 
 section "sync: sync.log rotates by size"
-fresh_env; share_target; export SYNC_LOG_MAX_BYTES=200
+# The config backup (#23) is off here: its own log lines would rotate the log a second time.
+fresh_env; share_target; export SYNC_LOG_MAX_BYTES=200 SYNC_CONFIG_BACKUP=0
 head -c 300 /dev/zero | tr '\0' 'x' > "$SYNC_LOG_FILE"
 mkfile "$OUT_ROOT/wide/2026/01/01/a.jpg" '10 minutes ago'
 sync_
 check "old log moved to sync.log.1" test "$(wc -c < "$SYNC_LOG_FILE.1" | tr -d ' ')" = 300
 check "new log is small and has the entry" grep -q 'sync ok files=1' "$SYNC_LOG_FILE"
 check "new log is under the cap" test "$(wc -c < "$SYNC_LOG_FILE" | tr -d ' ')" -lt 200
-unset SYNC_LOG_MAX_BYTES
+unset SYNC_LOG_MAX_BYTES SYNC_CONFIG_BACKUP
