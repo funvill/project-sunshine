@@ -134,7 +134,9 @@ section "Home Assistant package: the CM4"
 check "CM4 age sensor runs the script for cm4wide" grep -q 'sunset_frame_age.sh cm4wide' "$PKG"
 check "CM4 stale sensor" grep -q 'unique_id: sunset_cm4_frames_stale' "$PKG"
 check "CM4 alert watches it" grep -q 'entity_id: binary_sensor.sunset_cm4_frames_stale' "$PKG"
-check "CM4 unknown age counts as stale" test "$(grep -c 'not is_number(age)' "$PKG")" = 2
+check "CM4 unknown age counts as stale" test "$(grep -c 'not is_number(age)' "$PKG")" = 3
+check "cm4city age sensor runs the script for cm4city" grep -q 'sunset_frame_age.sh cm4city' "$PKG"
+check "cm4city alert watches its stale sensor" grep -q 'entity_id: binary_sensor.sunset_cm4city_frames_stale' "$PKG"
 
 section "frame age: a frame named in the future (issue #22)"
 W="$(mktemp -d)"

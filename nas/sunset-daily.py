@@ -29,7 +29,7 @@ import traceback
 from datetime import date, datetime, timedelta, timezone
 
 # Change SCRIPT_VERSION with every change to what this script makes; it goes in each record.
-SCRIPT_VERSION = "2026-11-15.2"   # YYYY-MM-DD.N; version_key compares them
+SCRIPT_VERSION = "2026-11-18.1"   # YYYY-MM-DD.N; version_key compares them
 RECORD_SCHEMA_VERSION = 2       # 1: records from before 2026-11-15, which have no schema_version
 
 UTC = timezone.utc
@@ -80,6 +80,9 @@ TEXT_X = 60
 TITLE_Y, TITLE_SIZE = 1604, 46
 TIME_Y, TIME_SIZE = 1670, 64
 LOC_Y, LOC_SIZE = 1746, 34      # the last line still ends 140 px above the bottom edge
+# The day's sky score, right-aligned on the location line (Steven, 2026-11-18). OVERLAY_SKY=0 drops it.
+SKY_TEXT = "Sky score %d"
+SKY_TEXT_RIGHT = 60             # px from the right edge, the same margin as TEXT_X on the left
 COMPASS = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
 BLUR_SIGMA = 5                  # pixels of the full frame; windows go, the outline and decks stay
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -134,6 +137,7 @@ class Config:
     font_file: str = DEFAULT_FONT_FILE
     start_local: object = None      # "HH:MM" local: start each video then, not after the last one
     location: str = DEFAULT_LOCATION
+    overlay_sky: bool = True        # the day's sky score on the video, right of the location line
     fused_dir: object = None        # frames here replace the same-named ones (see tools/fuse_sunset.py)
     max_gap_min: float = MAX_GAP_MIN
     max_sunset_gap_min: float = MAX_SUNSET_GAP_MIN
@@ -601,23 +605,27 @@ def filter_quote(text):
     return "'%s'" % text.replace("\\", "/").replace("'", "").replace(":", "\\:")
 
 
-def drawtext(cfg, text, y, size, enable=None):
+def drawtext(cfg, text, y, size, enable=None, right=None):
+    """Text at TEXT_X from the left, or ending `right` px from the right edge."""
+    x = "x=%d" % TEXT_X if right is None else "x=w-tw-%d" % right
     args = ["fontfile=" + filter_quote(cfg.font_file), "expansion=none", "text=" + filter_quote(text),
-            "x=%d" % TEXT_X, "y=%d" % y, "fontsize=%d" % size, "fontcolor=white",
+            x, "y=%d" % y, "fontsize=%d" % size, "fontcolor=white",
             "borderw=3", "bordercolor=black@0.6"]
     if enable:
         args.append("enable=" + filter_quote(enable))
     return "drawtext=" + ":".join(args)
 
 
-def overlay_filters(cfg, frames, azimuth=None):
-    """The title line, the location (small, with the view direction) and one timestamp per
-    frame, each shown only while its frame is. Frames reach these filters one each, at the
-    times concat_list gives them."""
+def overlay_filters(cfg, frames, azimuth=None, sky_score=None):
+    """The title line, the location (small, with the view direction), the day's sky score (small,
+    right-aligned on the location line, the whole video) and one timestamp per frame, each shown
+    only while its frame is. Frames reach these filters one each, at the times concat_list gives them."""
     chain = [drawtext(cfg, "%s   %s" % (OVERLAY_TITLE, OVERLAY_HANDLE), TITLE_Y, TITLE_SIZE)]
     if cfg.location:
         place = cfg.location if azimuth is None else "%s   %s" % (cfg.location, view_label(azimuth))
         chain.append(drawtext(cfg, place, LOC_Y, LOC_SIZE))
+    if sky_score is not None and cfg.overlay_sky:
+        chain.append(drawtext(cfg, SKY_TEXT % sky_score, LOC_Y, LOC_SIZE, right=SKY_TEXT_RIGHT))
     start = 0.0
     for i, frame in enumerate(frames):
         end = start + FRAME_SECONDS
@@ -670,7 +678,7 @@ def encode_video(cfg, frames, crop, mask, out):
             "scale=1080:1920:flags=lanczos:in_color_matrix=bt601:in_range=pc:out_color_matrix=bt709:out_range=tv",
             "format=yuv420p",
             "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709"]
-        chain += overlay_filters(cfg, frames, crop.get("center_azimuth_deg")) + [
+        chain += overlay_filters(cfg, frames, crop.get("center_azimuth_deg"), crop.get("sky_score")) + [
             "fps=%d" % OUTPUT_FPS,
             "format=yuv420p"]
         with os.fdopen(fd, "w", encoding="utf-8") as f:   # ffmpeg reads UTF-8: the degree sign
@@ -1040,10 +1048,16 @@ def process_sunset(cfg, sunset, frames, crop_config, encode, get_size, check_ima
         crop.update(blur=settings["blur"], blur_sigma=settings["blur_sigma"])
     mask = settings["mask"] or []
 
+    # Scored before encoding, so the video can show it (originals, not fused copies).
+    scored = sky_frames_scored(cfg, window, sunset, settings["sky_rows"], crop_columns(crop, frame_w))
+    sky = sky_from_scored(scored, settings["sky_full_warm"], settings["sky_min_frames"], crop_columns(crop, frame_w))
+    # What the encoder draws: the crop plus the score. Only the encoder sees it; the record keeps `crop`.
+    video_crop = dict(crop, sky_score=sky["score"]) if sky else crop
+
     video = day.isoformat() + ".mp4"
     tmp_video = os.path.join(cfg.daily_dir, ".%s.tmp" % video)
     try:
-        encode(cfg, window, crop, mask, tmp_video)
+        encode(cfg, window, video_crop, mask, tmp_video)
         os.replace(tmp_video, os.path.join(cfg.daily_dir, video))
     finally:
         if os.path.exists(tmp_video):
@@ -1056,8 +1070,6 @@ def process_sunset(cfg, sunset, frames, crop_config, encode, get_size, check_ima
     except EncodeError as e:
         log("%s WARN no check image: %s" % (day, e))
 
-    scored = sky_frames_scored(cfg, window, sunset, settings["sky_rows"], crop_columns(crop, frame_w))
-    sky = sky_from_scored(scored, settings["sky_full_warm"], settings["sky_min_frames"], crop_columns(crop, frame_w))
     record.update(status="encoded", video=video, caption=caption, sunset_frame=os.path.basename(sunset_frame.jpg),
                   crop=crop, sky=sky)
     if sky is None:
@@ -1070,7 +1082,7 @@ def process_sunset(cfg, sunset, frames, crop_config, encode, get_size, check_ima
     if cfg.sunset_cut:
         record["sunset_cut"] = {}
         ok &= make_extra(day, "sunset cut", record["sunset_cut"], lambda block: make_sunset_cut(
-            cfg, day, sunset, frames, crop, mask, encode, block))
+            cfg, day, sunset, frames, video_crop, mask, encode, block))
     if cfg.master:
         record["master"] = {}
         ok &= make_extra(day, "master", record["master"], lambda block: make_master(
@@ -1202,6 +1214,7 @@ def config_from_env(env):
                   font_file=env.get("FONT_FILE") or DEFAULT_FONT_FILE,
                   start_local=env.get("VIDEO_START_LOCAL") or None,
                   location=env.get("OVERLAY_LOCATION", DEFAULT_LOCATION),
+                  overlay_sky=env.get("OVERLAY_SKY", "1") != "0",
                   fused_dir=env.get("FUSED_DIR") or None,
                   max_gap_min=float(env.get("MAX_GAP_MIN", str(MAX_GAP_MIN))),
                   max_sunset_gap_min=float(env.get("MAX_SUNSET_GAP_MIN", str(MAX_SUNSET_GAP_MIN))),

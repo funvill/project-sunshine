@@ -42,6 +42,7 @@ DENSE_TIMEOUT_S="${DENSE_TIMEOUT_S:-30}"          # per rpicam-still call in den
 DENSE_WINDOWS="${DENSE_WINDOWS:-sunset}"          # which dense windows shoot: "sunset" (decided 2026-11-16), "sunrise sunset" for both
 SUN_PY="${SUN_PY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sunset-sun.py}"
 ROTATION="${ROTATION:-0}"                         # 180 = camera mounted upside down (only 0 or 180)
+CAMERA="${CAMERA:-}"                              # which camera, when there are two: its ID (e.g. i2c@0) or number
 BRACKET="${BRACKET:-0}"                           # 1 = the sunset bracket: ev+0 and ev-2 after each frame near sunset
 BRACKET_WINDOW_MIN="${BRACKET_WINDOW_MIN:-45}"    # within this many minutes either side of sunset
 BRACKET_AWB_HANDOVER_MIN="${BRACKET_AWB_HANDOVER_MIN:-10}"  # daylight white balance until this long after sunset, then auto
@@ -80,6 +81,25 @@ case "$ROTATION" in
 esac
 
 mkdir -p "$(dirname "$LOG_FILE")" "$OUT_ROOT"
+
+# CAMERA: rpicam numbers cameras in the order it finds them, and that order changed on the CM4
+# when CAM1 was enabled (2026-11-17). So CAMERA is matched against each camera's line of
+# --list-cameras (its port ID, e.g. i2c@0); a plain number is taken as the index. No match, or
+# more than one, skips the frame: a gap is better than the other camera's picture in this series.
+if [[ -n "$CAMERA" ]]; then
+  if [[ "$CAMERA" =~ ^[0-9]+$ ]]; then
+    CAM_INDEX="$CAMERA"
+  else
+    CAM_MATCHES="$(timeout 30 rpicam-still --list-cameras 2>/dev/null 9>&- | grep -E '^[[:space:]]*[0-9]+ : ' | grep -F -- "$CAMERA" || true)"
+    if [[ "$(grep -c . <<<"$CAM_MATCHES")" != 1 || -z "$CAM_MATCHES" ]]; then
+      [[ "$SCHEDULE" == dense ]] && exit 0
+      log "SKIPPED: CAMERA=$CAMERA matches $(grep -c . <<<"$CAM_MATCHES") cameras"
+      exit 1
+    fi
+    CAM_INDEX="$(sed -E 's/^[[:space:]]*([0-9]+) : .*/\1/' <<<"$CAM_MATCHES")"
+  fi
+  ROT_ARGS+=(--camera "$CAM_INDEX"); ROT_SET+=("camera=$CAMERA")
+fi
 
 # Site settings (issue #23). The units load sunset.env with EnvironmentFile=-, so systemd
 # runs this happily without it. A Pi rebuilt without the file would then default to

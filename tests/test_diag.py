@@ -346,6 +346,57 @@ class StreamCommand(unittest.TestCase):
                 self.assertNotIn("--rotation", diag.stream_command("full", 1280, 960))
 
 
+TWO_CAMS = """Available cameras
+-----------------
+0 : imx477 [4056x3040 12-bit RGGB] (/base/soc/i2c0mux/i2c@1/imx477@1a)
+    Modes: 'SRGGB10_CSI2P' : 1332x990 [120.50 fps - (696, 528)/2664x1980 crop]
+1 : imx477 [4056x3040 12-bit RGGB] (/base/soc/i2c0mux/i2c@0/imx477@1a)
+    Modes: 'SRGGB10_CSI2P' : 1332x990 [120.50 fps - (696, 528)/2664x1980 crop]
+"""
+
+
+class CameraChoice(unittest.TestCase):
+    # The CM4 with CAM0 and CAM1 both on (2026-11-17), as `rpicam-hello --list-cameras` printed it.
+    # rpicam numbers cameras in the order found, so the choice is by ID, as CAMERA in sunset-capture.sh.
+
+    def test_by_id(self):
+        self.assertEqual(diag.camera_index("i2c@0", TWO_CAMS), 1)
+        self.assertEqual(diag.camera_index("i2c@1", TWO_CAMS), 0)
+
+    def test_by_number(self):
+        self.assertEqual(diag.camera_index("1", TWO_CAMS), 1)
+
+    def test_none_given_is_rpicams_own_choice(self):
+        self.assertIsNone(diag.camera_index("", TWO_CAMS))
+        self.assertIsNone(diag.camera_index(None, TWO_CAMS))
+
+    def test_no_match_or_two_matches_is_an_error(self):
+        for spec in ("i2c@7", "imx477"):
+            with self.assertRaises(ValueError):
+                diag.camera_index(spec, TWO_CAMS)
+
+    def test_stream_uses_the_camera(self):
+        c = diag.stream_command("full", 1280, 960, camera=1)
+        self.assertEqual(c[c.index("--camera") + 1], "1")
+        self.assertNotIn("--camera", diag.stream_command("full", 1280, 960))
+
+    def test_diag_settings_win_over_capture_settings(self):
+        # `diag start <camera> [rotation]` shows another camera without touching production's settings.
+        env = {"CAMERA": "i2c@0", "ROTATION": "180", "DIAG_CAMERA": "i2c@1", "DIAG_ROTATION": "0"}
+        with mock.patch.dict(os.environ, env):
+            self.assertEqual(diag.view_settings(), ("i2c@1", "0"))
+        with mock.patch.dict(os.environ, {"CAMERA": "i2c@0", "ROTATION": "180", "DIAG_CAMERA": "",
+                                          "DIAG_ROTATION": ""}):
+            self.assertEqual(diag.view_settings(), ("i2c@0", "180"))
+
+    def test_rotation_can_be_given(self):
+        with mock.patch.dict(os.environ, {"ROTATION": "180"}):
+            self.assertNotIn("--rotation", diag.stream_command("full", 1280, 960, rotation="0"))
+        with mock.patch.dict(os.environ, {"ROTATION": "0"}):
+            c = diag.stream_command("full", 1280, 960, rotation="180")
+            self.assertEqual(c[c.index("--rotation") + 1], "180")
+
+
 class NextCapture(unittest.TestCase):
     # Format from `systemctl list-timers --output=json` on the pilot Pi (systemd 252), with a time
     # off the 5-minute slots so that the fallback cannot pass these by accident.

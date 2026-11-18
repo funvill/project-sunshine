@@ -3,6 +3,7 @@
 import calendar
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -294,12 +295,49 @@ class FrameSplitter:
         return frames
 
 
-def stream_command(view, width, height):
+def camera_index(spec, listing):
+    """Which rpicam camera number `spec` names, as CAMERA in sunset-capture.sh: a number is the
+    index, any other text must appear in exactly one camera's line of `--list-cameras` (its ID,
+    e.g. i2c@0). rpicam numbers cameras in the order found, which changed when CAM1 was enabled.
+    None if no camera is given (rpicam's own choice). ValueError if it matches none, or several."""
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    if spec.isdigit():
+        return int(spec)
+    found = [int(m.group(1)) for m in re.finditer(r"^\s*(\d+) : (.*)$", listing, re.M) if spec in m.group(2)]
+    if len(found) != 1:
+        raise ValueError("CAMERA=%s matches %d cameras" % (spec, len(found)))
+    return found[0]
+
+
+def list_cameras(listing):
+    """[(index, label)] from `rpicam-hello --list-cameras`; the label is the port ID (i2c@0) and sensor."""
+    out = []
+    for m in re.finditer(r"^\s*(\d+) : (\S+).*\(([^)]*)\)\s*$", listing, re.M):
+        port = re.search(r"i2c@\d+", m.group(3))
+        out.append((int(m.group(1)), "%s %s" % (port.group(0) if port else m.group(3), m.group(2))))
+    return out
+
+
+def view_settings():
+    """(camera, rotation) for the page: DIAG_CAMERA and DIAG_ROTATION (from `diag start <camera>
+    [rotation]`) win over production's CAMERA and ROTATION."""
+    cam = os.environ.get("DIAG_CAMERA", "").strip() or os.environ.get("CAMERA", "").strip()
+    rot = os.environ.get("DIAG_ROTATION", "").strip() or os.environ.get("ROTATION", "0").strip()
+    return cam, rot
+
+
+def stream_command(view, width, height, camera=None, rotation=None):
     """rpicam-vid writing MJPEG to stdout. No preview, and it runs until stopped."""
     cmd = ["rpicam-vid", "-t", "0", "-n", "--codec", "mjpeg", "--quality", "60", "--framerate", "5", "-o", "-"]
+    if camera is not None:
+        cmd += ["--camera", str(camera)]
     # A camera mounted upside down (ROTATION=180 in sunset.env, as in sunset-capture.sh). rpicam
     # takes --roi in the rotated picture's coordinates, so the focus crop below needs no change.
-    if os.environ.get("ROTATION", "0").strip() == "180":
+    if rotation is None:
+        rotation = os.environ.get("ROTATION", "0")
+    if str(rotation).strip() == "180":
         cmd += ["--rotation", "180"]
     if view == "focus" or view.startswith("focus@"):
         # 20% of the sensor at its full resolution, so one screen pixel is one sensor pixel.
@@ -396,6 +434,7 @@ class Camera:
         self._kill_after = kill_after_s
         self._proc = None
         self._view = "full"
+        self._camera = None           # rpicam camera number; None = what build_command picks
         self._proc_view = None
         self._paused = False
         self._started_at = 0
@@ -413,6 +452,12 @@ class Camera:
 
     def set_view(self, view):
         self._view = view
+
+    def camera(self):
+        return self._camera
+
+    def set_camera(self, camera):
+        self._camera = camera
 
     def latest(self):
         with self._ready:
@@ -445,7 +490,7 @@ class Camera:
             self.stop()
             return
         if self.running():
-            if self._proc_view == self._view:
+            if self._proc_view == (self._view, self._camera):
                 return
             self.stop()
         self._release()               # rpicam-vid has exited by itself, or was just stopped
@@ -464,9 +509,10 @@ class Camera:
         self._started_at = now
         self._got_frame = False
         self._stderr.clear()
-        self._proc_view = self._view
+        self._proc_view = (self._view, self._camera)
+        cmd = self._build(self._view) if self._camera is None else self._build(self._view, self._camera)
         try:
-            proc = subprocess.Popen(self._build(self._view), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except OSError as e:
             self._proc = _NeverStarted()
             self._stderr.append("cannot start camera: %s" % e)
@@ -590,6 +636,8 @@ class Service:
         """Cheap enough for the page to ask often: runs no commands."""
         return {"seconds_left": int(self.deadline - now), "camera": self.camera.state(),
                 "camera_error": self.camera.error(), "view": self.camera.view(), "viewers": self._viewers,
+                "cameras": [{"index": i, "label": l} for i, l in getattr(self, "cameras", [])],
+                "camera_index": self.camera.camera(),
                 "dense_window": self._dense}
 
     def status(self, now):
@@ -632,6 +680,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self._route()
+        if path == "/camera":
+            known = [i for i, _ in getattr(self.server.service, "cameras", [])]
+            try:
+                index = int(self.query.get("i", [""])[0])
+            except ValueError:
+                index = None
+            if index not in known:
+                self.send_error(400)
+                return
+            self.server.service.camera.set_camera(index)
+            self.send_response(204)
+            self.end_headers()
+            return
         view = self._view_from_query()
         if path != "/view":
             self.send_error(404)
@@ -721,8 +782,33 @@ def main():
     url_file = os.environ.get("DIAG_URL_FILE", "/run/sunset-diag/url")
 
     cfg = config_from_env()
-    camera = Camera(lambda view: stream_command(view, width, height), lock=CaptureLock(cfg.lock_file))
+    spec, rotation = view_settings()
+    listing = run_command(["rpicam-hello", "--list-cameras"]) or ""
+    try:
+        start_cam = camera_index(spec, listing)
+    except ValueError as e:
+        print("%s: showing rpicam's first camera" % e, file=sys.stderr)
+        start_cam = None
+    try:
+        prod_cam = camera_index(os.environ.get("CAMERA", ""), listing)
+    except ValueError:
+        prod_cam = None
+
+    def build(view, cam=None):
+        # The rotation the page started with goes with the camera it started on; production's
+        # ROTATION with production's camera; any other camera is shown as read.
+        if cam is None or cam == start_cam:
+            rot = rotation
+        elif cam == prod_cam:
+            rot = os.environ.get("ROTATION", "0")
+        else:
+            rot = "0"
+        return stream_command(view, width, height, camera=cam, rotation=rot)
+
+    camera = Camera(build, lock=CaptureLock(cfg.lock_file))
+    camera.set_camera(start_cam)
     service = Service(cfg, camera, time.time() + max_s)
+    service.cameras = list_cameras(listing)
     server = make_server(service, "0.0.0.0", port)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
@@ -789,6 +875,7 @@ pre { margin: 8px 0 0; font-size: 12px; line-height: 1.4; white-space: pre-wrap;
 <g class="under"><line x1="50%" y1="0" x2="50%" y2="100%"/><line x1="0" y1="50%" x2="100%" y2="50%"/></g>
 <g class="over"><line x1="50%" y1="0" x2="50%" y2="100%"/><line x1="0" y1="50%" x2="100%" y2="50%"/></g>
 <g class="ruler" id="ruler"></g></svg><span id="state">connecting</span></div>
+<div class="controls" id="camButtons" hidden></div>
 <div class="controls">
   <button id="full" type="button">Full frame</button>
   <button id="focus" type="button">Focus (centre, real pixels)</button>
@@ -848,6 +935,7 @@ function showCamera(d) {
   var mins = Math.max(0, Math.ceil(d.seconds_left / 60));
   $("left").textContent = "Stops by itself in " + mins + " min";
   $("state").textContent = d.camera_error ? d.camera + ": " + d.camera_error : d.camera;
+  showCameras(d);
   $("denseNote").hidden = !d.dense_window;
   $("denseNote").textContent = d.dense_window ? "In the " + d.dense_window + " window the Pi takes a frame every "
     + "minute, so the view pauses for about 25 seconds before each minute and comes back after it." : "";
@@ -966,6 +1054,25 @@ cam.onclick = function (e) {
   var y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
   setView("focus&x=" + x.toFixed(3) + "&y=" + y.toFixed(3));
 };
+// One button per camera the Pi found; the pressed one is on the view.
+function showCameras(d) {
+  var box = $("camButtons"), cams = d.cameras || [];
+  box.hidden = cams.length < 2;
+  if (box.childElementCount !== cams.length) {
+    box.textContent = "";
+    cams.forEach(function (c) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = "Camera " + c.index + " (" + c.label + ")";
+      b.onclick = function () { fetch("camera?i=" + c.index, { method: "POST" }).then(pollCamera); };
+      box.appendChild(b);
+    });
+  }
+  cams.forEach(function (c, k) {
+    var on = d.camera_index === c.index || (d.camera_index === null && k === 0);
+    box.children[k].setAttribute("aria-pressed", on);
+  });
+}
 $("full").onclick = function () { setView("full"); };
 $("focus").onclick = function () { setView("focus"); };
 $("reset").onclick = function () { best = 0; trend = []; };

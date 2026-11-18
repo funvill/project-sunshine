@@ -24,6 +24,14 @@ command_line:
       unit_of_measurement: min
       scan_interval: 300
       command_timeout: 30
+  # The CM4's second camera (CAM1, 6 mm, from 2026-11-17), saving as cm4city.
+  - sensor:
+      name: Sunset cm4city newest frame age
+      unique_id: sunset_cm4city_newest_frame_age
+      command: "sh /config/sunset/sunset_frame_age.sh cm4city"
+      unit_of_measurement: min
+      scan_interval: 300
+      command_timeout: 30
 
   # ---- Free space on the NAS share (issue #7) ----
   - sensor:
@@ -48,6 +56,12 @@ command_line:
       name: Sunset CM4 camera health
       unique_id: sunset_cm4_camera_health
       command: "sh /config/sunset/sunset_camera_health.sh cm4wide"
+      scan_interval: 300
+      command_timeout: 30
+  - sensor:
+      name: Sunset cm4city camera health
+      unique_id: sunset_cm4city_camera_health
+      command: "sh /config/sunset/sunset_camera_health.sh cm4city"
       scan_interval: 300
       command_timeout: 30
 
@@ -134,6 +148,13 @@ template:
         state: >
           {% set age = states('sensor.sunset_cm4_newest_frame_age') %}
           {{ not is_number(age) or age | float > states('input_number.sunset_max_frame_age') | float(60) }}
+      - name: Sunset cm4city frames stale
+        unique_id: sunset_cm4city_frames_stale
+        device_class: problem
+        delay_on: "00:10:00"
+        state: >
+          {% set age = states('sensor.sunset_cm4city_newest_frame_age') %}
+          {{ not is_number(age) or age | float > states('input_number.sunset_max_frame_age') | float(60) }}
 
       - name: Sunset NAS space low
         unique_id: sunset_nas_space_low
@@ -156,6 +177,11 @@ template:
         device_class: problem
         delay_on: "00:30:00"
         state: "{{ states('sensor.sunset_cm4_camera_health') != 'ok' }}"
+      - name: Sunset cm4city camera unhealthy
+        unique_id: sunset_cm4city_camera_unhealthy
+        device_class: problem
+        delay_on: "00:30:00"
+        state: "{{ states('sensor.sunset_cm4city_camera_health') != 'ok' }}"
 
       # The first word of the daily video state is the status.
       - name: Sunset daily video failed
@@ -221,6 +247,22 @@ alert:
       # Same phone as above, for example:
       # - mobile_app_your_phone
 
+  sunset_cm4city_frames_stale:
+    name: Project Sunset CM4 city camera has no new frames
+    entity_id: binary_sensor.sunset_cm4city_frames_stale
+    state: "on"
+    repeat: 360
+    can_acknowledge: true
+    message: >
+      {% set age = states('sensor.sunset_cm4city_newest_frame_age') %}
+      {% if is_number(age) %}The CM4's second camera (cm4city, 6 mm) has its newest frame on the NAS {{ age }} minutes old.
+      {% else %}Home Assistant can't find a recent cm4city frame on the NAS: no frames in two days, the share is unreadable, or the newest frame is named in the future.{% endif %}
+      Open the diag page on sunshine to see why.
+    done_message: Project Sunset cm4city frames are reaching the NAS again.
+    notifiers:
+      - persistent_notification
+      # - mobile_app_your_phone
+
   sunset_nas_space_low:
     name: Project Sunset NAS is running out of space
     entity_id: binary_sensor.sunset_nas_space_low
@@ -261,6 +303,20 @@ alert:
       The CM4 (sunshine), from its newest frame: {{ states('sensor.sunset_cm4_camera_health') }}.
       (undervoltage, throttled, temp, outbox, disk, small_jpeg, repeat_frame, no_meta. Unknown means no readable frame JSON.)
     done_message: The CM4 health check is clear.
+    notifiers:
+      - persistent_notification
+      # - mobile_app_your_phone
+
+  sunset_cm4city_camera_unhealthy:
+    name: Project Sunset CM4 city camera is unhealthy
+    entity_id: binary_sensor.sunset_cm4city_camera_unhealthy
+    state: "on"
+    repeat: 360
+    can_acknowledge: true
+    message: >
+      The CM4's second camera (cm4city), from its newest frame: {{ states('sensor.sunset_cm4city_camera_health') }}.
+      (undervoltage, throttled, temp, outbox, disk, small_jpeg, repeat_frame, no_meta. Unknown means no readable frame JSON.)
+    done_message: The cm4city health check is clear.
     notifiers:
       - persistent_notification
       # - mobile_app_your_phone
@@ -347,9 +403,11 @@ automation:
         entity_id:
           - alert.sunset_frames_stale
           - alert.sunset_cm4_frames_stale
+          - alert.sunset_cm4city_frames_stale
           - alert.sunset_nas_space_low
           - alert.sunset_camera_unhealthy
           - alert.sunset_cm4_camera_unhealthy
+          - alert.sunset_cm4city_camera_unhealthy
           - alert.sunset_daily_video_failed
           - alert.sunset_archive_check_failed
           - alert.sunset_cm4_archive_check_failed

@@ -14,8 +14,9 @@ Local-first, so a NAS or Wi-Fi outage never loses frames.
 - `timelaps`: Pi 3 B+ Rev 1.3, Arducam UC-517 in the CAMERA port, microSD card, 5 V supply. Hostname
   `timelaps`, user `funvill`.
 - `sunshine`: Raspberry Pi CM4 (32 GB eMMC, 8 GB RAM, no Wi-Fi) on an Embedded Micro Technology MyPi
-  Industrial IoT Integrator Board XT, Arducam IMX477 with a 3.2 mm lens on CAM0, USB Wi-Fi dongle.
-  Hostname `sunshine`, user `sunshine`. Camera mounted upside down (`ROTATION=180`).
+  Industrial IoT Integrator Board XT, USB Wi-Fi dongle. Hostname `sunshine`, user `sunshine`.
+  Two cameras from 2026-11-17: Arducam IMX477 (B0240E) with the 3.2 mm lens on CAM0 (`cm4wide`,
+  upright, `ROTATION=0`), and the UC-517 with the 6 mm lens on CAM1 (`cm4city`). `timelaps` is retired.
 - Both: lens focus locked at infinity, iris taped. UC-517: keep the IR-cut filter in day mode.
 - The Pi Zero W is not the target. The scripts have no Zero-specific code, but the camera has not
   been shown working on one. See `hardware/README.md`.
@@ -140,6 +141,11 @@ capture.log                                          # one line per capture (see
 sync.log                                             # one line per sync run
 .system-state-<cam>.json                             # the day's records, so the sync can't lose them
 ```
+The sync sends the oldest files first, in batches of up to `SYNC_BATCH` files or `SYNC_BATCH_MB` (32),
+and reads each batch back before deleting it. After `SYNC_MAX_S` (20 min) it stops between batches
+and logs `sync partial confirmed=N pending=M`; the next run, at most 5 minutes later, carries on.
+The unit's 60-minute `TimeoutStartSec` only catches a hung transfer (`sync interrupted`). On the
+CM4's slow Wi-Fi the evening bracket leaves a backlog that drains over the next hour or two.
 Each frame's `.json` holds rpicam-still's own camera fields at the top level, unchanged, plus these blocks:
 
 | Block | Written by | Contents |
@@ -196,14 +202,17 @@ Focusing tools, all worked out in the browser so the Pi does no extra work:
   dashed line is the best so far. Aim at something distant with fine detail, and compare only within
   the same scene and light. Switching view resets it.
 ```
-diag          # on for 30 minutes; running it again restarts the clock
-diag status   # is it on, and what is the link
-diag stop     # off
+diag                    # on for 30 minutes; running it again restarts the clock
+diag start i2c@1        # start on another camera (port ID or number); add 180 to rotate it
+diag status             # is it on, and what is the link
+diag stop               # off
 ```
-It stops by itself and does not come back after a reboot. The camera only runs while the page is
-open, and the view gives way to each scheduled capture so that the capture can use the camera. The
-page may also give way to dense frames, or may hold the camera through one; either way you don't
-need to stop the capture timers. Don't run `sunset-selftest.sh`, `sunset-focus.py` or a manual
+It stops by itself and does not come back after a reboot. On a Pi with two cameras the page has a
+button for each (above "Full frame"); production's camera is shown with its `ROTATION`, another one
+as read. **Capture pauses while the page is on** (from 2026-11-17): starting it stops the capture
+and dense timers of both cameras, and they start again when it ends, by `diag stop`, the time limit
+or a crash. Each session is a gap in the series, and restarting the timers takes one extra frame
+straight away (systemd 252). The camera only runs while the page is open. Don't run `sunset-selftest.sh`, `sunset-focus.py` or a manual
 capture while the page is open, because only one program can use the camera at a time.
 
 The page has no password: while it's on, anyone on your LAN can see the camera, the logs and the
@@ -364,21 +373,24 @@ exposed to the PC as a disk first. That step is the only part that differs.
    the board. `ssh sunshine@sunshine.local`, then `sudo apt update && sudo apt full-upgrade`.
 4. **Overlays.** In `/boot/firmware/config.txt`:
    - `camera_auto_detect=0`
-   - `dtoverlay=imx477,cam0` (the camera is on CAM0; nothing answered on CAM1)
+   - `dtoverlay=imx477,cam0` and `dtoverlay=imx477,cam1` (both cameras; `install.sh --cm4-two`
+     writes both). rpicam then numbers CAM1 as camera 0 and CAM0 as camera 1, which is why each
+     camera's settings name it by port (`CAMERA=i2c@0`, `CAMERA=i2c@1`), never by number.
    - `dtoverlay=i2c-rtc,ds1307,addr=0x68` (the board's DS1338 clock)
 
    Reboot. Let NTP set the clock once; the kernel then writes it back to the RTC every 11 minutes.
    There was no coin cell in the RTC holder on 2026-11-12 (whether one is fitted now: not recorded,
    check on the board), so the RTC only keeps time through a reboot, not a power cut.
-5. **Camera check.** `rpicam-still -n -t 3000 -o test.jpg`. The image is upside down until
-   `ROTATION=180` is set (step 7).
+5. **Camera check.** `rpicam-hello --list-cameras` must list two imx477, one on `i2c@0` (CAM0)
+   and one on `i2c@1` (CAM1). Then `rpicam-still -n --camera 1 -t 3000 -o test.jpg` for CAM0.
 6. **Packages.** `sudo apt install -y rpicam-apps-lite rsync python3 cifs-utils`, and the CM4 notes
    in section 5 (`linux-image-rpi-v8`, USB Wi-Fi firmware) before any trimming. The pilot CM4 went
    from 615 to 383 packages.
 7. **Copy `pi/` to `~/sunset`** as for `timelaps` (`scp -r pi/* sunshine@sunshine.local:sunset/`),
    then restore `sunset.env` from `pi/hosts/cm4.env` plus the real `SITE_LAT` and `SITE_LON`.
-   It must set `CAM_NAME=cm4wide` and `ROTATION=180`, and `NETWATCH=1` if the Pi is on the USB
-   Wi-Fi dongle. The other values the CM4 has used (night shutter, white balance, `SETUP_ID`) are
+   It must set `CAM_NAME=cm4wide`, `CAMERA=i2c@0` and `ROTATION=0`, and `NETWATCH=1` if the Pi is
+   on the USB Wi-Fi dongle. For the second camera, `cp sunset2.env.example sunset2.env`
+   (`CAM_NAME=cm4city`, `CAMERA=i2c@1`, its own `SETUP_ID` and night settings). The other values the CM4 has used (night shutter, white balance, `SETUP_ID`) are
    in `../changelog.md`.
 8. **Wi-Fi.** If the CM4 is on the dongle, join the network (`nmcli` or `raspi-config`). The dongle's
    firmware is in the kept packages. Dongle details beyond "old Buffalo 2.4 GHz USB": not recorded,
@@ -386,24 +398,28 @@ exposed to the PC as a disk first. That step is the only part that differs.
 9. **NAS login and mount.** As for `timelaps`: `/etc/sunset-nas.cred`, the fstab line, the mount
    point. The pilot copied the login file from `timelaps` Pi to Pi, without displaying it. Frames go
    to `project_sunshine/cm4wide/`.
-10. **Install.** `cd ~/sunset && sudo ./install.sh`, with no `--enable`. Do not use plain `--uc517`
-    on this board: it writes `dtoverlay=imx477` without `cam0`. For a cam0 option, run
-    `./install.sh --help` or read the header of `install.sh` for the exact flag, and check
-    `config.txt` afterwards. Step 4 already set the overlays, so the option is not required.
+10. **Install.** `cd ~/sunset && sudo ./install.sh --cm4-two`, with no `--enable`. It writes the
+    cam0 and cam1 overlays (and changes nothing if step 4 already did). Do not use plain `--uc517`
+    on this board: it writes `dtoverlay=imx477` without a port. It installs the second camera's
+    units too (`sunset-capture2`, `sunset-dense2`); with `--enable` it starts them only if
+    `sunset2.env` exists.
 11. **Low wear.** `sudo ./sunset-lowwear.sh`, then reboot.
 12. **Experiments and the weather units.** As in step 11 of the `timelaps` list, with this Pi's user
     and home.
 13. **Self-test.** `./sunset-selftest.sh`.
 14. **Check `CAM_NAME` before the timers start.**
-    `grep -E '^(CAM_NAME|ROTATION|SETUP_ID|NETWATCH)' ~/sunset/sunset.env` must show
-    `CAM_NAME=cm4wide` and `ROTATION=180`. A CM4 started from `sunset.env.example` has
+    `grep -E '^(CAM_NAME|CAMERA|ROTATION|SETUP_ID|NETWATCH)' ~/sunset/sunset.env` must show
+    `CAM_NAME=cm4wide`, `CAMERA=i2c@0` and `ROTATION=0`, and `sunset2.env` must show
+    `CAM_NAME=cm4city` and `CAMERA=i2c@1`. A CM4 started from `sunset.env.example` has
     `CAM_NAME=wide` and no rotation: its upside-down frames would land in the `wide/` folder, ruin
     that series and keep the `wide` alert quiet while `timelaps` could be dead.
 15. **First frame.** As for step 14 of the `timelaps` list. The log line must say `cam=cm4wide`, the
-    JPEG must be upright, and the JSON `Capture.settings` must say `rotation: 180`. Check that the
-    frame is under `cm4wide/` on the NAS and not in `wide/`.
-16. **Start and record.** As for steps 15 and 16 of the `timelaps` list. The CM4 has its own Home
-    Assistant alert (`cm4wide`).
+    JPEG must be upright, and the JSON `Capture.settings` must say `camera: i2c@0`. Check that the
+    frame is under `cm4wide/` on the NAS and not in `wide/`. Then `sudo systemctl start
+    sunset-capture2.service`: `cam=cm4city`, `camera: i2c@1`, frames under `cm4city/`.
+16. **Start and record.** As for steps 15 and 16 of the `timelaps` list, plus
+    `sudo systemctl enable --now sunset-capture2.timer sunset-dense2.timer`. Each camera has its
+    own Home Assistant alerts (`cm4wide`, `cm4city`).
 
 ## Save and restore the frozen image
 Make an image after a week of clean running, and again after any change to the setup. Keep one copy

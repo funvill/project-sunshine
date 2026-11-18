@@ -21,6 +21,7 @@ EOF
 chmod +x "$DIAG_W/bin/sudo" "$DIAG_W/bin/systemctl"
 diag_cmd() {
   PATH="$DIAG_W/bin:$PATH" DIAG_CALLS="$DIAG_W/calls" DIAG_URL_FILE="$DIAG_W/url" DIAG_WAIT_TRIES=2 \
+    DIAG_ENV_FILE="${DIAG_ENV_FILE:-$DIAG_W/diag.env}" \
     bash "$SRC/diag" "$@"
 }
 
@@ -40,6 +41,16 @@ check "status when on exits 0" test "$rc" = 0
 out="$(diag_cmd stop 2>&1)"; rc=$?
 check "stop stops the service" grep -qx 'stop sunset-diag.service' "$DIAG_W/calls"
 check "stop exits 0" test "$rc" = 0
+
+out="$(DIAG_ENV_FILE="$DIAG_W/diag.env" diag_cmd start i2c@1 0 2>&1)"; rc=$?
+check "start with a camera exits 0" test "$rc" = 0
+check "camera written for the page" grep -qx 'DIAG_CAMERA=i2c@1' "$DIAG_W/diag.env"
+check "rotation written for the page" grep -qx 'DIAG_ROTATION=0' "$DIAG_W/diag.env"
+out="$(DIAG_ENV_FILE="$DIAG_W/diag.env" diag_cmd start 2>&1)"; rc=$?
+check "plain start goes back to production's camera" sh -c "! grep -q '=.' '$DIAG_W/diag.env' 2>/dev/null"
+out="$(DIAG_ENV_FILE="$DIAG_W/diag.env" diag_cmd start 'i2c@1;x' 2>&1)"; rc=$?
+check "odd camera text refused" test "$rc" = 2
+diag_cmd stop >/dev/null 2>&1   # the starts above left the link file, as a running page does
 
 out="$(STUB_NO_URL=1 diag_cmd start 2>&1)"; rc=$?
 check "failed start exits 1" test "$rc" = 1

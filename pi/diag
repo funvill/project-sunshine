@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
 # Temporary diagnostics page: live camera view and Pi health.
 #   diag          turn it on, or restart its 30-minute clock
+#   diag start <camera> [rotation]
+#                 start on another camera (its ID, e.g. i2c@1, or number), optionally rotated 180
 #   diag stop     turn it off
 #   diag status   say whether it is on, and give the link
 set -u
 UNIT=sunset-diag.service
 URL_FILE="${DIAG_URL_FILE:-/run/sunset-diag/url}"
 TRIES="${DIAG_WAIT_TRIES:-20}"
+ENV_OUT="${DIAG_ENV_FILE:-/run/sunset-diag.env}"   # read by the unit after sunset.env; in RAM
 
 case "${1:-start}" in
   start)
+    cam="${2:-}"; rot="${3:-}"
+    if [[ ! "$cam" =~ ^[A-Za-z0-9@._-]*$ || ! "$rot" =~ ^(|0|180)$ ]]; then
+      echo "usage: diag start [camera [0|180]]" >&2
+      exit 2
+    fi
+    printf 'DIAG_CAMERA=%s\nDIAG_ROTATION=%s\n' "$cam" "$rot" | sudo tee "$ENV_OUT" >/dev/null || exit 1
     sudo systemctl restart "$UNIT" || exit 1
     for ((i = 0; i < TRIES; i++)); do
       if [[ -s "$URL_FILE" ]]; then

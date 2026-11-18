@@ -45,6 +45,11 @@ class Weight(unittest.TestCase):
         self.assertEqual(self.fs.fuse_weight(12, 60), 0.0)
         self.assertEqual(self.fs.fuse_weight(30, 60), 0.0)
 
+    def test_the_fade_out_window_can_be_given(self):
+        self.assertEqual(self.fs.fuse_weight(20, 60, fade_out=(30, 40)), 1.0)
+        self.assertAlmostEqual(self.fs.fuse_weight(35, 60, fade_out=(30, 40)), 0.5)
+        self.assertEqual(self.fs.fuse_weight(40, 60, fade_out=(30, 40)), 0.0)
+
 
 @unittest.skipIf(np is None, "needs numpy and OpenCV")
 class Pixels(unittest.TestCase):
@@ -192,6 +197,16 @@ class Run(unittest.TestCase):
         self.add_minute(SUNSET - timedelta(minutes=45))
         self.fs.fuse_run(self.run_dir, self.frames, self.out)
         self.assertFalse(any(self.stamp(late) in n for n in os.listdir(self.out)))
+
+    def test_the_fade_out_can_be_moved_later(self):
+        # The production bracket switches to auto white balance 10 min after sunset, so it can be
+        # merged well past the 12 min that the experiment's daylight-only bracket allowed (Nov 16).
+        late = SUNSET + timedelta(minutes=20)
+        for i in range(3):
+            self.add_minute(late + timedelta(minutes=i), prod=60)
+        self.add_minute(SUNSET - timedelta(minutes=45))
+        self.fs.fuse_run(self.run_dir, self.frames, self.out, fade_out=(30.0, 40.0))
+        self.assertAlmostEqual(self.out_mean(late), 130, delta=4, msg="fully fused 20 min after sunset")
 
 
 @unittest.skipIf(np is None, "needs numpy and OpenCV")
@@ -472,6 +487,221 @@ class ProductionBracket(unittest.TestCase):
         self.assertLess(start, SUNSET - timedelta(hours=1))
         self.assertGreater(end, SUNSET + timedelta(hours=1))
         self.assertLess(end - start, timedelta(hours=24))
+
+
+def write_frame(folder_root, t, bgr, minutes=None, gains=(3.0, 1.5), cam="cm4wide"):
+    """A small solid production frame with its JSON (Sun.minutes_from_sunset, ColourGains)."""
+    folder = os.path.join(folder_root, t.strftime("%Y/%m/%d"))
+    os.makedirs(folder, exist_ok=True)
+    base = os.path.join(folder, "%s_%s" % (cam, t.strftime("%Y%m%dT%H%M%SZ")))
+    cv2.imwrite(base + ".jpg", np.full((16, 16, 3), bgr, np.uint8), [cv2.IMWRITE_JPEG_QUALITY, 100])
+    if minutes is None:
+        minutes = (t - SUNSET).total_seconds() / 60.0
+    with open(base + ".json", "w") as f:
+        json.dump({"ColourGains": list(gains), "Sun": {"minutes_from_sunset": minutes}}, f)
+    return base + ".jpg"
+
+
+def mean_bgr(path):
+    return [float(x) for x in cv2.imread(path).reshape(-1, 3).mean(0)]
+
+
+@unittest.skipIf(np is None, "needs numpy and OpenCV")
+class Regain(unittest.TestCase):
+    """Re-render a frame as if the camera had used other colour gains (the teal dusk, Nov 12)."""
+
+    def setUp(self):
+        self.fs = load()
+        self.img = np.full((4, 4, 3), (100, 100, 100), np.uint8)      # BGR
+
+    def test_same_gains_change_nothing(self):
+        out = self.fs.regain(self.img, (2.0, 2.0), (2.0, 2.0))
+        self.assertTrue((np.abs(out.astype(int) - self.img) <= 1).all())
+
+    def test_doubling_a_gain_doubles_that_channel_in_linear_light(self):
+        out = self.fs.regain(self.img, (1.0, 1.0), (2.0, 0.5))
+        b, g, r = [int(x) for x in out[0, 0]]
+        self.assertAlmostEqual(r, 100 * 2 ** (1 / 2.2), delta=2)
+        self.assertAlmostEqual(b, 100 * 0.5 ** (1 / 2.2), delta=2)
+        self.assertEqual(g, 100)
+
+    def test_weight_goes_part_of_the_way(self):
+        none = self.fs.regain(self.img, (1.0, 1.0), (2.0, 1.0), weight=0.0)
+        half = self.fs.regain(self.img, (1.0, 1.0), (2.0, 1.0), weight=0.5)
+        self.assertEqual(int(none[0, 0, 2]), 100)
+        self.assertAlmostEqual(int(half[0, 0, 2]), 100 * 2 ** (0.5 / 2.2), delta=2)
+
+
+@unittest.skipIf(np is None, "needs numpy and OpenCV")
+class DuskColour(unittest.TestCase):
+    def setUp(self):
+        self.fs = load()
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.frames, self.out = os.path.join(self.dir, "frames"), os.path.join(self.dir, "out")
+        os.makedirs(self.out)
+        self.paths = {m: write_frame(self.frames, SUNSET + timedelta(minutes=m), (120, 160, 110), gains=(3.0, 1.5))
+                      for m in (-10, 2, 10, 20, 40)}
+
+    def out_path(self, m):
+        return os.path.join(self.out, os.path.basename(self.paths[m]))
+
+    def run_dusk(self, gains=(2.2, 2.8), ramp=(5.0, 15.0)):
+        return self.fs.dusk_colour(self.frames, self.out, SUNSET - timedelta(hours=1), SUNSET + timedelta(hours=2),
+                                   gains, ramp)
+
+    def test_frames_before_the_ramp_are_left_alone(self):
+        self.run_dusk()
+        self.assertFalse(os.path.exists(self.out_path(-10)))
+        self.assertFalse(os.path.exists(self.out_path(2)))
+
+    def test_after_the_ramp_the_frame_takes_the_new_gains(self):
+        self.assertEqual(self.run_dusk(), 3)
+        b, g, r = mean_bgr(self.out_path(40))
+        self.assertGreater(b, 120 * 1.2)      # blue gain 1.5 -> 2.8
+        self.assertLess(r, 110 * 0.9)         # red gain 3.0 -> 2.2
+        self.assertAlmostEqual(g, 160, delta=2)
+
+    def test_in_the_ramp_it_goes_part_of_the_way(self):
+        self.run_dusk()
+        b10 = mean_bgr(self.out_path(10))[0]
+        b40 = mean_bgr(self.out_path(40))[0]
+        self.assertTrue(120 + 3 < b10 < b40 - 3, (b10, b40))
+
+    def test_uses_the_fused_picture_where_there_is_one(self):
+        cv2.imwrite(self.out_path(40), np.full((16, 16, 3), (60, 60, 60), np.uint8), [cv2.IMWRITE_JPEG_QUALITY, 100])
+        self.run_dusk()
+        self.assertLess(mean_bgr(self.out_path(40))[1], 70)
+
+    def test_running_it_twice_does_not_recolour_twice(self):
+        self.run_dusk()
+        once = mean_bgr(self.out_path(40))
+        self.assertEqual(self.run_dusk(), 0)
+        self.assertEqual(mean_bgr(self.out_path(40)), once)
+
+    def test_other_settings_without_redo_are_refused(self):
+        self.run_dusk()
+        with self.assertRaises(ValueError):
+            self.run_dusk(gains=(2.0, 2.0))
+
+    def test_a_frame_without_gains_is_skipped(self):
+        with open(os.path.splitext(self.paths[20])[0] + ".json", "w") as f:
+            json.dump({"Sun": {"minutes_from_sunset": 20.0}}, f)
+        self.assertEqual(self.run_dusk(), 2)
+        self.assertFalse(os.path.exists(self.out_path(20)))
+
+
+@unittest.skipIf(np is None, "needs numpy and OpenCV")
+class Deflicker(unittest.TestCase):
+    """Nov 12, 00:13-00:19 UTC: the whole frame's brightness bounced by about 8 levels a minute."""
+
+    def setUp(self):
+        self.fs = load()
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.frames, self.out = os.path.join(self.dir, "frames"), os.path.join(self.dir, "out")
+        os.makedirs(self.out)
+        self.start = SUNSET - timedelta(minutes=30)
+
+    def minutes(self, values, step=1):
+        return [write_frame(self.frames, self.start + timedelta(minutes=i * step), (v, v, v))
+                for i, v in enumerate(values)]
+
+    def run_it(self, radius=2):
+        return self.fs.deflicker_minutes(self.frames, self.out, self.start - timedelta(minutes=1),
+                                         self.start + timedelta(hours=2), radius)
+
+    def level(self, path):
+        own = os.path.join(self.out, os.path.basename(path))
+        return mean_bgr(own if os.path.exists(own) else path)[1]
+
+    def test_a_bright_minute_is_pulled_to_its_neighbours(self):
+        paths = self.minutes([100] * 4 + [125] + [100] * 4)
+        self.run_it()
+        self.assertLess(self.level(paths[4]), 112)
+        self.assertGreater(self.level(paths[4]), 100)
+
+    def test_a_swell_in_the_sky_alone_is_pulled_back_and_the_ground_left_alone(self):
+        # Nov 12: the glow around the sun swelled while the city below stayed put, so a gain for the
+        # whole frame hardly moved. The correction has to be local.
+        paths = []
+        for i in range(9):
+            t = self.start + timedelta(minutes=i)
+            img = np.full((256, 256, 3), 90, np.uint8)
+            img[:128] = 160 if i == 4 else 120
+            p = write_frame(self.frames, t, (0, 0, 0))
+            cv2.imwrite(p, img, [cv2.IMWRITE_JPEG_QUALITY, 100])
+            paths.append(p)
+        self.run_it()
+        out = cv2.imread(os.path.join(self.out, os.path.basename(paths[4]))).astype(float)
+        self.assertLess(out[10:50].mean(), 145)                  # sky: 160 pulled towards 120
+        self.assertAlmostEqual(out[210:250].mean(), 90, delta=3)  # ground untouched
+
+    def test_a_steady_change_is_left_alone(self):
+        paths = self.minutes([80 + 5 * i for i in range(9)])
+        self.run_it()
+        for i in range(2, 7):
+            self.assertAlmostEqual(self.level(paths[i]), 80 + 5 * i, delta=1.5)
+
+    def test_frames_five_minutes_apart_are_left_alone(self):
+        self.minutes([100, 130, 100, 130, 100], step=5)
+        self.assertEqual(self.run_it(), 0)
+
+    def test_running_it_twice_does_not_deflicker_twice(self):
+        paths = self.minutes([100] * 4 + [125] + [100] * 4)
+        self.run_it()
+        once = self.level(paths[4])
+        self.assertEqual(self.run_it(), 0)
+        self.assertEqual(self.level(paths[4]), once)
+        with self.assertRaises(ValueError):
+            self.run_it(radius=4)
+
+
+@unittest.skipIf(np is None, "needs numpy and OpenCV")
+class VideoOptions(unittest.TestCase):
+    def setUp(self):
+        self.bv = load_build_video()
+
+    def test_parse_gains(self):
+        self.assertEqual(self.bv.parse_pair("2.20,2.80"), (2.2, 2.8))
+        for bad in ("2.2", "a,b", "0,1", "1,2,3"):
+            with self.assertRaises(ValueError):
+                self.bv.parse_pair(bad)
+
+    def test_parse_blend_weights(self):
+        self.assertEqual(self.bv.parse_weights("1,2,3,2,1"), (1, 2, 3, 2, 1))
+        for bad in ("1,2", "1", "1,0,1", "x"):
+            with self.assertRaises(ValueError):
+                self.bv.parse_weights(bad)
+
+    def test_redo_clears_the_marks_so_other_settings_can_be_used(self):
+        fs = load()
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        frames, out = os.path.join(d, "frames"), os.path.join(d, "out")
+        os.makedirs(out)
+        for m in (10, 20, 40):
+            write_frame(frames, SUNSET + timedelta(minutes=m), (120, 160, 110))
+        window = (SUNSET - timedelta(hours=1), SUNSET + timedelta(hours=2))
+        with mock.patch.object(fs, "fuse_run", lambda *a, **k: 0), mock.patch.object(fs, "blend_run", lambda *a, **k: 0):
+            self.bv.prepare_fused(fs, None, frames, out, window=window, dusk_gains=(2.2, 2.8))
+            with self.assertRaises(ValueError):
+                self.bv.prepare_fused(fs, None, frames, out, window=window, dusk_gains=(2.0, 2.0))
+            self.bv.prepare_fused(fs, None, frames, out, redo=True, window=window, dusk_gains=(2.0, 2.0))
+
+    def test_fuse_until_reaches_the_merge(self):
+        fs, seen = load(), {}
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        with mock.patch.object(fs, "fuse_run", lambda *a, **k: seen.update(k) or 0), \
+                mock.patch.object(fs, "blend_run", lambda *a, **k: 0):
+            self.bv.prepare_fused(fs, None, d, os.path.join(d, "out"), fuse_until=(30.0, 40.0))
+        self.assertEqual(seen.get("fade_out"), (30.0, 40.0))
+        seen.clear()
+        with mock.patch.object(fs, "fuse_run", lambda *a, **k: seen.update(k) or 0), \
+                mock.patch.object(fs, "blend_run", lambda *a, **k: 0):
+            self.bv.prepare_fused(fs, None, d, os.path.join(d, "out"))
+        self.assertNotIn("fade_out", seen, "the default stays fuse_run's own")
 
 
 if __name__ == "__main__":

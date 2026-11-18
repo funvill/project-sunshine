@@ -7,7 +7,17 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/sunset
 EnvironmentFile=-/home/pi/sunset/sunset.env
+# Set by `diag start <camera> [rotation]`: which camera the page starts on.
+EnvironmentFile=-/run/sunset-diag.env
+# Capture pauses while the page is on (Steven, 2026-11-17), so the live view is not interrupted
+# every 5 minutes while a camera is being aimed or focused. "+" runs these as root. ExecStopPost
+# also runs when the page times out or fails, so capture always comes back.
+# The second camera's timers too, where they exist (the "-" ignores a failure on a Pi without them).
+ExecStartPre=+/bin/systemctl stop sunset-capture.timer sunset-dense.timer
+ExecStartPre=-+/bin/systemctl stop sunset-capture2.timer sunset-dense2.timer
 ExecStart=/usr/bin/python3 /home/pi/sunset/sunset-diag.py
+ExecStopPost=+/bin/systemctl start sunset-capture.timer sunset-dense.timer
+ExecStopPost=-+/bin/sh -c 'systemctl is-enabled -q sunset-capture2.timer && systemctl start sunset-capture2.timer sunset-dense2.timer'
 # The link file for the diag command. In RAM, so it costs no SD writes.
 RuntimeDirectory=sunset-diag
 NoNewPrivileges=yes

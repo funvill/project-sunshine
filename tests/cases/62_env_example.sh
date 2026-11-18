@@ -25,7 +25,11 @@ for h in timelaps cm4; do
 done
 check "timelaps is the wide camera" grep -qx 'CAM_NAME=wide' "$SRC/hosts/timelaps.env"
 check "cm4 is not in the wide series" grep -qx 'CAM_NAME=cm4wide' "$SRC/hosts/cm4.env"
-check "cm4 is mounted upside down" grep -qx 'ROTATION=180' "$SRC/hosts/cm4.env"
+# Upright from 2026-11-17 (ROTATION=180 from 2026-11-12); chosen by port, not number.
+check "cm4 is upright" grep -qx 'ROTATION=0' "$SRC/hosts/cm4.env"
+check "cm4 names its camera by port" grep -qx 'CAMERA=i2c@0' "$SRC/hosts/cm4.env"
+check "second camera example names CAM1" grep -qx 'CAMERA=i2c@1' "$SRC/sunset2.env.example"
+check "second camera has its own name" grep -qx 'CAM_NAME=cm4city' "$SRC/sunset2.env.example"
 check "cm4 has the dongle watchdog on" grep -qx 'NETWATCH=1' "$SRC/hosts/cm4.env"
 check "cm4 night settings for its lens" grep -qx 'NIGHT_SHUTTER_US=8000000' "$SRC/hosts/cm4.env"
 check "cm4 night colour gains" grep -qx 'NIGHT_AWB=2.20,2.80' "$SRC/hosts/cm4.env"

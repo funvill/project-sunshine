@@ -48,11 +48,13 @@ def clamp(x):
     return max(0.0, min(1.0, x))
 
 
-def fuse_weight(minutes_from_sunset, minutes_into_run):
-    """How much of the fused frame to use: 1 is all of it, 0 is the production frame."""
+def fuse_weight(minutes_from_sunset, minutes_into_run, fade_out=(FADE_OUT_START, FADE_OUT_END)):
+    """How much of the fused frame to use: 1 is all of it, 0 is the production frame. fade_out:
+    the minutes after sunset over which the merge hands back to the production frame."""
+    start, end = fade_out
     fade_in = clamp(minutes_into_run / FADE_IN_MIN)
-    fade_out = clamp((FADE_OUT_END - minutes_from_sunset) / (FADE_OUT_END - FADE_OUT_START))
-    return min(fade_in, fade_out)
+    out = clamp((end - minutes_from_sunset) / (end - start)) if end > start else float(minutes_from_sunset < end)
+    return min(fade_in, out)
 
 
 def fuse(bright, dark):
@@ -149,7 +151,7 @@ def apply_ratio(production, ratio):
 
 
 def fuse_run(run_dir, frames_dir, out_dir, bright_name="ev+0-daylight", dark_name="ev-2-daylight", force=False,
-             smooth=SMOOTH_FRAMES, brackets=None):
+             smooth=SMOOTH_FRAMES, brackets=None, fade_out=(FADE_OUT_START, FADE_OUT_END)):
     """Write the fused frames. Returns how many were written.
 
     The runner skips the first minute of every 5-minute slot, and sometimes loses a longer stretch,
@@ -158,7 +160,10 @@ def fuse_run(run_dir, frames_dir, out_dir, bright_name="ev+0-daylight", dark_nam
     smooth gain and interpolated in time, or held from the one side within FILL_MAX_MIN). Repeating
     or blending the neighbours' pictures instead froze the video, then jumped, at the sunset.
 
-    brackets: (brights, darks) from production_bracket(), used instead of the experiment run."""
+    brackets: (brights, darks) from production_bracket(), used instead of the experiment run.
+    fade_out: minutes after sunset over which the merge fades back to the production frame (5 to
+    12 by default, for the experiment's daylight-only bracket, whose sky turns brown after about
+    +15). The production bracket switches to auto white balance at +10, so it can go later."""
     brights, darks = brackets if brackets else (list_run(run_dir, bright_name), list_run(run_dir, dark_name))
     if not brights or not darks:
         return 0
@@ -210,7 +215,7 @@ def fuse_run(run_dir, frames_dir, out_dir, bright_name="ev+0-daylight", dark_nam
         m = minutes_from_sunset(path)
         if m is None or not first - timedelta(seconds=MATCH_SECONDS) <= t <= last + timedelta(seconds=MATCH_SECONDS):
             continue
-        weight = fuse_weight(m, (t - first).total_seconds() / 60.0)
+        weight = fuse_weight(m, (t - first).total_seconds() / 60.0, fade_out)
         out = os.path.join(out_dir, os.path.basename(path))
         if weight <= 0 or (os.path.exists(out) and not force):
             continue
@@ -383,6 +388,152 @@ def blend_run(run_dir, frames_dir, out_dir, bright_name="ev+0-daylight", weights
         return 0
     margin = timedelta(minutes=BLEND_MARGIN_MIN)
     return blend_minutes(frames_dir, out_dir, brights[0][0] - margin, brights[-1][0] + margin, weights)
+
+
+GAMMA = 2.2                # JPEG to roughly linear light, for re-colouring
+DUSK_MARK = ".dusk"
+DEFLICKER_MARK = ".deflickered"
+
+
+def _checked_mark(mark, settings):
+    """True if this step already ran with these settings; ValueError if with others (use --redo)."""
+    if not os.path.exists(mark):
+        return False
+    done = read_mark(mark)
+    if done is not None and done.get("settings") == settings and done.get("complete"):
+        return True
+    raise ValueError("%s was made with other settings %s, or cut off: run again with --redo"
+                     % (os.path.basename(mark), None if done is None else done.get("settings")))
+
+
+def _picture(out_dir, path):
+    """The fused (or already processed) picture for a production frame if there is one, else the frame."""
+    own = os.path.join(out_dir, os.path.basename(path))
+    return cv2.imread(own if os.path.exists(own) else path)
+
+
+def regain(image, from_gains, to_gains, weight=1.0):
+    """A BGR picture re-rendered as if taken with colour gains to_gains (red, blue) instead of
+    from_gains, `weight` of the way (0 none, 1 all), in roughly linear light. Approximate: the
+    camera's colour matrix and tone curve come after the gains, and clipped areas stay clipped."""
+    lin = (image.astype(np.float32) / 255.0) ** GAMMA
+    lin[..., 2] *= (to_gains[0] / from_gains[0]) ** weight
+    lin[..., 0] *= (to_gains[1] / from_gains[1]) ** weight
+    return np.clip(np.clip(lin, 0.0, 1.0) ** (1.0 / GAMMA) * 255.0 + 0.5, 0, 255).astype(np.uint8)
+
+
+def frame_gains(jpg_path):
+    try:
+        with open(os.path.splitext(jpg_path)[0] + ".json") as f:
+            gains = json.load(f)["ColourGains"]
+        r, b = float(gains[0]), float(gains[1])
+        return (r, b) if r > 0 and b > 0 else None
+    except (OSError, ValueError, KeyError, TypeError, IndexError):
+        return None
+
+
+def dusk_colour(frames_dir, out_dir, start, end, gains, ramp=(5.0, 15.0)):
+    """Re-colour the frames after sunset as if shot with fixed colour gains (red, blue), for example
+    the camera's NIGHT_AWB. Auto white balance turns the CM4's dusk sky teal (Nov 12: red x3.2, blue
+    x1.5 against 2.20/2.80 at night), and the merge's daylight balance hands over to it within a few
+    minutes. From ramp[0] to ramp[1] minutes after sunset (Sun.minutes_from_sunset in the frame's
+    JSON) it goes from the frame's own gains to `gains`, then stays there. Each frame's own gains
+    come from its JSON (ColourGains); one without them is left alone. The picture used is the fused
+    one in out_dir if there is one. Writes to out_dir; returns how many. Done once per out_dir."""
+    mark = os.path.join(out_dir, DUSK_MARK)
+    settings = {"gains": list(gains), "ramp": list(ramp)}
+    if _checked_mark(mark, settings):
+        return 0
+    os.makedirs(out_dir, exist_ok=True)
+    record = {"settings": settings, "complete": False, "written": []}
+    write_mark(mark, record)
+    for t, path in production_frames(frames_dir, start, end):
+        minutes = minutes_from_sunset(path)
+        own = frame_gains(path)
+        if minutes is None or own is None or minutes < ramp[0]:
+            continue
+        weight = clamp((minutes - ramp[0]) / max(ramp[1] - ramp[0], 1e-6))
+        image = _picture(out_dir, path)
+        if image is None:
+            continue
+        name = os.path.basename(path)
+        record["written"].append(name)
+        write_mark(mark, record)
+        cv2.imwrite(os.path.join(out_dir, name), regain(image, own, gains, weight), [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+    record["complete"] = True
+    write_mark(mark, record)
+    return len(record["written"])
+
+
+def deflicker_minutes(frames_dir, out_dir, start, end, radius, max_gain=SMOOTH_MAX_GAIN):
+    """Steady the brightness of 1-a-minute frames, area by area: each area of a frame is pulled
+    towards the same area's mean over the `radius` minutes either side (a window the same size each
+    side, so a steady change is left alone), by at most max_gain, through a smooth gain map at
+    1/RATIO_SCALE size, so detail and moving cloud stay sharp. For the glow's swell of Nov 12,
+    00:13-00:19 UTC: the sky level went 147-164-146 while the city stayed put. Frames not one minute
+    from their neighbours (the 5-minute frames) are left alone. Uses the fused picture where there is
+    one; writes to out_dir."""
+    mark = os.path.join(out_dir, DEFLICKER_MARK)
+    settings = {"radius": radius, "max_gain": max_gain, "local": True}
+    if _checked_mark(mark, settings):
+        return 0
+    os.makedirs(out_dir, exist_ok=True)
+    frames = production_frames(frames_dir, start, end)
+    # contiguous runs of frames one minute apart
+    runs, current = [], []
+    for t, path in frames:
+        if current and abs((t - current[-1][0]).total_seconds() - 60) > BLEND_SPACING_S:
+            runs.append(current)
+            current = []
+        current.append((t, path))
+    runs.append(current)
+    # Worked out locally, at 1/RATIO_SCALE size and blurred, like the merge's tone map: the glow
+    # around the sun can swell while the city below stays put, and a gain for the whole frame then
+    # hardly moves. Each area is pulled towards the same area in the minutes around it.
+    plan = []
+    for run in runs:
+        if len(run) < 3:
+            continue
+        small = []
+        for _, path in run:
+            image = _picture(out_dir, path)
+            if image is None:
+                small.append(None)
+                continue
+            h, w = image.shape[:2]
+            size = (max(1, w // RATIO_SCALE), max(1, h // RATIO_SCALE))
+            small.append(cv2.resize(image, size, interpolation=cv2.INTER_AREA).astype(np.float32) + RATIO_OFFSET)
+        for i, (_, path) in enumerate(run):
+            reach = min(radius, i, len(run) - 1 - i)
+            around = [s for s in small[i - reach:i + reach + 1] if s is not None and s.shape == getattr(small[i], "shape", None)]
+            if small[i] is None or reach == 0 or len(around) < 2:
+                continue
+            ratio = cv2.GaussianBlur(sum(around) / len(around) / small[i], (0, 0), 2)
+            ratio = np.clip(ratio, 1.0 / max_gain, max_gain)
+            if float(np.abs(ratio - 1.0).max()) >= 0.005:
+                plan.append((path, ratio))
+    record = {"settings": settings, "complete": False, "written": []}
+    write_mark(mark, record)
+    for path, ratio in plan:
+        image = _picture(out_dir, path)
+        if image is None:
+            continue
+        name = os.path.basename(path)
+        record["written"].append(name)
+        write_mark(mark, record)
+        cv2.imwrite(os.path.join(out_dir, name), apply_ratio(image, ratio), [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+    record["complete"] = True
+    write_mark(mark, record)
+    return len(record["written"])
+
+
+def clear_marks(out_dir):
+    """Forget the dusk and deflicker steps (for a redo, which also removes the frames they wrote)."""
+    for name in (DUSK_MARK, DEFLICKER_MARK):
+        try:
+            os.remove(os.path.join(out_dir, name))
+        except OSError:
+            pass
 
 
 def main():

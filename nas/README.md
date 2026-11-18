@@ -19,7 +19,9 @@ Each frame carries three lines of text at the bottom left, the last 140 px above
 "Burnaby, BC, Canada   WSW 243°": the place and the compass bearing at the middle of the crop, which
 is the sunset's bearing when the crop is aimed at it (from the calibration, or the sunset azimuth
 without one). Instagram's caption may cover it in the Reels feed. Position, size and wording are
-constants at the top of the script; `OVERLAY_LOCATION=""` drops the third line.
+constants at the top of the script; `OVERLAY_LOCATION=""` drops the third line. The day's sky
+score (provisional, see below) sits right-aligned on that line as "Sky score 72", for the whole
+video; a day with no score shows none, and `OVERLAY_SKY=0` drops it.
 
 **Starting at a fixed time.** `VIDEO_START_LOCAL=07:30` starts each video at that local time on the
 day of the sunset instead of after the previous video, and the day before is ignored. A frame can then
@@ -77,6 +79,7 @@ record. An error in one day, of any kind, doesn't stop the other days.
 | `VIDEO_START_LOCAL` | unset | Local `HH:MM` to start each video at (see above). Unset means dark to dark |
 | `FUSED_DIR` | unset | A folder of fused frames (from `tools/fuse_sunset.py`). A file with the same name as a frame replaces its picture; the frame's time and Sun data stay |
 | `OVERLAY_LOCATION` | `Burnaby, BC, Canada` | Small text under the date. Empty for none |
+| `OVERLAY_SKY` | `1` | `0` leaves the day's sky score off the video (it stays in the record) |
 | `FONT_FILE` | `/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf` | Font for the text on the video. The image installs this one |
 | `SUNSET_CUT` | off | `1` makes the sunset-only cut as well (see below) |
 | `SUNSET_CUT_BEFORE_MIN` | `60` | The cut starts this many minutes before sunset |
