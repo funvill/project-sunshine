@@ -16,6 +16,8 @@ if [[ "${1:-}" == --help || "${1:-}" == --version ]]; then
   exit 0
 fi
 echo "rsync $*" >> "${STUB_CALLS:-/dev/null}"
+# STUB_RSYNC_SLEEP=<seconds>: a slow link, so a run outlasts the sync's own time limit.
+[[ -n "${STUB_RSYNC_SLEEP:-}" ]] && sleep "$STUB_RSYNC_SLEEP"
 [[ "${STUB_RSYNC:-ok}" == fail ]] && { echo "ssh: connect to host nas.local port 22: No route to host" >&2; exit 255; }
 if [[ "${STUB_RSYNC:-ok}" == hang ]]; then
   # A transfer that never finishes: the test kills it with TERM, as systemd does at the timeout.

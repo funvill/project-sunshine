@@ -9,6 +9,12 @@ LOG_FILE="${SYNC_LOG_FILE:-$(dirname "$OUT_ROOT")/sync.log}"
 LOCK_FILE="${SYNC_LOCK_FILE:-$(dirname "$OUT_ROOT")/.sunset-sync.lock}"
 LOG_MAX_BYTES="${SYNC_LOG_MAX_BYTES:-1048576}"   # rotate sync.log to sync.log.1 at this size
 BATCH="${SYNC_BATCH:-200}"                       # files per rsync run, oldest first
+# A batch also closes at this many MB (a bigger file still goes, on its own), so on a slow link
+# each batch is read back and its files deleted within minutes. 0: no size cap.
+BATCH_MB="${SYNC_BATCH_MB:-32}"
+# Stop starting new batches after this many seconds and leave the rest for the next run (logged
+# as "sync partial"), well before the unit's TimeoutStartSec kills it mid-batch. 0: no limit.
+MAX_S="${SYNC_MAX_S:-1200}"
 # Read-back before delete (issue #13), mounted share only. 1: a local file is deleted only after
 # its NAS copy has been read back and matches; 0: trust rsync's exit code, as before.
 VERIFY="${SYNC_VERIFY:-1}"
@@ -229,11 +235,35 @@ readback_batch() {
 # Send in batches of the oldest files. rsync sorts a file list by name on its own, so batching
 # is what makes "oldest first" real. A hard failure (rc 255, link gone) stops here; a partial
 # one (rc 23/24: some files unreadable or vanished) goes on with the next batch.
+# A batch is the oldest files up to BATCH files or BATCH_MB, whichever comes first, and always
+# at least one file. Sets N.
+make_batch() {
+  local p s bytes=0 cap=$(( BATCH_MB * 1048576 ))
+  N=0
+  : > "$LIST.batch"
+  while IFS= read -r -d '' p; do
+    s="$(wc -c < "$p" 2>/dev/null)" || s=0
+    if (( N > 0 && (N >= BATCH || (cap > 0 && bytes + s > cap)) )); then break; fi
+    printf '%s\0' "$p" >> "$LIST.batch"
+    N=$((N + 1)); bytes=$((bytes + s))
+  done < "$LIST"
+}
+
 RC=0
 FAILED_RC=0
+SECONDS=0
+BATCHES=0
 while (( REMAINING > 0 )); do
-  head -z -n "$BATCH" "$LIST" > "$LIST.batch"
-  N="$(tr -cd '\0' < "$LIST.batch" | wc -c)"
+  # Out of time: stop here, between batches, so nothing is cut off mid-transfer. At least one
+  # batch per run, so a run always moves something. The next timer run carries on.
+  if (( MAX_S > 0 && SECONDS >= MAX_S && BATCHES > 0 )); then
+    log "sync partial confirmed=$CONFIRMED pending=$REMAINING kept=$KEPT"
+    (( FAILED_RC == 0 )) || exit "$FAILED_RC"
+    (( KEPT == 0 )) || exit 1
+    exit 0
+  fi
+  BATCHES=$((BATCHES + 1))
+  make_batch
   BATCH_RC=0
   if rsync "${OPTS[@]}" --files-from="$LIST.batch" ./ "$NAS_TARGET" 2>"$ERR"; then
     :
@@ -244,7 +274,8 @@ while (( REMAINING > 0 )); do
     log "sync FAILED rc=$RC pending=$PENDING err=$(tail -n 2 "$ERR" | tr '\n' '|')"
     [[ "$RC" == 23 || "$RC" == 24 ]] || { rm -f "$LIST.batch"; exit "$RC"; }
   fi
-  if (( READBACK )); then readback_batch "$BATCH_RC"; fi
+  if (( READBACK )); then readback_batch "$BATCH_RC"
+  elif [[ "$BATCH_RC" == 0 ]]; then CONFIRMED=$((CONFIRMED + N)); fi   # rsync deleted them itself
   tail -z -n +$((N + 1)) "$LIST" > "$LIST.rest"
   mv -f "$LIST.rest" "$LIST"
   REMAINING=$((REMAINING - N))

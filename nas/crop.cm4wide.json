@@ -67,6 +67,68 @@
           "note": "cm4wide + 3.2 mm lens. Fitted to 5 skyline landmarks (two near towers, a third tower, two downtown spikes) whose bearings come from the wide camera's pilot-3 fit; residuals 8 px or less. Sunset at 243 deg is an extrapolation 14 deg past the nearest landmark. Check against a clear sunset."
         }
       ]
+    },
+    {
+      "start": "2026-11-17",
+      "setup_id": "cm4-window-3",
+      "cx": 2028,
+      "offset_px": 0,
+      "mask": [],
+      "view": {
+        "top": 100,
+        "height": 2400
+      },
+      "sky_full_warm": 0.178,
+      "blur_sigma": 5,
+      "blur": [
+        [
+          0,
+          1206,
+          259,
+          835
+        ],
+        [
+          1407,
+          757,
+          233,
+          807
+        ],
+        [
+          1690,
+          524,
+          275,
+          1111
+        ],
+        [
+          2761,
+          775,
+          296,
+          795
+        ],
+        [
+          3034,
+          819,
+          219,
+          691
+        ],
+        [
+          3283,
+          931,
+          273,
+          561
+        ]
+      ],
+      "fits": [
+        {
+          "date": "2026-11-17",
+          "f_px": 1880.0,
+          "az0_deg": 272.3,
+          "marks": 534,
+          "az_min": 242.7,
+          "az_max": 297.7,
+          "note": "Carried over from the cm4-window-1 fit after the move of 2026-11-17, not fitted to landmarks: a homography between the Nov 16 06:00 UTC and Nov 17 06:50 UTC night frames (534 matched points) maps the new frame centre to 272.3 deg through the old fit (f 1,880 px, 261.7 deg); scale across the centre 0.996, so f is kept. Inherits the old fit's limits (landmarks 257-295 deg). Blur boxes moved through the same homography; the far-left one is now out of frame. View 40 px shorter to keep the balcony rail out. sky_full_warm kept from the old position: recheck on a clear sunset."
+        }
+      ]
     }
   ]
 }

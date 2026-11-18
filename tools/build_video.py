@@ -45,22 +45,60 @@ def evening_window(day, tz=None):
     return noon.astimezone(timezone.utc), (noon + timedelta(hours=18)).astimezone(timezone.utc)
 
 
-def prepare_fused(fuse, run_dir, frames_dir, fused_dir, redo=False, blend=True, brackets=None):
+def parse_pair(text):
+    """'2.20,2.80' -> (2.2, 2.8): two positive numbers."""
+    parts = text.split(",")
+    if len(parts) != 2:
+        raise ValueError("expected two numbers like 2.20,2.80, not %r" % text)
+    pair = tuple(float(p) for p in parts)
+    if min(pair) <= 0:
+        raise ValueError("both must be above 0: %r" % text)
+    return pair
+
+
+def parse_weights(text):
+    """'1,2,3,2,1' -> (1, 2, 3, 2, 1): an odd number (3 or more) of positive whole numbers."""
+    weights = tuple(int(p) for p in text.split(","))
+    if len(weights) < 3 or len(weights) % 2 == 0 or min(weights) <= 0:
+        raise ValueError("blend weights need an odd count of 3 or more, all above 0: %r" % text)
+    return weights
+
+
+def prepare_fused(fuse, run_dir, frames_dir, fused_dir, redo=False, blend=True, brackets=None, window=None,
+                  dusk_gains=None, dusk_ramp=(5.0, 15.0), deflicker=0, blend_weights=None, fuse_until=None):
     """Merge the sunset bracket into fused_dir, then blend each minute with its neighbours.
     Returns (frames fused, frames blended). Without redo, frames already there are kept. With redo
     the blend is undone (fused frames put back, the rest removed) and every frame fused again, so
     the video never encodes pictures made by older merge code. brackets: the production pairs from
-    fuse.production_bracket(), used instead of an experiment run (run_dir is then ignored)."""
+    fuse.production_bracket(), used instead of an experiment run (run_dir is then ignored).
+
+    Optional steps over `window` (UTC start, end), each off unless asked for:
+    dusk_gains (red, blue): after the merge and before the blend, re-colour the frames after sunset
+    as if shot with these fixed colour gains, ramping in over dusk_ramp minutes (fuse.dusk_colour).
+    deflicker (minutes): after the blend, steady each 1-a-minute frame's brightness, area by area,
+    towards that many minutes either side (fuse.deflicker_minutes). blend_weights: other blend weights,
+    e.g. (1, 2, 3, 2, 1) for five minutes. fuse_until (from, to): minutes after sunset over which
+    the merge fades out (fuse_run's own default, 5 to 12, when None). A step run before with other
+    settings needs redo."""
     if redo:
         fuse.undo_blend(fused_dir)
+        fuse.clear_marks(fused_dir)
         # Drop every fused frame, so frames the new merge no longer makes (a narrower window) are
         # not still swapped into the video. Only frame-named JPEGs at the top level are removed.
         if os.path.isdir(fused_dir):
             for name in os.listdir(fused_dir):
                 if FUSED_NAME.match(name):
                     os.remove(os.path.join(fused_dir, name))
-    made = fuse.fuse_run(run_dir, frames_dir, fused_dir, force=redo, brackets=brackets)
-    blended = fuse.blend_run(run_dir, frames_dir, fused_dir, brights=brackets[0] if brackets else None) if blend else 0
+    extra = {"fade_out": fuse_until} if fuse_until else {}
+    made = fuse.fuse_run(run_dir, frames_dir, fused_dir, force=redo, brackets=brackets, **extra)
+    if dusk_gains:
+        fuse.dusk_colour(frames_dir, fused_dir, window[0], window[1], dusk_gains, dusk_ramp)
+    blended = 0
+    if blend:
+        kwargs = {"weights": blend_weights} if blend_weights else {}
+        blended = fuse.blend_run(run_dir, frames_dir, fused_dir, brights=brackets[0] if brackets else None, **kwargs)
+    if deflicker:
+        fuse.deflicker_minutes(frames_dir, fused_dir, window[0], window[1], deflicker)
     return made, blended
 
 
@@ -80,6 +118,19 @@ def main():
                     help="merge the production bracket (the _ev0/_ev-2 frames from BRACKET=1) instead of an experiment run")
     ap.add_argument("--fused", help="a folder of already-fused frames (what --fuse-run makes in <out>/fused)")
     ap.add_argument("--no-blend", action="store_true", help="with --fuse-run: skip the 1:2:1 blend of each sunset minute with its neighbours")
+    ap.add_argument("--dusk-gains", type=parse_pair, metavar="R,B",
+                    help="after sunset, re-colour frames as if shot with these colour gains (e.g. the camera's "
+                         "NIGHT_AWB, 2.20,2.80 on cm4wide): fixes the teal dusk of auto white balance")
+    ap.add_argument("--dusk-ramp", type=parse_pair, default=(5.0, 15.0), metavar="FROM,TO",
+                    help="minutes after sunset over which --dusk-gains comes in (default 5,15)")
+    ap.add_argument("--fuse-until", type=parse_pair, metavar="FROM,TO",
+                    help="minutes after sunset over which the merge fades out (default 5,12). The production "
+                         "bracket switches to auto white balance at +10, so it can go later, e.g. 30,40; needs --redo")
+    ap.add_argument("--deflicker", type=int, default=0, metavar="MIN",
+                    help="steady the brightness of the 1-a-minute frames, area by area, over this many minutes either side "
+                         "(e.g. 3); off by default")
+    ap.add_argument("--blend-weights", type=parse_weights, metavar="W,W,W",
+                    help="weights of the neighbour blend, e.g. 1,2,3,2,1 for five minutes (default 1,2,1)")
     ap.add_argument("--redo", action="store_true",
                     help="delete that day's record first, so it is built again; with --fuse-run, make the fused frames again too")
     args = ap.parse_args()
@@ -108,7 +159,10 @@ def main():
         else:
             run_dir, brackets = str(Path(args.nas).parent / "project_sunshine_experiments" / args.fuse_run), None
         made, blended = prepare_fused(fuse, run_dir, cfg.frames_dir, args.fused, redo=args.redo,
-                                      blend=not args.no_blend, brackets=brackets)
+                                      blend=not args.no_blend, brackets=brackets, window=evening_window(day, cfg.tz),
+                                      dusk_gains=args.dusk_gains, dusk_ramp=args.dusk_ramp,
+                                      deflicker=args.deflicker, blend_weights=args.blend_weights,
+                                      fuse_until=args.fuse_until)
         print("fused %d frames" % made)
         if not args.no_blend:
             print("blended %d frames with their neighbours" % blended)

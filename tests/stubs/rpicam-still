@@ -22,6 +22,8 @@ case "${STUB_RPICAM:-ok}" in
   orphan) sleep "${STUB_ORPHAN_S:-4}" >/dev/null 2>&1 & ;;
 esac
 if [[ "$*" == *--list-cameras* ]]; then
+  # STUB_CAMERA_LIST: the camera lines to print instead of the one default camera.
+  if [[ -n "${STUB_CAMERA_LIST:-}" ]]; then echo "Available cameras"; echo "$STUB_CAMERA_LIST"; exit 0; fi
   case "${STUB_CAMERA:-imx477}" in
     none) echo "No cameras available!"; exit 0 ;;
     *) echo "Available cameras"; echo "0 : ${STUB_CAMERA:-imx477} [4056x3040 12-bit RGGB] (/base/soc/i2c0mux/i2c@1/sensor@1a)"; exit 0 ;;

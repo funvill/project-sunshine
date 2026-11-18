@@ -76,11 +76,12 @@ for eid, sc in sensors.items():
 result(cmd_ok, "every sensor command is 'sh /config/sunset/<script that exists>'")
 result(all("command_timeout" in s and "scan_interval" in s for s in sensors.values()), "every sensor has a timeout and a scan interval")
 
-# Each camera has its own sensor of each kind.
+# Each camera has its own sensor of each kind. cm4city (from 2026-11-17) has frame age and health
+# only: the NAS archive check and daily health jobs don't run for it yet.
 for script in ("sunset_camera_health.sh", "sunset_frame_age.sh"):
     cams = [s["command"].split()[-1] for s in sensors.values() if script in s["command"]]
     cams = ["wide" if c.endswith(".sh") else c for c in cams]
-    result(sorted(cams) == ["cm4wide", "wide"], "%s has one sensor per camera (%s)" % (script, ",".join(cams)))
+    result(sorted(cams) == ["cm4city", "cm4wide", "wide"], "%s has one sensor per camera (%s)" % (script, ",".join(cams)))
 for kind in ("verify", "health"):
     cams = [s["command"].split()[3] for s in sensors.values() if "sunset_result.sh %s " % kind in s["command"]]
     result(sorted(cams) == ["cm4wide", "wide"], "result %s has one sensor per camera" % kind)

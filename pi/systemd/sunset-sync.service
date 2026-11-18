@@ -8,4 +8,6 @@ Type=oneshot
 User=pi
 EnvironmentFile=-/home/pi/sunset/sunset.env
 ExecStart=/home/pi/sunset/sunset-sync.sh
-TimeoutStartSec=1800
+# A backstop for a hung transfer only: the script stops itself between batches after SYNC_MAX_S
+# (20 min), and one 32 MB batch on the CM4's slow Wi-Fi can take several minutes more.
+TimeoutStartSec=3600

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -1310,7 +1311,7 @@ class RealEncoding(unittest.TestCase):
         last = gray_row(out, 960, seek=9.5 / 12)   # the 10th frame, the last gray one
         self.assertAlmostEqual(sum(last) / len(last), sum(before) / len(before), delta=2)
 
-    def overlay_video(self, minutes, center_azimuth_deg=None, **config):
+    def overlay_video(self, minutes, center_azimuth_deg=None, sky_score=None, **config):
         """Gray frames at these minutes after SUNSET, encoded with the overlay."""
         gray = os.path.join(self.dir, "gray.jpg")
         make_image(gray, color="gray")
@@ -1321,6 +1322,8 @@ class RealEncoding(unittest.TestCase):
         crop = {"x": 0, "width": 270, "height": 480}
         if center_azimuth_deg is not None:
             crop["center_azimuth_deg"] = center_azimuth_deg
+        if sky_score is not None:
+            crop["sky_score"] = sky_score
         daily.encode_video(tree.config(**config), frames, crop, [], out)
         return out
 
@@ -1355,6 +1358,30 @@ class RealEncoding(unittest.TestCase):
         row = gray_row(out, daily.LOC_Y + daily.LOC_SIZE // 2, seek=0)
         self.assertGreater(max(row[:540]) - min(row[:540]), 100, "the location line is drawn on the left")
         self.assertLess(max(row[900:]) - min(row[900:]), 20, "and stays on the left")
+
+    def test_sky_score_is_drawn_right_of_the_location_line(self):
+        out = self.overlay_video([0, 15, 30], sky_score=72)
+        row = gray_row(out, daily.LOC_Y + daily.LOC_SIZE // 2, seek=0)
+        self.assertGreater(max(row[750:1020]) - min(row[750:1020]), 100, "the score is on the right")
+        self.assertLess(max(row[1020 + 10:]) - min(row[1020 + 10:]), 20, "with the right margin kept clear")
+        top = gray_row(out, daily.TITLE_Y + daily.TITLE_SIZE // 2, seek=0)
+        self.assertLess(max(top[900:]) - min(top[900:]), 20, "nothing new on the title line")
+
+    def test_sky_score_shows_on_the_last_frame_too(self):
+        out = self.overlay_video([0, 15, 30], sky_score=72)
+        row = gray_row(out, daily.LOC_Y + daily.LOC_SIZE // 2, seek=2 * daily.FRAME_SECONDS)
+        self.assertGreater(max(row[750:1020]) - min(row[750:1020]), 100)
+
+    def test_no_sky_score_or_turned_off_means_no_score_text(self):
+        for kwargs in ({}, {"sky_score": 72, "overlay_sky": False}):
+            out = self.overlay_video([0, 15, 30], **kwargs)
+            row = gray_row(out, daily.LOC_Y + daily.LOC_SIZE // 2, seek=0)
+            self.assertLess(max(row[900:]) - min(row[900:]), 20, kwargs)
+
+    def test_sky_score_filter_text(self):
+        cfg = types.SimpleNamespace(font_file="f.ttf", location="", overlay_sky=True)
+        chain = daily.overlay_filters(cfg, [], sky_score=72)
+        self.assertTrue(any("Sky score 72" in c and "x=w-tw-%d" % daily.SKY_TEXT_RIGHT in c for c in chain), chain)
 
     def test_no_location_means_no_third_line(self):
         out = self.overlay_video([0, 15, 30], location="")
@@ -1401,6 +1428,7 @@ class RealEncoding(unittest.TestCase):
         for m in extra:
             tree.add(SUNSET + timedelta(minutes=m), schedule="dense")
         self.assertEqual(self.run_real(tree), 0)
+        self.sky_tree = tree
         return tree.record()
 
     def test_record_has_a_sky_score_from_the_frames_around_sunset(self):
@@ -1409,6 +1437,13 @@ class RealEncoding(unittest.TestCase):
         self.assertEqual(sky["sky"]["frames_scored"], 13, "-35 to +25 minutes: 4 regular and 9 extra frames")
         self.assertTrue(sky["sky"]["provisional"])
         self.assertEqual(sky["sky"]["crop"]["score"], 100, "the crop's columns are orange too")
+
+    def test_the_days_video_shows_its_sky_score_but_the_record_crop_does_not_carry_it(self):
+        rec = self.sky_record("orange")
+        self.assertNotIn("sky_score", rec["crop"], "the score lives in the sky block only")
+        video = os.path.join(self.sky_tree.daily, rec["video"])
+        row = gray_row(video, daily.LOC_Y + daily.LOC_SIZE // 2, seek=0)
+        self.assertGreater(max(row[750:1020]) - min(row[750:1020]), 100, "score drawn right of the location")
 
     def test_too_few_frames_around_sunset_gives_no_score_and_says_why(self):
         rec = self.sky_record("orange", extra=())

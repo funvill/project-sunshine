@@ -32,11 +32,19 @@ Give times in UTC and Vancouver. Add the entry when it happens, or as soon as it
   NAS job for a chosen date, prints the sky score, posts nothing; command in `README.md`).
   `ups_bench.py` bench-tests the UPS reader (`pi/sunset-ups.py`) against the real board. `fuse_sunset.py` merges the sunset bracket (ev+0 and ev-2) into the frames the video uses.
   `fog_scan.py` measures each frame's clarity against its time-of-day baseline (fog, condensation, #33; no alert yet).
+  `camera_check.py` is the read-only health check behind the `camera-check` skill (use it when Steven
+  asks to check the camera; hosts and NAS path in the git-ignored `tools/camera_check.hosts`).
+  `build_reports.py` rebuilds `reports/` (no AI): one row a day with a 100 px thumbnail of the sunset point,
+  the sky score and an SVG graph of it, frames, forecast, Pi health and changelog events. Run it whenever the
+  project is updated (Steven, 2026-11-18); it may lag a few weeks. A new `SETUP_ID` needs its horizon row in
+  `HORIZON_Y` there.
   `issue_blur.py` blurs and labels the nearby buildings in images posted
   to GitHub issues, and nothing else. Style 1 (light Gaussian) is the default, chosen by Steven 2026-11-09.
 - `docs/`: setup guide and hardware notes.
 
 Frames never go in this repo, and neither does `sunset.env`, which holds the real site coordinates.
+The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tower blur applied, no metadata
+(Steven asked for them, 2026-11-18).
 
 ## Owner context
 - Steven: maker/hacker, CTO at a building-automation company. Comfortable with Linux,
@@ -63,6 +71,20 @@ Frames never go in this repo, and neither does `sunset.env`, which holds the rea
 - Magnetic declination in Vancouver ~16° E (phone compass must use true north).
 
 ## Decisions made
+- **The move of 2026-11-17 (Steven; details in `changelog.md`):**
+  - **`timelaps` retired** from the window (last frame 04:10 UTC Nov 17). Its HA `wide` alerts will
+    fire until removed. Everything now runs on the CM4 `sunshine`.
+  - **Two cameras on the CM4.** CAM0: the 3.2 mm `cm4wide` (official series), now **upright,
+    `ROTATION=0`** (replaces the #12 decision to keep it upside down), aimed for #4 at about 272°,
+    `SETUP_ID=cm4-window-3`. CAM1: the UC-517 with the **6 mm** lens (the 16 mm could not reach
+    infinity; most likely the 5 mm C-to-CS spacer is missing), series **`cm4city`**, about 281°
+    (downtown), `SETUP_ID=cm4city-window-1`, from `~/sunset/sunset2.env` and the
+    `sunset-capture2`/`sunset-dense2` units, 30 s after the first camera, sharing its lock.
+  - **Cameras are chosen by port ID** (`CAMERA=i2c@0` / `i2c@1`): with both ports on, rpicam calls
+    CAM1 camera 0. `install.sh --cm4-two` writes both overlays.
+  - **Diag mode pauses capture** of both cameras while it is on; the page has a camera switch.
+  - Temporary wired Ethernet on the CM4 besides the Wi-Fi dongle (addresses only in the git-ignored `tools/camera_check.hosts`).
+  - **`nas/crop.cm4wide.json` re-fitted for the new heading** (new calibration from 2026-11-17).
 - **Decisions of 2026-11-16 (Steven, walked through the open issues; details on each issue):**
   - **Storage (#5, #9), reversed the same day:** no DNGs. **`SAVE_RAW=0` on both Pis from 09:15 UTC
     2026-11-16, and all 6,325 DNGs on the NAS deleted (~157 GB; Steven, #38).** The test

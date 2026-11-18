@@ -41,7 +41,8 @@ check "capture service uses the user's home" grep -qx 'ExecStart=/home/tester/su
 check "env file path rewritten" grep -qx 'EnvironmentFile=-/home/tester/sunset/sunset.env' "$U/sunset-sync.service"
 check "no unit still says /home/pi" bash -c "! grep -l '/home/pi' '$U'/sunset-*.service '$U'/sunset-*.timer"
 check "no unit keeps User=pi" bash -c "! grep -l '^User=pi' '$U'/sunset-*.service"
-check "all ten units installed" test "$(ls "$U"/sunset-*.service "$U"/sunset-*.timer | wc -l | tr -d ' ')" = 10
+check "all fourteen units installed" test "$(ls "$U"/sunset-*.service "$U"/sunset-*.timer | wc -l | tr -d ' ')" = 14
+check "second camera units installed for the user" grep -qx 'EnvironmentFile=/home/tester/sunset/sunset2.env' "$U/sunset-capture2.service"
 check "diag installed" test -x "$R/usr/local/bin/diag"
 check "LED rule installed" test -f "$R/etc/udev/rules.d/90-sunset-leds.rules"
 check "watchdog setting installed" test -f "$R/etc/systemd/system.conf.d/sunset-watchdog.conf"
@@ -59,6 +60,9 @@ check "try-restart comes after daemon-reload" test "${t:-0}" -gt "${r:-99}"
 section "install.sh --enable"
 fix_root_; inst --enable
 check "capture, sync and dense timers enabled" grep -q 'systemctl enable --now sunset-capture.timer sunset-sync.timer sunset-dense.timer' "$STUB_CALLS"
+check "no second camera without sunset2.env" bash -c "! grep -q 'sunset-capture2.timer' '$STUB_CALLS'"
+fix_root_; mkdir -p "$R/home/tester/sunset"; echo CAM_NAME=cm4city > "$R/home/tester/sunset/sunset2.env"; inst --enable
+check "second camera timers enabled with sunset2.env" grep -q 'systemctl enable --now sunset-capture2.timer sunset-dense2.timer' "$STUB_CALLS"
 
 section "install.sh: unknown option and missing user"
 fix_root_; inst --bogus; rc=$?
@@ -98,6 +102,21 @@ check "--uc517 leaves an existing cam0 line alone" grep -qx 'dtoverlay=imx477,ca
 fix_root_; sed -i '/^\[all\]/,$d' "$R/$cfg"
 inst --uc517-cam0
 check "no [all] section: overlay appended" grep -qx 'dtoverlay=imx477,cam0' "$R/$cfg"
+
+section "install.sh --cm4-two: both CM4 camera ports (2026-11-17)"
+fix_root_; inst --cm4-two; rc=$?
+check "exits 0" test "$rc" = 0
+check "cam0 line" grep -qx 'dtoverlay=imx477,cam0' "$R/$cfg"
+check "cam1 line" grep -qx 'dtoverlay=imx477,cam1' "$R/$cfg"
+check "exactly two imx477 lines" test "$(n_overlay)" = 2
+first="$(cksum < "$R/$cfg")"
+inst --cm4-two
+check "second run: no change" test "$(cksum < "$R/$cfg")" = "$first"
+inst --uc517-cam0
+check "--uc517-cam0 afterwards keeps the cam1 line" grep -qx 'dtoverlay=imx477,cam1' "$R/$cfg"
+check "--uc517-cam0 afterwards: still two lines" test "$(n_overlay)" = 2
+fix_root_; inst --uc517-cam0; inst --cm4-two
+check "cam0 setup gains cam1" test "$(grep -c '^dtoverlay=imx477,cam0$' "$R/$cfg")$(grep -c '^dtoverlay=imx477,cam1$' "$R/$cfg")" = 11
 
 section "sunset-lowwear.sh: fstab, cmdline and files"
 fix_root_

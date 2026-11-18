@@ -17,3 +17,6 @@ sunset.env*
 
 # Local working notes, not part of the project
 windowtracking/
+
+# camera_check.py: the Pi's LAN addresses
+tools/camera_check.hosts

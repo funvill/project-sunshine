@@ -1,0 +1,9 @@
+[Unit]
+Description=Project Sunset dense frames, second camera (30 s after the first)
+
+[Timer]
+OnCalendar=*:*:30
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

@@ -106,6 +106,7 @@ and the final mount and hood. The longer backlog is at the end of `CLAUDE.md`.
 | `nas/` | The daily sunset video job (Python + ffmpeg in Docker) | [nas/README.md](nas/README.md) |
 | `experiments/` | Pilot experiment runner and the hourly weather log. Not part of production capture | Issue #3 |
 | `tools/` | PC-side helpers: `build_video.py` (builds one day's Instagram video and prints its sky score, no AI), `fuse_sunset.py` (merges the sunset bracket so the sunset isn't blown out), `issue_blur.py` (blurs the nearby buildings in images posted to issues), `fog_scan.py` (measures how clear each frame is, to find fog or condensation, #33; measuring only, no alert) | [Building a video](#building-a-days-video-by-hand) |
+| `reports/` | A page of every day of the wide camera: the sunset point as a 100 px thumbnail, the sky score (with an SVG graph), frames taken and missed, the forecast at sunset, the Pi's health and the day's events. Made by `tools/build_reports.py`; can be a few weeks behind | [Reports](#reports) |
 | `homeassistant/` | The stale-frame alert, copied into Home Assistant by hand | [Pi setup guide](docs/setup.md#home-assistant-alert) |
 | `tests/` | Offline tests with a stubbed camera and NAS | Below |
 | `docs/` | Pi setup guide and hardware notes | [hardware notes](docs/hardware/README.md) |
@@ -151,8 +152,34 @@ Set `SUNSET_NAS` once on the PC to the `project_sunshine` folder on the share (f
 that experiment run's sunset bracket first and blends each sunset minute with its neighbours (1:2:1, to
 calm the cloud flicker; `--no-blend` to skip it), `--fuse-production` does the same with the production
 bracket (the `_ev0`/`_ev-2` frames that `BRACKET=1` saves beside each sunset frame, #10) instead of an
-experiment run, and `--redo` builds a day again. The camera's `crop.json`
+experiment run, and `--redo` builds a day again. Optional fixes, off unless asked for: `--dusk-gains R,B`
+re-colours the frames after sunset as if shot with fixed colour gains (on `cm4wide` its night gains
+`2.20,2.80`, which turn auto white balance's teal dusk blue), coming in over `--dusk-ramp` minutes (5,15);
+`--deflicker MIN` steadies the brightness of the 1-a-minute frames area by area over that many minutes
+either side (3 calmed Nov 12's glow from a 147-164-146 swing to 152-154); `--blend-weights 1,2,3,2,1`
+widens the neighbour blend; `--fuse-until FROM,TO` moves the merge's fade-out (default 5,12 minutes
+after sunset), which the production bracket allows later, e.g. `30,40`. Changing any of them on a day already built needs `--redo`. The Nov 12
+video with both: `--dusk-gains 2.20,2.80 --deflicker 3`. The camera's `crop.json`
 (calibration, tighter view, tower blur) is `nas/crop.cm4wide.json`.
+
+### Reports
+
+`reports/index.html` is rebuilt by `tools/build_reports.py`, with no AI, whenever the project is updated, so
+it can be a few weeks behind. It reads the frames on the NAS (the `nas` line of the git-ignored
+`tools/camera_check.hosts`, or `--frames`) and only redoes new days and the last two:
+
+```bash
+python tools/build_reports.py            # --camera cm4wide by default; --redo rebuilds every day
+```
+
+One row a day, newest first: a 100 x 100 thumbnail of the point where the sun meets the horizon, from the
+frame nearest sunset whatever the weather (its column from the calibration in `nas/crop.cm4wide.json`, its
+row from `HORIZON_Y` in the script, the tower blur applied first), the sky score by the NAS job's own
+functions, the sunset time and bearing, frames taken and missed, the Open-Meteo forecast at sunset, the
+Pi's health from the frames' `System` blocks, and the `**Event:**` entries of that day in `changelog.md`.
+`reports/sky-scores.svg` is the score graph. A new camera position needs its horizon row added to
+`HORIZON_Y`, or its days get no thumbnail. Open the page through a local server
+(`python -m http.server --directory reports`) or a browser; GitHub shows HTML as source.
 
 ## Rules
 
