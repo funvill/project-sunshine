@@ -114,7 +114,7 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
     name the city only; a licensed music track; posting starts only once the sky score gates it, at
     a threshold of **60** (retune later). Login method still open.
   - **Monitoring (#22):** no outside heartbeat.
-  - **UPS cells (#29):** name-brand Li-ion, so firmware 1.6 stays and R20 must be changed to 576k.
+  - **UPS cells (#29):** Li-ion on firmware 1.6. **R20 stays as fitted (Steven, 2026-11-16: the boards won't be modified)**, so the board stops charging at about 3.5-3.6 V per cell.
 - Capture every **5 min, 24/7**, day and night (changed from 15 min on 2026-11-07 at Steven's
   request). Every frame keeps its DNG, and dark slots still add the night frame, so this is
   about 3x the data: an estimated 8-15 GB a day on the NAS, and a full SD card now holds about
@@ -435,7 +435,7 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   Li-ion cells need R20 changed to 576k plus Li-ion firmware 1.6 to charge fully. **Decided 2026-11-15: run
   the 34T Li-ion cells with the R20 change and firmware 1.6**, charge temperatures limited to 5-45 °C. As found,
   the board was unconfigured LiFePO4 firmware v1.1; flashed to v1.6 Li-ion on 2026-11-15 (R20 not yet changed),
-  then set `CAPACITY` 3400 mAh and `CHG_TEMP_WARM`/`HOT` 40/45 °C.
+  then set `CAPACITY` 3400 mAh (2500 from Nov 17, for the new cells) and `CHG_TEMP_WARM`/`HOT` 40/45 °C.
   **Integration decided 2026-11-16 (plan on #29):** status read by our own stdlib Python reader over
   `/dev/hidraw` (Mini-Box's `0x81`/`0x83` status messages, read-only), not NUT; `~/sunset/ups.log`
   written only when a value changes beyond its deadband, on events, and a keyframe every 4 h (minimal SD
@@ -444,8 +444,9 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   (a halted Pi stays off if mains returns before the UPS cuts out); HA alert later; `ups_source` and
   `ups_charge_pct` in each frame's `System` block after the pending `sunset-meta.py` work merges. The flasher (`HIDBootLoader.exe`) comes from
   Mini-Box's OpenUPS (v1) firmware pack; never flash that pack's hex files. **Reader built 2026-11-16, not installed:** `pi/sunset-ups.py` (`--once`, `--raw`, `--run`), `pi/systemd/sunset-ups.service` (root, not yet in `install.sh`), `tests/test_ups.py`. Bench-tested on the PC in WSL (USB passed through with usbipd-win, busid 1-14) against the real board: steady values wrote only keyframes, and an unplug wrote one lost and one found line. Settings are `UPS_*` in `sunset.env` (defaults in the script). Deadbands to tune once the cells are in. Bench runs: `tools/ups_bench.py` (WSL as root; summarises the log, warns on cells under 2.5 V).
+  **Cells fitted 2026-11-16 (5:46 pm, 00:46 UTC Nov 17):** three charged Li-ion 18650s (4.17 V, matched; rated 2,500 mAh each, model not recorded; `CAPACITY` set to 2500, 03:57 UTC Nov 17), so the Li-ion route stands (firmware 1.6). **R20 stays unchanged (decided 2026-11-16)**: the cells start full and settle at the board's ~3.5-3.6 V charge stop, trading runtime for cell life. The board wakes from ship mode on P10 or input power; a 12 V supply is too low to count as mains, so it runs from the cells. Reader bench-tested on battery (values match the tool, `low_battery` fires). **Steven chose to keep the 24 V 1 A supply (2026-11-16)**, though it reads just over the 24 V input limit (board 24.24 V); a 15 V supply is on the shopping list as the fallback. Mains lost/back by hand: the output goes 24.2 V on mains, 12.4 V on cells (both inside the MyPi XT's 9-28 V). The reader logged each switch once (`mains_lost`/`mains_back`, no flapping; bench run 03:48-03:56 UTC Nov 17).
   **No cells (2026-11-16):** the three 34Ts read 1.14-1.18 V (over-discharged) and were recycled with Steven's other 18650s. New cells are Steven's to buy. **Decided 2026-11-16: name-brand Li-ion** (e.g. Samsung 35E or LG MJ1, matched set of three), so firmware 1.6 stays, R20 goes to 576k and `CAPACITY` is set to the cells' rating. The options were: **LiFePO4** (e.g. Lithium Werks APR18650M1B, ~1.1 Ah, ~1.5-2 h on the CM4): no R20 change, but reflash Mini-Box's LiFePO4 firmware 1.5 and set CAPACITY again; safer and longer-lived at a sunny window. Name-brand Li-ion keeps firmware 1.6 and needs the R20 change (~6 h). Cheap or salvaged Li-ion is fine for the bench only (it charges to ~3.6 V/cell until R20 is changed). Measure every cell first: matched within 0.05 V, none under 2.5 V.
-  **Next, in order:** choose the cells; flash or solder to match; adapter ≥13 V (15-19 V) and set `OUT_VOLTAGE` at or above it; bench run with cells (`ups_bench.py --low-cell 3.8`, unplug the adapter for mains lost/back), tune deadbands and check `RTE` units; add the unit to `install.sh` and a `docs/setup.md` section; install on `sunshine` with Steven's OK; then `ups_source`/`ups_charge_pct` in `sunset-meta.py` and the HA alert. Steps and status in issue #29.
+  **Next, in order:** check the P2-to-MyPi cable polarity; once the cells settle at the charge stop, check the board's charge % and set `UPS_LOW_CELL_V`/`UPS_LOW_PCT` and the deadbands to suit (3.45 V may be too close to ~3.55 V), measure the runtime and check `RTE` units; add the unit to `install.sh` and a `docs/setup.md` section; install on `sunshine` with Steven's OK; then `ups_source`/`ups_charge_pct` in `sunset-meta.py` and the HA alert. Steps and status in issue #29.
 - **Wyze Cam v2** ×several — not for this project (no RAW/manual control). Possible Home Assistant
   cameras via Thingino firmware.
 - Sony NEX-5 and Samsung NX200: rejected (no USB remote control, mechanical shutter only).

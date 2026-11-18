@@ -16,6 +16,10 @@ spec.loader.exec_module(ups)
 
 REAL_82 = bytes.fromhex("82000000000000000000000000e401e601e601000000000000010000ff070016")
 REAL_84 = bytes.fromhex("84008602ae02000000030f0032000000ffff0000000000000000200100000f01")
+# Same board on 2026-11-17 with three charged Li-ion cells and a 12.5 V supply (too low for the
+# board to call it mains), so running from the cells.
+BATT_82 = bytes.fromhex("82ec308a30cc30431044104510e501e901ef010000000000c0310000c0070016")
+BATT_84 = bytes.fromhex("84008602ae02000005060f044b00ff07ffff0000000000000000303300050f17")
 
 
 def put16(b, i, v):
@@ -82,6 +86,18 @@ class Decode(unittest.TestCase):
         self.assertEqual(s["present"], [False, False, False])
         self.assertIsNone(s["rte_min"])
         self.assertEqual(s["vin"], 0.0)
+
+    def test_real_on_battery_reply(self):
+        s = ups.decode(BATT_82, BATT_84)  # matches the Windows tool's screen at the same moment
+        self.assertEqual(s["source"], "battery")
+        self.assertEqual(s["cells"], [4.163, 4.164, 4.165])
+        self.assertAlmostEqual(s["vbat"], 12.492)
+        self.assertAlmostEqual(s["vin"], 12.524)
+        self.assertAlmostEqual(s["vout"], 12.426)
+        self.assertEqual(s["present"], [True, True, True])
+        self.assertEqual(s["pct"], 75)
+        self.assertEqual(s["ups_state"], "06")
+        self.assertEqual(s["temps"], [23, 23, 24])
 
     def test_sources_and_values(self):
         s = reply("battery", vin=0.0, cells=(3.80, 3.81, 3.79), idchg=0.35, pct=60, rte=320)
