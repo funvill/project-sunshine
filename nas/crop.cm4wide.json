@@ -60,11 +60,11 @@
         {
           "date": "2026-11-12",
           "f_px": 1880.0,
-          "az0_deg": 261.7,
-          "marks": 5,
-          "az_min": 257.5,
-          "az_max": 294.6,
-          "note": "cm4wide + 3.2 mm lens. Fitted to 5 skyline landmarks (two near towers, a third tower, two downtown spikes) whose bearings come from the wide camera's pilot-3 fit; residuals 8 px or less. Sunset at 243 deg is an extrapolation 14 deg past the nearest landmark. Check against a clear sunset."
+          "az0_deg": 263.9,
+          "marks": 22,
+          "az_min": 236.7,
+          "az_max": 240.8,
+          "note": "Fitted to the sun on 2026-11-16 (Nov 17 00:05-00:26 UTC, 22 dense ev-2 frames, elevation 2.8 to 0.1 deg): median 263.94, spread 263.76-264.11. f kept at 1,880 px (the sun moved 122 px where the fit predicts 118). Replaces the skyline-landmark fit of 2026-11-12 (261.7 deg, 5 marks), which put the sun about 85 px too far right: the landmarks' bearings came from the wide camera's pilot-3 estimate. Camera unmoved horizontally from Nov 12 to Nov 16 (phase correlation 0-2 px; a 19-23 px vertical shift on Nov 16)."
         }
       ]
     },
@@ -126,7 +126,7 @@
           "marks": 534,
           "az_min": 242.7,
           "az_max": 297.7,
-          "note": "Carried over from the cm4-window-1 fit after the move of 2026-11-17, not fitted to landmarks: a homography between the Nov 16 06:00 UTC and Nov 17 06:50 UTC night frames (534 matched points) maps the new frame centre to 272.3 deg through the old fit (f 1,880 px, 261.7 deg); scale across the centre 0.996, so f is kept. Inherits the old fit's limits (landmarks 257-295 deg). Blur boxes moved through the same homography; the far-left one is now out of frame. View 40 px shorter to keep the balcony rail out. sky_full_warm kept from the old position: recheck on a clear sunset."
+          "note": "Carried over from the cm4-window-1 fit after the move of 2026-11-17, not fitted to landmarks: a homography between the Nov 16 06:00 UTC and Nov 17 06:50 UTC night frames (534 matched points) maps the new frame centre to 272.3 deg through the old fit (f 1,880 px, 261.7 deg); scale across the centre 0.996, so f is kept. Inherits the old fit's limits (landmarks 257-295 deg). Blur boxes moved through the same homography; the far-left one is now out of frame. View 40 px shorter to keep the balcony rail out. sky_full_warm kept from the old position: recheck on a clear sunset. Checked on the sun on 2026-11-17 (22 ev-2 frames, 00:05-00:26 UTC): 272.07 deg, 0.23 deg (8 px) from this value, so kept."
         }
       ]
     }

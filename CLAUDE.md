@@ -134,8 +134,9 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
 - **Instagram video from the CM4 camera (2026-11-12, Steven's requests):** starts at 07:30 local
   (`VIDEO_START_LOCAL`), handle `@funvill`, and a small third line `Burnaby, BC, Canada   WSW 243°`
   (place and the bearing at the middle of the crop). The near towers get a light blur (`blur` boxes in
-  `crop.json`). The caption still has no location. `cm4wide` is calibrated from skyline landmarks
-  (f 1,880 px, 261.7° at the centre; `nas/crop.cm4wide.json`), not yet checked on a clear sunset. Build
+  `crop.json`). The caption still has no location. `cm4wide` is calibrated on the sun's disc in the ev-2 frames
+  (`nas/crop.cm4wide.json`, f 1,880 px): `cm4-window-1` 263.9° at the centre (Nov 16; the skyline-landmark
+  fit of 261.7° was 2.2° off), `cm4-window-3` 272.3°, checked on the Nov 17 sun (272.07°). Build
   a day with `tools/build_video.py`, no AI. The crop `view` is top 100, height 2440 (2026-11-13): as
   tall as it can be without the lower balcony in the corner (2,560 showed a sliver of rail). Steven
   said the merged sunset exposure (`fuse_sunset.py`, option E) looks better, so it is the way the
