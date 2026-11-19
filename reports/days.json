@@ -1,6 +1,6 @@
 {
  "camera": "cm4wide",
- "generated_utc": "2026-11-18T23:20:25Z",
+ "generated_utc": "2026-11-19T06:04:40Z",
  "days": [
   {
    "date": "2026-11-12",
@@ -259,6 +259,41 @@
    },
    "weather": null,
    "thumbnail": "thumbs/cm4wide/2026-11-17.jpg",
+   "thumbnail_note": null,
+   "camera": "cm4wide"
+  },
+  {
+   "date": "2026-11-18",
+   "weekday": "Wed",
+   "frames": {
+    "regular": 216,
+    "expected": 288,
+    "missing_slots": 72,
+    "dense": 73,
+    "bracket_pairs": 75,
+    "night": 94,
+    "largest_gap_min": 365.0
+   },
+   "pi": {
+    "cpu_max_c": 38.5,
+    "reboots": 0,
+    "throttled": [],
+    "outbox_max_files": 618,
+    "wifi_dbm_median": -53
+   },
+   "setup_ids": [
+    "cm4-window-3"
+   ],
+   "events": [],
+   "sunset_local": "17:26",
+   "sunset_bearing_deg": 241,
+   "sky": {
+    "score": 27,
+    "label": "some colour",
+    "warm_sky_percent": 5.08
+   },
+   "weather": null,
+   "thumbnail": "thumbs/cm4wide/2026-11-18.jpg",
    "thumbnail_note": null,
    "camera": "cm4wide"
   }
