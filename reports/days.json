@@ -1,6 +1,6 @@
 {
  "camera": "cm4wide",
- "generated_utc": "2026-11-19T06:04:40Z",
+ "generated_utc": "2026-11-19T06:20:50Z",
  "days": [
   {
    "date": "2026-11-12",
@@ -266,19 +266,19 @@
    "date": "2026-11-18",
    "weekday": "Wed",
    "frames": {
-    "regular": 216,
+    "regular": 217,
     "expected": 288,
-    "missing_slots": 72,
-    "dense": 73,
-    "bracket_pairs": 75,
+    "missing_slots": 71,
+    "dense": 75,
+    "bracket_pairs": 79,
     "night": 94,
-    "largest_gap_min": 365.0
+    "largest_gap_min": 360.0
    },
    "pi": {
     "cpu_max_c": 38.5,
     "reboots": 0,
     "throttled": [],
-    "outbox_max_files": 618,
+    "outbox_max_files": 640,
     "wifi_dbm_median": -53
    },
    "setup_ids": [
