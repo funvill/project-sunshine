@@ -52,6 +52,7 @@ UTC = dt.timezone.utc
 HORIZON_Y = {
     "cm4-window-1": 1300,    # Nov 13 00:05 UTC frame, skyline row at the sunset bearing
     "cm4-window-3": 1310,    # Nov 18 00:22 UTC, the sun's disc at 0.5 deg elevation
+    "cm4-window-4": 1310,    # the foam hood, Nov 20: camera unmoved (under 1 px), so as cm4-window-3
 }
 THUMB_SIZE = 100             # pixels, square; the page shows it at this size
 THUMB_REGION = 400           # full-frame pixels the thumbnail covers (about 12 deg on the 3.2 mm lens)
