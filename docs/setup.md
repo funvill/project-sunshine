@@ -124,6 +124,36 @@ hard freeze, since it only holds what the kernel managed to write.
   transient experiment timers (`exp-*`).
 - It keeps its state in RAM (`/run/sunset-netwatch`) and writes `~/sunset/netwatch.log` only when it acts.
 - Tune with `NETWATCH_IFACE`, `NETWATCH_RESET_MIN`, `NETWATCH_REBOOT_MIN`, `NETWATCH_REBOOT_GAP_H`.
+- It watches `wlan0` only: if the Wi-Fi is gone it reboots after 30 minutes even when wired Ethernet
+  is up (it did on 2026-11-20, while the new dongle had no driver).
+
+**AIC8800 Wi-Fi dongle (CM4, from 2026-11-20).** The CM4's dongle is an AIC8800D80 (USB
+`a69c:5723` at power-up, a69c:8d81 once running), on 5 GHz. Its driver isn't in the kernel, and this
+unit has the older MCU revision (`chip_id=7, chip_mcu_id=1` in `dmesg`): with the current AIC
+firmware the upload stalls at `0x170400` ("bin upload fail: 170400, err:-32", radxa-pkg/aic8800#49).
+It needs the older V3 firmware set and the loader that matches it, from the `legacy-mcu1` branch of
+`github.com/shenmintao/aic8800d80` (its D80 firmware is byte-identical to Radxa's SDK V3, commit
+`254d47e`; `fmacfw_8800d80_u02.bin` is 327,037 bytes, SHA-256 `1ec680c2b63d...`). What is on the CM4:
+
+1. The disk eject: `pi/sunset-aic-eject` in `/usr/local/sbin/` (mode 755) and
+   `pi/90-sunset-aic8800.rules` in `/etc/udev/rules.d/`. Without them the dongle stays a disk.
+2. The firmware: the branch's `fw/aic8800D80/` copied to `/lib/firmware/aic8800D80/`.
+3. The modules `aic_load_fw.ko` and `aic8800_fdrv.ko` in
+   `/lib/modules/6.12.109+rpt-rpi-v8/updates/aic8800/`, then `depmod -a 6.12.109+rpt-rpi-v8`. They
+   load by themselves when the dongle appears. The branch's `aic_zlp_quirk` (a Bluetooth fix that
+   hooks the kernel with kprobes) and `aic_btusb` are not installed.
+4. NetworkManager's saved Wi-Fi connection, which it already had from the old dongle.
+
+Building the modules (the CM4 runs the 64-bit kernel on 32-bit userland, so it cross-builds on
+itself): `apt-get install gcc-aarch64-linux-gnu make`; `apt-get download
+linux-headers-6.12.109+rpt-rpi-v8:arm64` and unpack it with `dpkg -x` (installing it wants an arm64
+`gcc-12`, which can't be installed here), copy its `usr/src/linux-headers-6.12.109+rpt-rpi-v8` to
+`/usr/src/` and link `/lib/modules/6.12.109+rpt-rpi-v8/build` to it (its `scripts` link uses the
+installed 32-bit `linux-kbuild-6.12.109+rpt`, which works for any target); then in the branch's
+`drivers/aic8800`: `make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-
+KDIR=/lib/modules/6.12.109+rpt-rpi-v8/build` (about 3 minutes; `nice -n 19` keeps capture unaffected).
+A new kernel needs the modules rebuilt the same way, which is one more reason not to update it.
+Not yet tested: the network watchdog's software replug (a USB unbind and rebind of the running dongle).
 
 ## 6. Freeze it
 After a week of clean running: disable unattended upgrades and save a full image of the card (or

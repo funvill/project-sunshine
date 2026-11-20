@@ -1,0 +1,4 @@
+# Project Sunset: the CM4's AIC8800 Wi-Fi dongle (a69c:5723) powers up as a driver disk.
+# Eject it so it becomes a69c:8d80/8d81. Install to /etc/udev/rules.d/ with
+# pi/sunset-aic-eject in /usr/local/sbin/ (docs/setup.md, "AIC8800 Wi-Fi dongle").
+ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="sd*", ATTRS{idVendor}=="a69c", ATTRS{idProduct}=="5723", RUN+="/usr/local/sbin/sunset-aic-eject /dev/%k"

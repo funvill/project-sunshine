@@ -388,7 +388,9 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   capture through `sunset-capture.service` (2026-11-11 23:44 UTC) went through cleanly and synced to
   `project_sunshine/cm4wide/`.
   **At the window from 2026-11-12 ~00:30 UTC** (`SETUP_ID=cm4-window-1`), on Wi-Fi through an old
-  Buffalo 2.4 GHz USB dongle (about 2.4 Mbit/s to the NAS). **Capturing since
+  Buffalo 2.4 GHz USB dongle (about 2.4 Mbit/s to the NAS). **Replaced 2026-11-20 by an AIC8800D80
+  dongle on 5 GHz (about 88 Mbit/s)**, which needs an out-of-tree driver built for the running kernel
+  (`docs/setup.md`, "AIC8800 Wi-Fi dongle"); Ethernet is going away, so Wi-Fi is the CM4's only link. **Capturing since
   2026-11-12 00:35 UTC** (Steven's go-ahead): the 5-minute, dense and sync timers, same schedule as
   `timelaps`. HA has a separate CM4 alert (`cm4wide`) from 2026-11-12, same 60-minute limit, also
   sent to the phone.
