@@ -83,7 +83,7 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   - **Cameras are chosen by port ID** (`CAMERA=i2c@0` / `i2c@1`): with both ports on, rpicam calls
     CAM1 camera 0. `install.sh --cm4-two` writes both overlays.
   - **Diag mode pauses capture** of both cameras while it is on; the page has a camera switch.
-  - Temporary wired Ethernet on the CM4 besides the Wi-Fi dongle (addresses only in the git-ignored `tools/camera_check.hosts`).
+  - The CM4 is on Wi-Fi only from 2026-11-20 (Steven unplugged the temporary wired Ethernet); addresses only in the git-ignored `tools/camera_check.hosts`, whose `key=` word lets the Wi-Fi address use the wired one's host key.
   - **`nas/crop.cm4wide.json` re-fitted for the new heading** (new calibration from 2026-11-17).
 - **Decisions of 2026-11-16 (Steven, walked through the open issues; details on each issue):**
   - **Storage (#5, #9), reversed the same day:** no DNGs. **`SAVE_RAW=0` on both Pis from 09:15 UTC

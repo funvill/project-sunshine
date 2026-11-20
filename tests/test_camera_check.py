@@ -63,6 +63,21 @@ class Vancouver(unittest.TestCase):
         self.assertEqual(cc.van(t("2026-11-18T00:27:00Z")).strftime("%Y-%m-%d %H:%M"), "2026-11-17 17:27")
 
 
+class HostLine(unittest.TestCase):
+    # A hosts line can name the known_hosts entry to check the key against: the CM4's Wi-Fi address
+    # isn't in known_hosts, its wired one is, and both are the same machine (2026-11-20).
+    def test_plain(self):
+        self.assertEqual(cc.host_line("pi@10.0.0.5"), ("pi@10.0.0.5", []))
+
+    def test_key_alias(self):
+        self.assertEqual(cc.host_line("pi@10.0.0.7 key=10.0.0.5"),
+                         ("pi@10.0.0.7", ["-o", "HostKeyAlias=10.0.0.5"]))
+
+    def test_unknown_word_is_refused(self):
+        with self.assertRaises(ValueError):
+            cc.host_line("pi@10.0.0.7 port=22")
+
+
 class Parse(unittest.TestCase):
     def test_sections(self):
         d = cc.parse("### now\n2026-11-17T10:00:00Z\n### empty\n### newest\na /x/a_1.jpg\n")

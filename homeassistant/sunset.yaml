@@ -54,10 +54,14 @@ command_line:
       command_timeout: 30
 
   # ---- The CM4's UPS (issue #29), from the newest cm4wide frame: "mains 100", "battery 87", "unknown ..." ----
+  # The state is that line (the alert reads it); every reading is an attribute, and the template
+  # sensors below turn them into numbers Home Assistant graphs and keeps statistics for.
   - sensor:
       name: Sunset UPS
       unique_id: sunset_ups
-      command: "sh /config/sunset/sunset_ups.sh cm4wide"
+      command: "sh /config/sunset/sunset_ups.sh cm4wide --json"
+      value_template: "{{ value_json.state }}"
+      json_attributes: [power, charge_pct, input_v, output_v, pack_v, cell1_v, cell2_v, cell3_v, cell1_c, cell2_c, cell3_c]
       scan_interval: 120
       command_timeout: 30
 
@@ -182,6 +186,81 @@ template:
         delay_on: "00:10:00"
         state: "{{ states('sensor.sunset_cm4_daily_health') != 'ok' }}"
 
+  # The UPS readings as numbers, for graphs and long-term statistics. A reading the frame doesn't have
+  # makes the sensor unavailable (a gap in the graph), never 0. Input voltage is the mains side: about
+  # 15.2 V on mains, 0 on the cells. The board reports no current or run time on battery (#29).
+  - sensor:
+      - name: Sunset UPS charge
+        unique_id: sunset_ups_charge
+        unit_of_measurement: "%"
+        device_class: battery
+        state_class: measurement
+        state: "{{ state_attr('sensor.sunset_ups', 'charge_pct') }}"
+        availability: "{{ state_attr('sensor.sunset_ups', 'charge_pct') is number }}"
+      - name: Sunset UPS input voltage
+        unique_id: sunset_ups_input_voltage
+        unit_of_measurement: "V"
+        device_class: voltage
+        state_class: measurement
+        state: "{{ state_attr('sensor.sunset_ups', 'input_v') }}"
+        availability: "{{ state_attr('sensor.sunset_ups', 'input_v') is number }}"
+      - name: Sunset UPS output voltage
+        unique_id: sunset_ups_output_voltage
+        unit_of_measurement: "V"
+        device_class: voltage
+        state_class: measurement
+        state: "{{ state_attr('sensor.sunset_ups', 'output_v') }}"
+        availability: "{{ state_attr('sensor.sunset_ups', 'output_v') is number }}"
+      - name: Sunset UPS pack voltage
+        unique_id: sunset_ups_pack_voltage
+        unit_of_measurement: "V"
+        device_class: voltage
+        state_class: measurement
+        state: "{{ state_attr('sensor.sunset_ups', 'pack_v') }}"
+        availability: "{{ state_attr('sensor.sunset_ups', 'pack_v') is number }}"
+      - name: Sunset UPS cell 1 voltage
+        unique_id: sunset_ups_cell_1_voltage
+        unit_of_measurement: "V"
+        device_class: voltage
+        state_class: measurement
+        state: "{{ state_attr('sensor.sunset_ups', 'cell1_v') }}"
+        availability: "{{ state_attr('sensor.sunset_ups', 'cell1_v') is number }}"
+      - name: Sunset UPS cell 2 voltage
+        unique_id: sunset_ups_cell_2_voltage
+        unit_of_measurement: "V"
+        device_class: voltage
+        state_class: measurement
+        state: "{{ state_attr('sensor.sunset_ups', 'cell2_v') }}"
+        availability: "{{ state_attr('sensor.sunset_ups', 'cell2_v') is number }}"
+      - name: Sunset UPS cell 3 voltage
+        unique_id: sunset_ups_cell_3_voltage
+        unit_of_measurement: "V"
+        device_class: voltage
+        state_class: measurement
+        state: "{{ state_attr('sensor.sunset_ups', 'cell3_v') }}"
+        availability: "{{ state_attr('sensor.sunset_ups', 'cell3_v') is number }}"
+      - name: Sunset UPS cell 1 temperature
+        unique_id: sunset_ups_cell_1_temperature
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ state_attr('sensor.sunset_ups', 'cell1_c') }}"
+        availability: "{{ state_attr('sensor.sunset_ups', 'cell1_c') is number }}"
+      - name: Sunset UPS cell 2 temperature
+        unique_id: sunset_ups_cell_2_temperature
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ state_attr('sensor.sunset_ups', 'cell2_c') }}"
+        availability: "{{ state_attr('sensor.sunset_ups', 'cell2_c') is number }}"
+      - name: Sunset UPS cell 3 temperature
+        unique_id: sunset_ups_cell_3_temperature
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ state_attr('sensor.sunset_ups', 'cell3_c') }}"
+        availability: "{{ state_attr('sensor.sunset_ups', 'cell3_c') is number }}"
+
 alert:
   sunset_cm4_frames_stale:
     name: Project Sunset CM4 has no new frames
@@ -270,7 +349,8 @@ alert:
       {% set ups = states('sensor.sunset_ups') %}
       {% if ups.startswith('battery') %}The CM4 (sunshine) lost mains power and is running on the UPS cells, {{ ups.split(' ')[1] if ' ' in ups else '?' }}% charge.
       At low battery the Pi pauses capture and waits for mains (issue #29).
-      {% else %}Home Assistant can't tell whether the CM4 is on mains: the UPS reads "{{ ups }}" (no frame JSON, or the UPS monitor's status is stale).{% endif %}
+      {% elif ups in ['unknown', 'unavailable', ''] %}Home Assistant has no UPS reading yet: it may have just restarted (it reads a frame within 2 minutes), or no recent frame JSON is readable.
+      {% else %}Home Assistant can't tell whether the CM4 is on mains: the UPS reads "{{ ups }}" (the UPS monitor's status is stale or missing).{% endif %}
     done_message: The CM4 is back on mains power.
     notifiers:
       - persistent_notification

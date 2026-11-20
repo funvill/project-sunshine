@@ -16,7 +16,8 @@ repo (step 4).
    ```
 
    It tries the hosts in `tools/camera_check.hosts` in order (git-ignored, LAN addresses never go in
-   the repo). If none answers, say so and stop. An ssh "host key changed" error is Steven's to
+   the repo). A line can add `key=<address>` to check the host key under another address of the same
+   machine: the CM4's Wi-Fi address uses the key known for its wired one. If none answers, say so and stop. An ssh "host key changed" error is Steven's to
    resolve: don't edit `known_hosts`.
 
 2. Look at each camera's `*_small.jpg` the script names (Read the file). Check:

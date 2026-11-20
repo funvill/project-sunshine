@@ -105,6 +105,20 @@ for eid, b in binaries.items():
         print("FAIL %s has no delay_on" % eid)
 result(reads_ok, "binary sensors read defined entities and all have delay_on")
 
+# The UPS numbers: template sensors reading attributes the UPS sensor really lists, with units.
+ups_sensor = sensors["sensor.sunset_ups"]
+result("--json" in ups_sensor["command"] and ups_sensor.get("value_template") == "{{ value_json.state }}",
+       "the UPS sensor reads --json and keeps the plain line as its state")
+numbers_t = [x for t in main["template"] for x in t.get("sensor", [])]
+result(len(numbers_t) == 10, "ten UPS number sensors (charge, 3 voltages, 3 cells x volts and temperature)")
+for t in numbers_t:
+    attr = re.findall(r"state_attr\('sensor\.sunset_ups', '([a-z0-9_]+)'\)", t["state"])
+    ok_attr = len(attr) == 1 and attr[0] in ups_sensor["json_attributes"] and attr[0] in t.get("availability", "")
+    result(ok_attr and t.get("unit_of_measurement") and t.get("state_class") == "measurement"
+           and t["unique_id"] == slug(t["name"]), "UPS number %s reads a listed attribute, has a unit, is graphed" % t["name"])
+allids = uids + [t["unique_id"] for t in numbers_t]
+result(len(allids) == len(set(allids)), "unique_ids are unique, the number sensors included")
+
 auto = [a for a in main["automation"] if a["id"] == "sunset_unacknowledge_alerts"][0]
 covered = set(auto["trigger"][0]["entity_id"])
 result(covered == {"alert." + k for k in alerts}, "the re-arm automation covers every alert")
