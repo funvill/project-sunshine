@@ -1,0 +1,19 @@
+#!/usr/bin/python3
+# Project Sunset: eject the AIC8800 Wi-Fi dongle's driver disk so it switches to Wi-Fi mode.
+#
+# The dongle (USB a69c:5723, "Aic MSC") powers up as a small USB disk holding a Windows driver.
+# Ejecting that disk makes it re-enumerate as a69c:8d80, where aic_load_fw uploads the firmware
+# and it becomes a69c:8d81 (wlan0). This does what `eject /dev/sdX` does (the CDROMEJECT ioctl,
+# which the kernel turns into SCSI START STOP UNIT with LoEj); the eject package isn't installed.
+# Run by pi/90-sunset-aic8800.rules. Setup: docs/setup.md, "AIC8800 Wi-Fi dongle".
+import fcntl
+import os
+import sys
+
+CDROMEJECT = 0x5309
+
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_NONBLOCK)
+try:
+    fcntl.ioctl(fd, CDROMEJECT)
+finally:
+    os.close(fd)

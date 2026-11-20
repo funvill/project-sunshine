@@ -2,6 +2,16 @@
 
 The history of Project Sunset, newest first: every change (code, settings, hardware, including changes made only on a Pi, marked **Pi**) and every event that affects the record (outages and lost frames, power cuts, camera moves, weather that matters, good sunsets, solstices, the moon, milestones). Dates are Vancouver local time; times are given in UTC and Vancouver. Decisions and their reasons are in `CLAUDE.md`.
 
+## 2026-11-19
+
+- **Event and change (Pi): new Wi-Fi dongle on the CM4, an AIC8800D80, now working on 5 GHz** (Steven swapped it at about 06:05 UTC Nov 20, 11:05 pm Nov 19). The old Buffalo dongle ran at about 2.4 Mbit/s and dropped for 2 minutes about 1.4 times an hour (10 drops in 7 h on Nov 18-19).
+  - **Outage:** from about 06:05 UTC there was no Wi-Fi: the new dongle came up as a USB disk (`a69c:5723`, "Aic MSC") with no Linux driver. Steven plugged in Ethernet at 06:13 UTC (11:13 pm). The NAS share had dropped with the network, so the syncs at 06:07 and 06:12 UTC failed ("share not mounted"). Opening the share at 06:16 UTC brought the automount back, and a sync then caught up (24 files). At 06:37 UTC (11:37 pm) the network watchdog rebooted the CM4 after 30 minutes without Wi-Fi, though Ethernet was up (it watches `wlan0` only).
+  - **No frames lost:** `cm4wide` took every 5-minute slot. Capture is local-first, and the frames reached the NAS after each gap.
+  - **Driver:** this dongle has the older MCU revision (`chip_id=7, chip_mcu_id=1`). Radxa's current AIC8800 driver uploaded the first firmware files, then stalled at `0x170400` every time ("bin upload fail: 170400, err:-32", 06:34 UTC), the failure in radxa-pkg/aic8800#49. What works is the matched V3 firmware set and loader from the `legacy-mcu1` branch of `shenmintao/aic8800d80` (D80 firmware byte-identical to Radxa's SDK V3). Built on the CM4 for the running kernel `6.12.109+rpt-rpi-v8` and installed with a udev rule that ejects the dongle's disk (`pi/sunset-aic-eject`, `pi/90-sunset-aic8800.rules`); steps in `docs/setup.md`. NetworkManager rejoined the saved Wi-Fi by itself at about 06:47 UTC (11:47 pm).
+  - **Tested:** with Ethernet disconnected, a NAS read ran at about 88 Mbit/s (5,200 MHz, signal -37 dBm, sending at 180 Mbit/s), and a sync went through. A test reboot at 06:52 UTC (11:52 pm) came back in about 75 s with the dongle switched and Wi-Fi up by itself. Not tested yet: the watchdog's software replug of this dongle, and a full day on Wi-Fi alone.
+  - **Installed on the CM4 for the build:** `gcc-aarch64-linux-gnu` (apt), the arm64 kernel headers unpacked by hand into `/usr/src/linux-headers-6.12.109+rpt-rpi-v8` (not registered with dpkg) with the `build` link to them, and the source in `~/aic-build`. A kernel update would need the modules rebuilt.
+- **Event: `cm4city` camera timeouts, 04:36 to 05:26 UTC Nov 20 (9:36 to 10:26 pm Nov 19).** Five captures failed with libcamera "Failed to queue buffer for Unicam Image" and "Device timeout", and the 05:00 UTC slot was lost (one frame). `cm4wide` was unaffected. Cause unknown; if it recurs, reseat the CAM1 ribbon.
+
 ## 2026-11-18
 
 - **Fix: the `cm4-window-1` calibration was 2.2° off; re-fitted on the sun** (Steven asked, about 06:30 UTC Nov 19, 11:30 pm Nov 18). Steven asked whether the report thumbnails really show the sunset point. Checked on the frames:
