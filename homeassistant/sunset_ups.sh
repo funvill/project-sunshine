@@ -12,7 +12,8 @@
 # Arguments: the camera name whose frames carry the UPS fields (cm4wide; cm4city has them too), and
 # optionally --json: one JSON line for Home Assistant's graphs, with "state" (the line above) and the
 # numbers: power (mains or battery), charge_pct, input_v, output_v, pack_v, cell1_v..cell3_v, cell1_c..cell3_c, from
-# System.ups. A value the frame doesn't have is null, never 0, so a graph shows a gap, not a false drop.
+# System.ups, and cpu_temp_c, the Pi's CPU temperature (System.cpu_temp_c in the same
+# frame). A value the frame doesn't have is null, never 0, so a graph shows a gap, not a false drop.
 CAM="${1:-cm4wide}"
 MODE="${2:-}"
 case "$CAM" in *[!A-Za-z0-9_-]*|"") echo "bad camera name: $CAM" >&2; exit 2 ;; esac
@@ -81,5 +82,6 @@ for i in range(3):
     out["cell%d_v" % (i + 1)] = item("cells", i) if ok else None
 for i in range(3):
     out["cell%d_c" % (i + 1)] = item("temps", i) if ok else None
+out["cpu_temp_c"] = number(system.get("cpu_temp_c"))    # the Pi's own, whatever the UPS status
 print(json.dumps(out))
 PY

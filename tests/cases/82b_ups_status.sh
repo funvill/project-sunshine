@@ -60,7 +60,7 @@ section "ups: --json gives every value, for Home Assistant's graphs"
 # json_field <field>: the field from the script's --json output, as Python prints it
 json_field() { sh "$SH" cm4wide --json | python3 -c "import json,sys; print(json.load(sys.stdin).get('$1'))"; }
 fresh_ups
-uframe cm4wide 20261120T175500Z '"battery"' 87 '"ups":{"ok":true,"source":"battery","pct":87,"vin":0.0,"vout":12.132,"vbat":12.177,"cells":[4.061,4.062,4.055],"temps":[20,21,22],"ichg":0.0,"idchg":0.0}'
+uframe cm4wide 20261120T175500Z '"battery"' 87 '"cpu_temp_c":47.2,"ups":{"ok":true,"source":"battery","pct":87,"vin":0.0,"vout":12.132,"vbat":12.177,"cells":[4.061,4.062,4.055],"temps":[20,21,22],"ichg":0.0,"idchg":0.0}'
 check "state is the plain line" test "$(json_field state)" = "battery 87"
 check "power" test "$(json_field power)" = battery
 check "charge %" test "$(json_field charge_pct)" = 87
@@ -71,12 +71,14 @@ check "cell 1 volts" test "$(json_field cell1_v)" = 4.061
 check "cell 3 volts" test "$(json_field cell3_v)" = 4.055
 check "cell 1 temperature" test "$(json_field cell1_c)" = 20
 check "cell 3 temperature" test "$(json_field cell3_c)" = 22
+check "CM4 CPU temperature from the same frame" test "$(json_field cpu_temp_c)" = 47.2
 check "one JSON line" test "$(sh "$SH" cm4wide --json | wc -l | tr -d ' ')" = 1
 fresh_ups
 uframe cm4wide 20261120T175500Z null null '"ups":{"ok":false,"error":"stale"}'
 check "stale: state says so" test "$(json_field state)" = "unknown stale"
 check "stale: no numbers (null, not 0)" test "$(json_field cell1_v)" = None
 check "stale: no charge" test "$(json_field charge_pct)" = None
+check "no cpu_temp_c in the frame gives null" test "$(json_field cpu_temp_c)" = None
 fresh_ups
 uframe cm4wide 20261120T175500Z '"mains"' 100 '"ups":{"ok":true,"source":"mains","pct":100,"vin":15.2,"cells":[4.1,null],"temps":"bad"}'
 check "short or bad lists give null, not an error" test "$(json_field cell2_v)/$(json_field cell3_v)/$(json_field cell1_c)" = "None/None/None"

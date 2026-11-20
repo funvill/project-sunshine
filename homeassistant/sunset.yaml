@@ -61,7 +61,7 @@ command_line:
       unique_id: sunset_ups
       command: "sh /config/sunset/sunset_ups.sh cm4wide --json"
       value_template: "{{ value_json.state }}"
-      json_attributes: [power, charge_pct, input_v, output_v, pack_v, cell1_v, cell2_v, cell3_v, cell1_c, cell2_c, cell3_c]
+      json_attributes: [power, charge_pct, input_v, output_v, pack_v, cell1_v, cell2_v, cell3_v, cell1_c, cell2_c, cell3_c, cpu_temp_c]
       scan_interval: 120
       command_timeout: 30
 
@@ -260,6 +260,14 @@ template:
         state_class: measurement
         state: "{{ state_attr('sensor.sunset_ups', 'cell3_c') }}"
         availability: "{{ state_attr('sensor.sunset_ups', 'cell3_c') is number }}"
+      # The CM4's CPU temperature, from the same frame (System.cpu_temp_c), read by the UPS script.
+      - name: Sunset CM4 CPU temperature
+        unique_id: sunset_cm4_cpu_temperature
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        state: "{{ state_attr('sensor.sunset_ups', 'cpu_temp_c') }}"
+        availability: "{{ state_attr('sensor.sunset_ups', 'cpu_temp_c') is number }}"
 
 alert:
   sunset_cm4_frames_stale:
