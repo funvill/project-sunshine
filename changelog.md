@@ -4,6 +4,10 @@ The history of Project Sunset, newest first: every change (code, settings, hardw
 
 ## 2026-11-20
 
+- **Pi (`sunshine`): the newer diag unit and `sunset-sun.py` from `main` deployed** (Steven, 16:20 UTC, 9:20 am). The old copies are in `~/sunset/.bak-20261120-diagsun/`. Nothing else on the Pi changed and no service was restarted. Before the copy, the Pi's `sunset-diag.py`, `diag`, `sunset-capture.sh` and `sunset-selftest.sh` were checked against `main` and matched.
+  - **Diag unit:** `/etc/systemd/system/sunset-diag.service` (and the copy in `~/sunset/systemd/`) now pauses both cameras' capture and dense timers while the diag page is on, and starts them again when it stops, times out or fails. It also reads `/run/sunset-diag.env`, which sets the camera the page starts on. Until now the diag page on `sunshine` left capture running. Written through a temp file, then `daemon-reload`; `systemd-analyze verify` is clean. Not yet tried with the page on.
+  - **`sunset-sun.py`:** adds the sun-in-view check (`view`, `view-calendar`, #32). No `VIEW_*` is set in either camera's env file, so frames are unchanged. The next-sunset output is the same as the old script's.
+  - **Checked:** the next frames from both cameras (`cm4wide_20261120T162500Z`, `cm4city_20261120T162530Z`) logged `meta=ok`, have the same `Sun` fields as before, and mark nothing unavailable. All six timers are running and no unit has failed.
 - **Pi (`sunshine`): the UPS monitor is installed and its status reaches the NAS** (Steven's go-ahead; issue #29). `sunset-ups.service` started at 07:24:52 UTC (00:24 am Nov 20) and is enabled. `sunset-ups.py`, `sunset-meta.py`, `sunset-sync.sh`, `install.sh`, `sunset.env.example` and two unit files were copied in (the old ones are in `~/sunset/.bak-20261120-ups/`). Nothing else on the Pi changed.
   - **First reading:** on mains, 100%; input 15.19 V, output 15.22 V; cells 4.13, 4.14 and 4.14 V; 17-19 °C; no charge or discharge current; firmware 1.6. So the board counts the 15 V supply as mains. The cells are still at their fitted 4.14 V, above the ~3.5-3.6 V charge stop, because they have not been cycled.
   - **Checked on the real thing:**
@@ -24,10 +28,7 @@ The history of Project Sunset, newest first: every change (code, settings, hardw
   - **Cause:** a first `install.sh --ups` run stopped because `~/sunset/systemd/` on the Pi had no second-camera unit files (they had been installed straight into `/etc`). On its way out, its `> unit` redirect emptied `/etc/systemd/system/sunset-capture2.service`. The `daemon-reload` that followed for the UPS unit loaded the empty unit, and the 07:25:30 timer failed on it.
   - **Fix:** the unit was restored from the repo (identical to what was there) at 07:25:31 and the timer restarted. It ran the slot at once (frame at 07:25:53) and has kept to schedule since.
   - **So it can't happen again:** `install.sh` now writes each unit through a temp file and stops before touching anything if a source file is missing (new test in `61_install_lowwear.sh`). The four second-camera unit files and `sunset2.env.example` are now in `~/sunset/` on the Pi.
-- **Found, not changed: `sunshine` runs older copies of two files than `main`.**
-  - `/etc/systemd/system/sunset-diag.service` lacks the lines that pause capture while the diag page is on.
-  - `~/sunset/sunset-sun.py` lacks the sun-in-view code (`view`, `VIEW_*`, #32).
-  - Deploying them is a separate step: a full `install.sh` run would install the newer diag unit.
+- **Found: `sunshine` ran older copies of two files than `main`:** the diag unit, which lacked the lines that pause capture while the page is on, and `sunset-sun.py`, which lacked the sun-in-view code. Both were deployed later the same day (above).
 
 ## 2026-11-19
 
