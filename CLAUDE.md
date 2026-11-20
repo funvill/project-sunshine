@@ -184,6 +184,9 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   running won't trigger it, and a reboot clears any transient `exp-*` timers. `sunset-kernlog.service` keeps kernel
   messages in `~/sunset/kernel.log` (up to two 1 MB files), flushed per line, because system logs
   are in RAM and are lost on reboot.
+- **Camera failure recovery (2026-11-20, Steven asked):** `sunset-camwatch.sh` (`CAMWATCH=1`) reboots
+  when one camera fails 3 captures within 60 minutes since boot, at most every 6 h. A window, not
+  "in a row": the Nov 19 failures were scattered. A reboot is the only fix known to work so far.
 - Freeze software once stable: pinned OS, no auto-updates, full SD image saved on the NAS.
 - Mount: 3D printed in **PETG or ASA** (not PLA — sun heat), stuck to glass with **3M VHB**
   (no suction cups), **keyed two-part design** so a replacement camera returns to the same framing,

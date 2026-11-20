@@ -1,12 +1,13 @@
 ---
 name: camera-check
-description: Health check of the Project Sunset capture Pi and its cameras. Use when Steven asks to "check camera", "check the cameras", "health check", "are the cameras OK", "is it still capturing", or similar.
+description: Health check of the Project Sunset capture Pi and its cameras, then an update of the daily report in `reports/`. Use when Steven asks to "check camera", "check the cameras", "health check", "are the cameras OK", "is it still capturing", or similar.
 ---
 
 # Camera check
 
-Read-only. Never change settings, restart units or pause capture as part of a check: report, and
-ask before fixing anything.
+Read-only on the Pi. Never change settings, restart units or pause capture as part of a check:
+report, and ask before fixing anything. The one thing a check writes is the daily report in the
+repo (step 4).
 
 1. Run the script (from the repo root). The data part is deterministic and costs no tokens:
 
@@ -30,9 +31,25 @@ ask before fixing anything.
    Vancouver), Pi health (throttled, temperature, disk, uptime), sync and network, the pictures.
    Lead with any `WARN` lines. A gap that matches a diag session or a known event in
    `changelog.md` is expected; say which. Known, no need to raise again: the two empty
-   `cm4wide_20261116T072500Z` files in the outbox (Nov 16 freeze), and the Wi-Fi dropping for
-   2 minutes about once an hour (changelog 2026-11-17) unless the rate goes up.
+   `cm4wide_20261116T072500Z` files in the outbox (Nov 16 freeze). Network drops: the old dongle
+   dropped for 2 minutes about 1.4 times an hour; the AIC8800 dongle (from 2026-11-20) has no
+   baseline yet, so report its drop count.
 
-4. If something affects the record (gap, outage, bump, undervoltage, weather on the glass) and it
+4. Update the daily report (`reports/`, see README "Reports"). Deterministic, no AI:
+
+   ```
+   python tools/build_reports.py           # new days up to yesterday, and redoes the last two
+   ```
+
+   It reads the frames on the NAS, so it needs the NAS reachable from the PC; if it isn't, say so
+   and skip this step. Do it on a branch off `origin/main` (`git status` first: another session may
+   have uncommitted work in the checkout, so use a worktree if it isn't clean). In the reply, give
+   each new day's sky score and frames taken, and say which days scored 60 or more (the posting
+   threshold). A day still short of frames because sync was behind is corrected by the next run,
+   so say so rather than call the frames missing. The report goes to GitHub only as a commit:
+   commit, push and open a PR only when Steven asks (`git -c user.name="SWS-Chipkin"
+   -c user.email="sws-dev@chipkin.com" commit`, pushed as `funvill`).
+
+5. If something affects the record (gap, outage, bump, undervoltage, weather on the glass) and it
    isn't in `changelog.md` yet, offer to add it (CLAUDE.md: record events with UTC and Vancouver
    times).

@@ -127,6 +127,21 @@ hard freeze, since it only holds what the kernel managed to write.
 - It watches `wlan0` only: if the Wi-Fi is gone it reboots after 30 minutes even when wired Ethernet
   is up (it did on 2026-11-20, while the new dongle had no driver).
 
+**Camera watchdog (`CAMWATCH=1`).** From 14:05 UTC 2026-11-19 both CM4 cameras failed captures on
+and off ("Failed to queue buffer for Unicam Image", "Device timeout") for 16 hours, until a reboot
+cleared it. `install.sh` enables `sunset-camwatch.timer` on every Pi, but `sunset-camwatch.sh` does
+nothing unless `sunset.env` has `CAMWATCH=1`. Every 5 minutes, as root, it reads `capture.log`:
+
+- Per camera, it counts failed captures (5-minute, dense and night; not "FAILED publish", skips or
+  retried warnings) since this boot within the last 60 minutes.
+- 3 or more: it reboots, at most once every 6 hours (marker `~/sunset/.camwatch-reboot`), so a dead
+  camera can't cause a reboot loop; after that it logs once that it is holding back. Like the network
+  watchdog, it leaves the trusted time for the capture after the reboot.
+- The failures came scattered, not in a row (`cm4wide` never failed twice running), which is why it
+  counts within a window. Replayed on that day's `capture.log`, it would have rebooted at 14:47 UTC.
+- It keeps its state in RAM (`/run/sunset-camwatch`) and writes `~/sunset/camwatch.log` only when it acts.
+- Tune with `CAMWATCH_FAILS`, `CAMWATCH_WINDOW_MIN`, `CAMWATCH_REBOOT_GAP_H`.
+
 **AIC8800 Wi-Fi dongle (CM4, from 2026-11-20).** The CM4's dongle is an AIC8800D80 (USB
 `a69c:5723` at power-up, a69c:8d81 once running), on 5 GHz. Its driver isn't in the kernel, and this
 unit has the older MCU revision (`chip_id=7, chip_mcu_id=1` in `dmesg`): with the current AIC
