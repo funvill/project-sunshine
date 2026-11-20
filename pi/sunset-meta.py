@@ -49,6 +49,12 @@ DEADLINE_S = 15            # whole script; the capture kills it at 30
 CACHE_NAME = ".meta-cache.json"
 CACHED_COMMANDS = (("rpicam-still", "--version"), ("vcgencmd", "version"))
 SENSOR_OVERLAY = re.compile(r"^(imx|ov|arducam)", re.I)
+# The UPS monitor (sunset-ups.py) rewrites this every 10 s, in RAM. Older than UPS_STALE_S
+# means the monitor has stopped, and the values are left out rather than passed off as current.
+UPS_STATUS_FILE = "run/sunset-ups.json"
+UPS_STALE_S = 120
+UPS_FIELDS = ("source", "pct", "rte_min", "vin", "vout", "vbat", "cells", "temps", "ichg", "idchg",
+              "present", "ups_state", "chg_state", "flags", "fw")
 
 
 def iso(epoch):
@@ -219,6 +225,25 @@ def sync_state(path):
     return out
 
 
+def ups_status(path, now):
+    """The UPS as the monitor last saw it (issue #29). ok is false when the monitor could not read
+    the board or its status is stale; the reason is in error and the readings are left out."""
+    with open(path) as f:
+        doc = json.load(f)
+    age = now - datetime.strptime(doc["time"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+    out = {"age_s": int(round(age))}
+    if not doc.get("ok"):
+        # No file paths in frame files (see the top of this file), so a device path goes.
+        why = re.sub(r"'?/[^\s']+'?", "<path>", str(doc.get("error") or "unknown"))
+        out.update(ok=False, error=why[:120])
+    elif age > UPS_STALE_S:
+        out.update(ok=False, error="stale")
+    else:
+        out["ok"] = True
+        out.update({k: doc.get(k) for k in UPS_FIELDS})
+    return out
+
+
 def versions(run):
     text = run(["rpicam-still", "--version"])
     found = dict(re.findall(r"^(rpicam-apps|libcamera) build:\s*(\S+)", text, re.M))
@@ -240,9 +265,12 @@ def prober(missing, deadline=None, skipped=None):
     return probe
 
 
-def system_block(root, outbox, nas_target, sync_log, run=run_command, deadline=None):
+def system_block(root, outbox, nas_target, sync_log, run=run_command, deadline=None,
+                 ups_file=None, now=None):
     """The machine at the moment of this frame. Slow-changing details are in daily_fields."""
     missing, skipped = [], []
+    if ups_file is None:
+        ups_file = os.environ.get("UPS_STATUS_FILE") or os.path.join(root, UPS_STATUS_FILE)
     probe = prober(missing, deadline, skipped)
 
     def vc(*args):
@@ -265,8 +293,16 @@ def system_block(root, outbox, nas_target, sync_log, run=run_command, deadline=N
         "network": probe("network", lambda: network(root)),
         "clock": probe("clock", lambda: clock(run)),
         "nas": nas,
-        "unavailable": missing,
     }
+    # Only on a Pi with the UPS monitor running (the CM4); no block, and nothing unavailable,
+    # on a Pi without one.
+    if os.path.exists(ups_file):
+        ups = probe("ups", lambda: ups_status(ups_file, time.time() if now is None else now))
+        good = bool(ups and ups.get("ok"))
+        block["ups_source"] = ups["source"] if good else None       # names decided on #29
+        block["ups_charge_pct"] = ups["pct"] if good else None
+        block["ups"] = ups
+    block["unavailable"] = missing
     if skipped:
         block["cut_short"] = True   # the deadline passed; the probes in `unavailable` didn't run
     return block

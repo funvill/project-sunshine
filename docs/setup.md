@@ -170,6 +170,7 @@ outbox/<cam>/YYYY/MM/DD/system.json                  # what rarely changes, one 
 capture.log                                          # one line per capture (see below)
 sync.log                                             # one line per sync run
 .system-state-<cam>.json                             # the day's records, so the sync can't lose them
+ups.log, ups.log.1 ...                               # UPS monitor, CM4 only (see "UPS" below)
 ```
 The sync sends the oldest files first, in batches of up to `SYNC_BATCH` files or `SYNC_BATCH_MB` (32),
 and reads each batch back before deleting it. After `SYNC_MAX_S` (20 min) it stops between batches
@@ -182,7 +183,7 @@ Each frame's `.json` holds rpicam-still's own camera fields at the top level, un
 |---|---|---|
 | `Sun` | `sunset-sun.py` | True-north azimuth, elevation, nearest sunset and minutes from it, from `SITE_LAT`/`SITE_LON` |
 | `Capture` | `sunset-meta.py` | `schema_version`, camera, `kind` (`auto` or `night`), `setup_id`, `system_id`, slot and shot times, shot duration, settings asked for, the lux that triggered a night frame, size and SHA-256 of the JPEG and DNG |
-| `System` | `sunset-meta.py` | The machine at that moment: uptime, load, free memory, CPU temperature, core voltage, ARM clock, `throttled`, free disk space, frames waiting to sync, SD sectors read and written, network state and Wi-Fi signal, NTP state, NAS mount and last sync |
+| `System` | `sunset-meta.py` | The machine at that moment: uptime, load, free memory, CPU temperature, core voltage, ARM clock, `throttled`, free disk space, frames waiting to sync, SD sectors read and written, network state and Wi-Fi signal, NTP state, NAS mount and last sync; on the CM4 also the UPS (`ups_source`, `ups_charge_pct` and an `ups` block, see "UPS" below) |
 
 `system.json` holds what rarely changes: hostname, Pi model, board revision, OS, kernel, firmware, Python, rpicam-apps and libcamera versions, camera overlay, time zone, total memory and disk, SD card identity, `setup_id`, `setup_note` and a hash identifying the capture script. It has a `records` list, normally with one entry. If something changes during the day, such as the setup at the bracket move, the file gains a record starting at that frame. A frame's `Capture.system_id` names the record that applied to it.
 
@@ -209,6 +210,32 @@ or `FAILED ...` / `SKIPPED ...` / `DISK ...` lines explaining what was dropped a
   skipped, and with under 100 MB free nothing is captured. Tune with `DISK_DROP_RAW_PCT`,
   `DISK_SKIP_NIGHT_PCT`, `DISK_MIN_FREE_MB`.
 - **Camera hang:** each `rpicam-still` call is limited to `CAPTURE_TIMEOUT_S` (60 s).
+
+### UPS (`sunshine` only, issue #29)
+The CM4 runs from a Mini-Box OpenUPS2, plugged into it by USB. `sunset-ups.service` (root, runs
+`sunset-ups.py --run`) reads the board every 10 s over `/dev/hidraw`, read-only. Install it with
+`sudo ./install.sh --ups`; `sudo python3 sunset-ups.py --once` prints one reading.
+
+How it reaches the NAS, without extra writes to the eMMC:
+- **Every frame:** `sunset-meta.py` copies the live status from `/run/sunset-ups.json` (RAM) into
+  the frame's `System` block: `ups_source` (`mains`, `battery` or `usb`) and `ups_charge_pct`, plus
+  `System.ups` with everything the board reports: `ok`, `age_s`, `source`, `pct`, `rte_min` (run
+  time left, null when the board gives none; units unchecked), `vin`, `vout`, `vbat`, `cells` (V,
+  three), `temps` (°C, three), `ichg`, `idchg` (A), `present` (which cells the board sees),
+  `ups_state`, `chg_state`, `flags` (raw hex) and `fw`. A status older than 120 s (the monitor
+  stopped) gives `ok: false, error: "stale"` and no readings, and `ups_source`/`ups_charge_pct` are
+  null; so does a monitor that can't read the board (`error` says why). A Pi without the monitor
+  has no UPS fields at all.
+- **The log:** `ups.log` (a line on each change beyond its deadband, on each event such as
+  `mains_lost`, `mains_back`, `low_battery`, `temp_high`, `ups_lost`, and a keyframe every 4 h;
+  rotated daily or at 256 KB, 14 kept) is copied by the sync, with the config backup, to
+  `project_sunshine_config/<host>/ups/ups-<UTC of its first line>.log`. A file is copied again only
+  when its size on the share differs.
+
+On battery with a cell under `UPS_LOW_CELL_V` (3.45 V) or charge at or under `UPS_LOW_PCT` (10%),
+it stops whichever of the capture, dense (both cameras) and sync timers are running, flushes the
+disks and logs `capture_paused units=...`; when mains returns it starts the same ones again. It
+never halts the Pi. Settings: `UPS_*` in `sunset.env.example`. No Home Assistant alert on it yet.
 
 ### Next sunset, for scheduling
 ```
@@ -428,7 +455,8 @@ exposed to the PC as a disk first. That step is the only part that differs.
 9. **NAS login and mount.** As for `timelaps`: `/etc/sunset-nas.cred`, the fstab line, the mount
    point. The pilot copied the login file from `timelaps` Pi to Pi, without displaying it. Frames go
    to `project_sunshine/cm4wide/`.
-10. **Install.** `cd ~/sunset && sudo ./install.sh --cm4-two`, with no `--enable`. It writes the
+10. **Install.** `cd ~/sunset && sudo ./install.sh --cm4-two --ups`, with no `--enable`
+    (`--ups` starts the UPS monitor; see "UPS" above). It writes the
     cam0 and cam1 overlays (and changes nothing if step 4 already did). Do not use plain `--uc517`
     on this board: it writes `dtoverlay=imx477` without a port. It installs the second camera's
     units too (`sunset-capture2`, `sunset-dense2`); with `--enable` it starts them only if

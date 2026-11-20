@@ -53,7 +53,8 @@ class Cfg:
     low_pct = 10
     warn_temp = 40
     pause = True
-    pause_units = ["sunset-capture.timer", "sunset-dense.timer", "sunset-sync.timer"]
+    pause_units = ["sunset-capture.timer", "sunset-dense.timer", "sunset-capture2.timer",
+                   "sunset-dense2.timer", "sunset-sync.timer"]
     pause_flag = ""
 
 
@@ -65,11 +66,14 @@ class Clock:
         return self.t
 
 
-def monitor(cfg=None, flag=""):
+def monitor(cfg=None, flag="", running=None):
+    """running: the units systemd reports active (default: all of them)."""
     cfg = cfg or Cfg()
     cfg.pause_flag = flag
     lines, calls, clock = [], [], Clock()
-    m = ups.Monitor(cfg, lambda tag, s: lines.append(tag), run=lambda argv: calls.append(argv) or 0, clock=clock)
+    active = (lambda u: True) if running is None else (lambda u: u in running)
+    m = ups.Monitor(cfg, lambda tag, s: lines.append(tag), run=lambda argv: calls.append(argv) or 0,
+                    clock=clock, active=active)
     return m, lines, calls, clock
 
 
@@ -180,7 +184,7 @@ class Events(unittest.TestCase):
         self.assertEqual(calls, [])
         m.poll(reply("battery", vin=0.0, cells=(3.44, 3.50, 3.50), pct=15))
         self.assertIn("EVENT low_battery", lines)
-        self.assertIn("EVENT capture_paused", lines)
+        self.assertIn("EVENT capture_paused units=" + ",".join(Cfg.pause_units), lines)
         self.assertEqual(calls[0], ["systemctl", "stop"] + Cfg.pause_units)
         self.assertEqual(calls[1], ["sync"])
         m.poll(reply("battery", vin=0.0, cells=(3.40, 3.45, 3.45), pct=8))
@@ -189,6 +193,28 @@ class Events(unittest.TestCase):
         self.assertIn("EVENT mains_back", lines)
         self.assertIn("EVENT capture_resumed", lines)
         self.assertEqual(calls[2], ["systemctl", "start"] + Cfg.pause_units)
+
+    def test_default_units_cover_both_cameras_and_the_sync(self):
+        for u in ("sunset-capture.timer", "sunset-dense.timer", "sunset-capture2.timer",
+                  "sunset-dense2.timer", "sunset-sync.timer"):
+            self.assertIn(u, ups.PAUSE_UNITS.split())
+
+    def test_resume_starts_only_what_the_pause_stopped(self):
+        running = {"sunset-capture.timer", "sunset-sync.timer"}  # say the second camera is off
+        m, lines, calls, _ = monitor(running=running)
+        m.poll(reply("battery", vin=0.0, cells=(3.40, 3.40, 3.40), pct=5))
+        self.assertEqual(calls[0], ["systemctl", "stop", "sunset-capture.timer", "sunset-sync.timer"])
+        m.poll(reply("mains", pct=6))
+        self.assertEqual(calls[-1], ["systemctl", "start", "sunset-capture.timer", "sunset-sync.timer"])
+
+    def test_nothing_running_stops_and_starts_nothing(self):
+        m, lines, calls, _ = monitor(running=set())
+        m.poll(reply("battery", vin=0.0, cells=(3.40, 3.40, 3.40), pct=5))
+        self.assertIn("EVENT capture_paused units=none", lines)
+        self.assertEqual(calls, [["sync"]])
+        m.poll(reply("mains", pct=6))
+        self.assertIn("EVENT capture_resumed", lines)
+        self.assertEqual(calls, [["sync"]])
 
     def test_low_charge_alone_pauses(self):
         m, lines, calls, _ = monitor()
@@ -224,8 +250,25 @@ class Events(unittest.TestCase):
             m2, lines2, calls2, _ = monitor(flag=flag)  # the service restarted
             m2.poll(reply("mains", pct=6))
             self.assertIn("EVENT capture_resumed", lines2)
-            self.assertEqual(calls2[0][:2], ["systemctl", "start"])
+            self.assertEqual(calls2[0], ["systemctl", "start"] + Cfg.pause_units)
             self.assertFalse(os.path.exists(flag))
+
+    def test_restart_keeps_the_list_of_stopped_units(self):
+        with tempfile.TemporaryDirectory() as d:
+            flag = os.path.join(d, "paused")
+            m, _, _, _ = monitor(flag=flag, running={"sunset-capture.timer"})
+            m.poll(reply("battery", vin=0.0, cells=(3.40, 3.40, 3.40), pct=5))
+            m2, _, calls2, _ = monitor(flag=flag, running=set())  # restarted; all stopped now
+            m2.poll(reply("mains", pct=6))
+            self.assertEqual(calls2, [["systemctl", "start", "sunset-capture.timer"]])
+
+    def test_a_flag_from_the_older_version_restarts_the_whole_set(self):
+        with tempfile.TemporaryDirectory() as d:
+            flag = os.path.join(d, "paused")
+            open(flag, "w").close()   # empty, as the first version wrote it
+            m, _, calls, _ = monitor(flag=flag, running=set())
+            m.poll(reply("mains", pct=6))
+            self.assertEqual(calls, [["systemctl", "start"] + Cfg.pause_units])
 
     def test_cell_and_temperature_events(self):
         m, lines, _, _ = monitor()

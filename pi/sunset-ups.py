@@ -19,9 +19,13 @@ Keeps SD-card writes to a minimum (decided 2026-11-16, issue #29):
     keeping UPS_LOG_KEEP files.
 
 Low battery (on battery and a cell below UPS_LOW_CELL_V or charge at or below UPS_LOW_PCT):
-stops the capture, dense and sync timers (stop, not disable) and flushes the disks, then
-starts them again if mains comes back. If it doesn't, the UPS cuts its own output and the
+stops the capture, dense and sync timers of both cameras (stop, not disable; only those that
+were running) and flushes the disks, then starts the same ones again if mains comes back. If it doesn't, the UPS cuts its own output and the
 Pi boots when mains returns, with the timers still enabled. UPS_PAUSE=0 only logs.
+
+How the status reaches the NAS: sunset-meta.py copies the /run status into every frame's
+System block (System.ups), and sunset-sync.sh copies ups.log and its rotated files to
+project_sunshine_config/<host>/ups/ on the share.
 
 Settings come from the environment (sunset.env via the systemd unit); defaults below.
 """
@@ -54,7 +58,8 @@ DEADBANDS = {
 # Any change in these is a change.
 EXACT = ("source", "fw", "ups_state", "chg_state", "present", "flags")
 
-PAUSE_UNITS = "sunset-capture.timer sunset-dense.timer sunset-sync.timer"
+PAUSE_UNITS = ("sunset-capture.timer sunset-dense.timer sunset-capture2.timer "
+               "sunset-dense2.timer sunset-sync.timer")
 
 
 def env(name, default, cast=str):
@@ -210,16 +215,37 @@ def low_battery(s, cfg):
     return (bool(live) and min(live) < cfg.low_cell_v) or s["pct"] <= cfg.low_pct
 
 
-class Monitor:
-    """Decides what to write. Pure apart from the writer and runner it is given."""
+def unit_active(unit):
+    """True if systemd says the unit is running. If systemctl itself fails, assume it is, so a
+    pause never leaves a running timer behind."""
+    try:
+        return subprocess.call(["systemctl", "is-active", "--quiet", unit]) == 0
+    except OSError:
+        return True
 
-    def __init__(self, cfg, write, run=None, clock=time.time):
-        self.cfg, self.write, self.clock = cfg, write, clock
+
+class Monitor:
+    """Decides what to write. Pure apart from the writer, runner and unit check it is given."""
+
+    def __init__(self, cfg, write, run=None, clock=time.time, active=unit_active):
+        self.cfg, self.write, self.clock, self.active = cfg, write, clock, active
         self.run = run or (lambda argv: subprocess.call(argv))
+        # What the pause stopped, so a resume starts only those. None: not known (a flag left
+        # by an older version, which held no list), and a resume starts the whole set.
+        self.paused_units = None
         self.last_written = None  # status as last written to the log
         self.last = None          # status at the last poll
         self.last_key = None      # time of the last keyframe
         self.paused = bool(cfg.pause_flag) and os.path.exists(cfg.pause_flag)
+        if self.paused:
+            try:
+                with open(cfg.pause_flag) as f:
+                    text = f.read()
+                self.paused_units = text.split() if text.strip() else None
+                if text.strip() == "-":
+                    self.paused_units = []
+            except OSError:
+                pass
         self.lost = False
 
     def set_paused(self, on):
@@ -228,7 +254,9 @@ class Monitor:
             return
         try:
             if on:
-                open(self.cfg.pause_flag, "w").close()
+                # The flag holds the units that were stopped, for a resume after a restart.
+                with open(self.cfg.pause_flag, "w") as f:
+                    f.write("\n".join(self.paused_units or ["-"]) + "\n")
             elif os.path.exists(self.cfg.pause_flag):
                 os.remove(self.cfg.pause_flag)
         except OSError:
@@ -259,18 +287,24 @@ class Monitor:
             if hot_now != hot_before:
                 self.event("temp_high" if hot_now else "temp_ok", s)
         if low_battery(s, self.cfg) and not self.paused:
+            self.paused_units = ([u for u in self.cfg.pause_units if self.active(u)]
+                                 if self.cfg.pause else [])
             self.set_paused(True)
             self.event("low_battery", s)
             if self.cfg.pause:
-                self.run(["systemctl", "stop"] + self.cfg.pause_units)
+                if self.paused_units:
+                    self.run(["systemctl", "stop"] + self.paused_units)
                 self.run(["sync"])
-                self.event("capture_paused", s)
+                self.event("capture_paused units=" + (",".join(self.paused_units) or "none"), s)
             else:
                 self.event("capture_pause_skipped_UPS_PAUSE=0", s)
         elif self.paused and s["source"] == "mains":
+            units = self.cfg.pause_units if self.paused_units is None else self.paused_units
+            self.paused_units = None
             self.set_paused(False)
             if self.cfg.pause:
-                self.run(["systemctl", "start"] + self.cfg.pause_units)
+                if units:
+                    self.run(["systemctl", "start"] + units)
                 self.event("capture_resumed", s)
         self.last = s
         what = changed(self.last_written, s)
