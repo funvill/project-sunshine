@@ -41,7 +41,7 @@ check "capture service uses the user's home" grep -qx 'ExecStart=/home/tester/su
 check "env file path rewritten" grep -qx 'EnvironmentFile=-/home/tester/sunset/sunset.env' "$U/sunset-sync.service"
 check "no unit still says /home/pi" bash -c "! grep -l '/home/pi' '$U'/sunset-*.service '$U'/sunset-*.timer"
 check "no unit keeps User=pi" bash -c "! grep -l '^User=pi' '$U'/sunset-*.service"
-check "all fifteen units installed" test "$(ls "$U"/sunset-*.service "$U"/sunset-*.timer | wc -l | tr -d ' ')" = 15
+check "all seventeen units installed" test "$(ls "$U"/sunset-*.service "$U"/sunset-*.timer | wc -l | tr -d ' ')" = 17
 check "ups unit installed for the user's home" grep -qx 'Environment=UPS_LOG_FILE=/home/tester/sunset/ups.log' "$U/sunset-ups.service"
 check "ups monitor runs as root (it reads /dev/hidraw)" bash -c "! grep -q '^User=' '$U/sunset-ups.service'"
 check "ups monitor not enabled without --ups" bash -c "! grep -q 'enable --now sunset-ups.service' '$STUB_CALLS'"

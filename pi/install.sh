@@ -52,7 +52,7 @@ if [[ -n "$OVERLAY" ]]; then
 fi
 
 mkdir -p "$ROOT/etc/systemd/system" "$ROOT/usr/local/bin" "$ROOT/etc/udev/rules.d"
-for u in sunset-capture.service sunset-capture.timer sunset-sync.service sunset-sync.timer sunset-dense.service sunset-dense.timer sunset-diag.service sunset-kernlog.service sunset-netwatch.service sunset-netwatch.timer sunset-capture2.service sunset-capture2.timer sunset-dense2.service sunset-dense2.timer sunset-ups.service; do
+for u in sunset-capture.service sunset-capture.timer sunset-sync.service sunset-sync.timer sunset-dense.service sunset-dense.timer sunset-diag.service sunset-kernlog.service sunset-netwatch.service sunset-netwatch.timer sunset-camwatch.service sunset-camwatch.timer sunset-capture2.service sunset-capture2.timer sunset-dense2.service sunset-dense2.timer sunset-ups.service; do
   # Via a temp file: a plain "> unit" empties the live unit first, and a missing source then
   # leaves it empty (2026-11-20, the CM4's second camera lost one slot to that).
   [[ -f "$HERE/systemd/$u" ]] || { echo "missing $HERE/systemd/$u: copy all of pi/systemd first; nothing installed past this point" >&2; exit 1; }
@@ -77,6 +77,8 @@ systemctl try-restart sunset-ups.service
 if (( UPS )); then
   systemctl enable --now sunset-ups.service
 fi
+# Does nothing unless CAMWATCH=1 in sunset.env: reboots when a camera keeps failing.
+systemctl enable --now sunset-camwatch.timer
 if (( ENABLE )); then
   systemctl enable --now sunset-capture.timer sunset-sync.timer sunset-dense.timer
   # The second camera only where it is set up: its units need sunset2.env (no "-" on that line).

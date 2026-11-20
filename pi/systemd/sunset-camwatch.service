@@ -1,0 +1,10 @@
+[Unit]
+Description=Project Sunset camera watchdog (reboots when a camera keeps failing)
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/home/pi/sunset/sunset.env
+Environment=CAMWATCH_LOG=/home/pi/sunset/camwatch.log
+Environment=CAMWATCH_CAPTURE_LOG=/home/pi/sunset/capture.log
+ExecStart=/home/pi/sunset/sunset-camwatch.sh
+TimeoutStartSec=60
