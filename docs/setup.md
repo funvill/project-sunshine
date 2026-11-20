@@ -346,7 +346,8 @@ written with the File editor add-on; HA is on port 80) is `sunset.yaml` without 
 archive check and daily health blocks: those NAS jobs don't run yet, so their sensors would read
 "stale" and alert forever. Add those blocks once the jobs run. The scripts are in `/config/sunset/`:
 `sunset_frame_age.sh`, `sunset_nas_free.sh`, `sunset_camera_health.sh` and `sunset_ups.sh`. HA's copy
-has no phone notifier yet: every alert goes to `persistent_notification` only. To update, copy the
+adds the phone (`mobile_app_pixel_8`, from 2026-11-20) under every alert's `notifiers`; the repo keeps
+the placeholder. To update, copy the
 scripts over and re-make HA's `sunset.yaml` from the repo's (keeping any phone lines), check the
 configuration, restart.
 

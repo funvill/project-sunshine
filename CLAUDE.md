@@ -341,7 +341,8 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   age, camera health for both CM4 cameras, NAS free space and **"CM4 on battery"** (`sunset_ups.sh`)
   installed. The NAS-job alerts are left out because those jobs don't run yet. HA is at
   `homeassistant.local` on port 80 (not 8123), and its config is edited with the File editor add-on.
-  **HA's copy has no phone notifier**: alerts go only to `persistent_notification` (found 2026-11-20).
+  HA's copy had no phone notifier (found 2026-11-20). **The Pixel 8 (`mobile_app_pixel_8`) was added to all six
+  alerts at 20:22 UTC Nov 20**, in HA's copy only (the repo keeps the placeholder).
 - **Not done yet:** confirming the new supply over several days, final mounting and framing (keyed mount
   waiting on Steven's 3D printer, #35). **Foam hood fitted** (between 23:30 UTC Nov 19 and 16:00 UTC Nov 20;
   `SETUP_ID` `cm4-window-4` / `cm4city-window-2` from 19:16 UTC Nov 20).
