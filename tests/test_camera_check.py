@@ -59,13 +59,8 @@ class Vancouver(unittest.TestCase):
         self.assertEqual(cc.van(t("2026-11-01T09:00:00Z")).hour, 2)
         self.assertEqual(cc.van(t("2027-01-15T16:00:00Z")).hour, 9)
 
-    def test_fallback_without_tzdata_is_utc_minus_7(self):
-        saved = cc.VAN_TZ
-        try:
-            cc.VAN_TZ = None
-            self.assertEqual(cc.van(t("2026-11-18T00:27:00Z")).hour, 17)
-        finally:
-            cc.VAN_TZ = saved
+    def test_sunset_evening(self):
+        self.assertEqual(cc.van(t("2026-11-18T00:27:00Z")).strftime("%Y-%m-%d %H:%M"), "2026-11-17 17:27")
 
 
 class Parse(unittest.TestCase):

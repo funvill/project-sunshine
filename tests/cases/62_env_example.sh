@@ -62,12 +62,17 @@ check "example still shows the SSH form as an alternative" grep -q '^#NAS_TARGET
 check "example has no secrets or LAN addresses" bash -c "! grep -Eiq '([0-9]{1,3}\.){3}[0-9]{1,3}|password|token' '$EX'"
 
 section ".gitignore"
-ign() { git -c safe.directory='*' -C "$REPO" check-ignore -q --no-index "$1"; }
+# The rules are checked in a scratch repo holding a copy of .gitignore, so this works in a worktree
+# (whose .git file can name a path this shell can't reach, e.g. C:/... under WSL) or a plain copy.
+GI="$(mktemp -d)"
+git init -q "$GI" && cp "$REPO/.gitignore" "$GI/.gitignore"
+ign() { git -c safe.directory='*' -C "$GI" check-ignore -q --no-index "$1"; }
 check "sunset.env is ignored" ign pi/sunset.env
 check "sunset.env backups are ignored" ign pi/sunset.env.bak-2026-11-13-netwatch
 check "sunset.env.bak-pilot3 is ignored" ign pi/sunset.env.bak-pilot3
 check "credential files are ignored" ign sunset-nas.cred
 check "a credential file in a subfolder is ignored" ign pi/x/my.cred
-check "the example is not ignored" bash -c "! git -c safe.directory='*' -C '$REPO' check-ignore -q --no-index pi/sunset.env.example"
-check "pi/hosts/timelaps.env is not ignored" bash -c "! git -c safe.directory='*' -C '$REPO' check-ignore -q --no-index pi/hosts/timelaps.env"
-check "pi/hosts/cm4.env is not ignored" bash -c "! git -c safe.directory='*' -C '$REPO' check-ignore -q --no-index pi/hosts/cm4.env"
+check "the example is not ignored" bash -c "! git -c safe.directory='*' -C '$GI' check-ignore -q --no-index pi/sunset.env.example"
+check "pi/hosts/timelaps.env is not ignored" bash -c "! git -c safe.directory='*' -C '$GI' check-ignore -q --no-index pi/hosts/timelaps.env"
+check "pi/hosts/cm4.env is not ignored" bash -c "! git -c safe.directory='*' -C '$GI' check-ignore -q --no-index pi/hosts/cm4.env"
+rm -rf "$GI"
