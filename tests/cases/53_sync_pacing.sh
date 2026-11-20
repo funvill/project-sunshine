@@ -54,7 +54,7 @@ check "the rest wait on the Pi" test -e "$d/b.jpg" -a -e "$d/c.jpg"
 check "partial logged with confirmed and pending" grep -q 'sync partial confirmed=1 pending=2' "$SYNC_LOG_FILE"
 check "no ok line" bash -c "! grep -q 'sync ok' '$SYNC_LOG_FILE'"
 check "no interrupted line" bash -c "! grep -q 'sync interrupted' '$SYNC_LOG_FILE'"
-unset STUB_RSYNC_SLEEP
+unset STUB_RSYNC_SLEEP SYNC_MAX_S   # the follow-up run has the default limit: 1 s can be too short on a slow CI runner
 sync_; rc=$?
 check "next run sends the rest" test "$rc" = 0 -a -z "$(frames)"
 check "next run logs ok" grep -q 'sync ok files=2' "$SYNC_LOG_FILE"
