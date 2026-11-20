@@ -55,3 +55,31 @@ uframe cm4wide 20261120T175000Z '"battery"' 60
 printf '{"Captu' > "$W/cm4wide/2026/11/20/cm4wide_20261120T175500Z.json"
 ha_out "a half-copied newest frame falls back to the one before" "battery 60" "$SH" cm4wide
 ha_fails "a bad camera name" "$SH" 'cm4wide/../x'
+
+section "ups: --json gives every value, for Home Assistant's graphs"
+# json_field <field>: the field from the script's --json output, as Python prints it
+json_field() { sh "$SH" cm4wide --json | python3 -c "import json,sys; print(json.load(sys.stdin).get('$1'))"; }
+fresh_ups
+uframe cm4wide 20261120T175500Z '"battery"' 87 '"ups":{"ok":true,"source":"battery","pct":87,"vin":0.0,"vout":12.132,"vbat":12.177,"cells":[4.061,4.062,4.055],"temps":[20,21,22],"ichg":0.0,"idchg":0.0}'
+check "state is the plain line" test "$(json_field state)" = "battery 87"
+check "power" test "$(json_field power)" = battery
+check "charge %" test "$(json_field charge_pct)" = 87
+check "input volts (mains)" test "$(json_field input_v)" = 0.0
+check "output volts" test "$(json_field output_v)" = 12.132
+check "pack volts" test "$(json_field pack_v)" = 12.177
+check "cell 1 volts" test "$(json_field cell1_v)" = 4.061
+check "cell 3 volts" test "$(json_field cell3_v)" = 4.055
+check "cell 1 temperature" test "$(json_field cell1_c)" = 20
+check "cell 3 temperature" test "$(json_field cell3_c)" = 22
+check "one JSON line" test "$(sh "$SH" cm4wide --json | wc -l | tr -d ' ')" = 1
+fresh_ups
+uframe cm4wide 20261120T175500Z null null '"ups":{"ok":false,"error":"stale"}'
+check "stale: state says so" test "$(json_field state)" = "unknown stale"
+check "stale: no numbers (null, not 0)" test "$(json_field cell1_v)" = None
+check "stale: no charge" test "$(json_field charge_pct)" = None
+fresh_ups
+uframe cm4wide 20261120T175500Z '"mains"' 100 '"ups":{"ok":true,"source":"mains","pct":100,"vin":15.2,"cells":[4.1,null],"temps":"bad"}'
+check "short or bad lists give null, not an error" test "$(json_field cell2_v)/$(json_field cell3_v)/$(json_field cell1_c)" = "None/None/None"
+check "a value that is there still comes through" test "$(json_field input_v)" = 15.2
+fresh_ups
+ha_fails "--json with no frame still prints nothing" "$SH" cm4wide --json

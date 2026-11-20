@@ -359,7 +359,15 @@ The package alerts on:
 - **the CM4 on battery** (`sensor.sunset_ups`, from `System.ups_source` and `ups_charge_pct` in the
   newest `cm4wide` frame; `homeassistant/sunset_ups.sh`): anything but `mains` for 2 minutes, which
   includes a stale UPS status, repeating hourly. A power cut shows up within about 5 to 10 minutes
-  (the next frame, then the 2-minute scan). Tested with a real cut on 2026-11-20;
+  (the next frame, then the 2-minute scan). Tested with a real cut on 2026-11-20. Just after HA
+  restarts the sensor is `unknown` for up to 2 minutes, and the alert can fire once in that time;
+  its message says so;
+- **UPS numbers for graphs** (2026-11-20): `sensor.sunset_ups` runs `sunset_ups.sh cm4wide --json`
+  and carries every value as an attribute, and ten template sensors turn them into numbers HA records
+  and graphs: charge %, input, output and pack voltage, each cell's voltage and temperature
+  (`sensor.sunset_ups_cell_1_voltage` and so on). Input voltage stands in for "mains": about 15.2 V on
+  mains, 0 on the cells. The board reports no discharge current or run time, so there are no sensors
+  for those. A value the frame lacks (stale UPS status) is a gap in the graph, never a 0;
 - in the repo only, until the NAS jobs run: the daily video job's status, and the results of
   `nas/sunset-verify.py` and `nas/sunset-health.py` (see `nas/README.md`).
 

@@ -10,7 +10,7 @@ regular frame of each camera to --out (default: sunset-camera-check in the temp 
 repo, since frames don't go in it) with a quarter-size copy to look at. It prints one report and
 exits 1 if anything needs a look (lines starting WARN), else 0.
 
-Which Pi: --host, else SUNSET_SSH (comma-separated), else tools/camera_check.hosts, one user@host
+Which Pi: --host, else SUNSET_SSH (comma-separated), else tools/camera_check.hosts, one user@host (optionally "key=<known_hosts name>")
 per line, tried in order (e.g. wired first, then Wi-Fi). That file is git-ignored: the repo is
 public and holds no LAN addresses.
 
@@ -249,6 +249,20 @@ def nas_newest(nas, cam, now):
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=6"]
 
 
+def host_line(entry):
+    """("user@host", extra ssh options) from a hosts entry: "user@host", optionally followed by
+    "key=<name>" to check the host key under another known_hosts name (ssh's HostKeyAlias), e.g. the
+    CM4's Wi-Fi address checked against the key recorded for its wired one."""
+    words = entry.split()
+    opts = []
+    for w in words[1:]:
+        if w.startswith("key=") and len(w) > 4:
+            opts += ["-o", "HostKeyAlias=" + w[4:]]
+        else:
+            raise ValueError("unknown word in hosts entry %r: %s" % (entry, w))
+    return words[0], opts
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--host")
@@ -258,15 +272,16 @@ def main():
     ap.add_argument("--nas", help="PC path to the NAS folder holding <cam>/YYYY/MM/DD")
     a = ap.parse_args()
 
-    host, res = None, None
+    host, host_opts, res = None, [], None
     for h in hosts(a.host):
         # Bytes, not text: on Windows text mode would send CRLF line ends to bash.
         start = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=a.hours + 0.1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        r = subprocess.run(SSH + [h, "bash -s"], input=REMOTE.replace("START", start).encode(),
+        target, opts = host_line(h)
+        r = subprocess.run(SSH + opts + [target, "bash -s"], input=REMOTE.replace("START", start).encode(),
                            capture_output=True)
         out = r.stdout.decode("utf-8", "replace")
         if r.returncode == 0 and "### now" in out:
-            host, res = h, out
+            host, host_opts, res = target, opts, out
             break
         err = r.stderr.decode("utf-8", "replace").strip().splitlines() or ["?"]
         print("(no answer from %s: %s)" % (h, err[-1]))
@@ -385,7 +400,7 @@ def main():
             if pick[0] == "NAS":
                 shutil.copyfile(pick[1], local)
             else:
-                r = subprocess.run(["scp", "-q", "-o", "BatchMode=yes", "%s:%s" % (host, pick[1]), local],
+                r = subprocess.run(["scp", "-q", "-o", "BatchMode=yes"] + host_opts + ["%s:%s" % (host, pick[1]), local],
                                    capture_output=True, text=True)
                 if r.returncode:
                     print("  %s: copy failed: %s" % (cam, r.stderr.strip()))
