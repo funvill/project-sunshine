@@ -7,6 +7,7 @@ import os
 import pathlib
 import socket
 import tempfile
+import time
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -83,6 +84,85 @@ class Tree(unittest.TestCase):
 
     def system(self):
         return meta.system_block(self.root, self.outbox, "/mnt/nas", self.sync_log, fake_run)
+
+
+class UpsInSystemBlock(Tree):
+    """The OpenUPS2 status from the monitor's file in /run (issue #29)."""
+    NOW = 1794800000.0   # 2026-11-17T05:33:20Z
+
+    def status(self, age=5, **over):
+        doc = {"time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.NOW - age)), "ok": True,
+               "fw": "1.6", "source": "mains", "vin": 15.1, "vout": 15.0, "vbat": 10.7,
+               "cells": [3.57, 3.56, 3.57], "temps": [24, 24, 25], "ichg": 0.0, "idchg": 0.0,
+               "flags": "002000", "cfg_switch": 0, "ups_state": "03", "chg_state": "0f", "pct": 88,
+               "present": [True, True, True], "rte_min": None}
+        doc.update(over)
+        write(self.root, "run/sunset-ups.json", json.dumps(doc))
+
+    def ups_system(self):
+        return meta.system_block(self.root, self.outbox, "/mnt/nas", self.sync_log, fake_run,
+                                 now=self.NOW)
+
+    def test_no_ups_monitor_no_block_and_nothing_unavailable(self):
+        s = self.ups_system()
+        for k in ("ups", "ups_source", "ups_charge_pct"):
+            self.assertNotIn(k, s)
+        self.assertNotIn("ups", s["unavailable"])
+
+    def test_current_status_is_copied(self):
+        self.status()
+        s = self.ups_system()
+        self.assertEqual(s["ups_source"], "mains")
+        self.assertEqual(s["ups_charge_pct"], 88)
+        u = s["ups"]
+        self.assertTrue(u["ok"])
+        self.assertEqual(u["age_s"], 5)
+        self.assertEqual(u["cells"], [3.57, 3.56, 3.57])
+        self.assertEqual(u["temps"], [24, 24, 25])
+        self.assertEqual(u["vin"], 15.1)
+        for k in ("vout", "vbat", "ichg", "idchg", "present", "ups_state", "chg_state", "flags",
+                  "fw", "rte_min"):
+            self.assertIn(k, u)
+
+    def test_on_battery(self):
+        self.status(source="battery", vin=0.0, pct=41, idchg=0.6)
+        s = self.ups_system()
+        self.assertEqual(s["ups_source"], "battery")
+        self.assertEqual(s["ups"]["idchg"], 0.6)
+
+    def test_stale_status_is_not_passed_off_as_current(self):
+        self.status(age=600)
+        s = self.ups_system()
+        self.assertIsNone(s["ups_source"])
+        self.assertIsNone(s["ups_charge_pct"])
+        self.assertEqual(s["ups"], {"age_s": 600, "ok": False, "error": "stale"})
+
+    def test_monitor_cannot_read_the_board(self):
+        write(self.root, "run/sunset-ups.json", json.dumps({
+            "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.NOW)), "ok": False,
+            "error": "[Errno 2] No such file or directory: '/dev/hidraw0'"}))
+        u = self.ups_system()["ups"]
+        self.assertFalse(u["ok"])
+        self.assertNotIn("/dev", u["error"])
+        self.assertIn("No such file", u["error"])
+        self.assertNotIn("cells", u)
+
+    def test_a_damaged_status_file_is_named_not_fatal(self):
+        write(self.root, "run/sunset-ups.json", "{not json")
+        s = self.ups_system()
+        self.assertIn("ups", s["unavailable"])
+        self.assertIsNone(s["ups"])
+        self.assertIsNone(s["ups_source"])
+        self.assertEqual(s["cpu_temp_c"], 52.6)
+
+    def test_status_file_path_from_the_environment(self):
+        other = os.path.join(self.root, "elsewhere.json")
+        write(self.root, "elsewhere.json", json.dumps({
+            "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.NOW)), "ok": True,
+            "source": "usb", "pct": 0}))
+        os.environ["UPS_STATUS_FILE"] = other
+        self.addCleanup(os.environ.pop, "UPS_STATUS_FILE", None)
+        self.assertEqual(self.ups_system()["ups_source"], "usb")
 
 
 class SystemBlock(Tree):

@@ -2,8 +2,40 @@
 
 The history of Project Sunset, newest first: every change (code, settings, hardware, including changes made only on a Pi, marked **Pi**) and every event that affects the record (outages and lost frames, power cuts, camera moves, weather that matters, good sunsets, solstices, the moon, milestones). Dates are Vancouver local time; times are given in UTC and Vancouver. Decisions and their reasons are in `CLAUDE.md`.
 
+## 2026-11-20
+
+- **Pi (`sunshine`): the UPS monitor is installed and its status reaches the NAS** (Steven's go-ahead; issue #29). `sunset-ups.service` started at 07:24:52 UTC (00:24 am Nov 20) and is enabled. `sunset-ups.py`, `sunset-meta.py`, `sunset-sync.sh`, `install.sh`, `sunset.env.example` and two unit files were copied in (the old ones are in `~/sunset/.bak-20261120-ups/`). Nothing else on the Pi changed.
+  - **First reading:** on mains, 100%; input 15.19 V, output 15.22 V; cells 4.13, 4.14 and 4.14 V; 17-19 °C; no charge or discharge current; firmware 1.6. So the board counts the 15 V supply as mains. The cells are still at their fitted 4.14 V, above the ~3.5-3.6 V charge stop, because they have not been cycled.
+  - **Checked on the real thing:**
+    - From 07:30 UTC every frame of both cameras has the UPS fields in its `System` block (`cm4wide_20261120T073000Z`, `cm4city_20261120T073030Z`), and nothing in them is marked unavailable.
+    - The 07:29 UTC sync copied `ups.log` to `project_sunshine_config/sunshine/ups/ups-20261120T072452Z.log` on the share, matching byte for byte.
+  - **What it adds:**
+    - **Every frame:** `System.ups_source` and `System.ups_charge_pct` (the names decided on #29), and `System.ups` with:
+      - the cell voltages and the three cell temperatures;
+      - input, output and pack voltages, and charge and discharge current;
+      - run time left, and which cells are present;
+      - the charger and UPS states, flags and firmware.
+      It is copied from the monitor's status in `/run` (RAM), so it adds no eMMC writes. A status over 120 s old shows as `ok: false, error: "stale"` with no readings. A Pi without the monitor (`timelaps`) gets no UPS fields.
+    - **The log:** the sync copies `ups.log` and its rotated files to `project_sunshine_config/<host>/ups/`, each named after its first line, and copies a file again only when its size on the share differs.
+    - **Low-battery pause covers both cameras:** the second camera's timers are now on the list. Only the timers that were running are stopped, and only those are started again when mains returns.
+    - `install.sh --ups` installs and enables the unit. `tools/camera_check.py` shows a UPS line and its events, and warns on battery, stale status, cell imbalance or heat.
+    - Documented in `docs/setup.md` ("UPS") and `sunset.env.example`.
+- **Event: `cm4city` slot 07:25:30 UTC taken 23 s late; no frame lost** (00:25 am Nov 20).
+  - **Cause:** a first `install.sh --ups` run stopped because `~/sunset/systemd/` on the Pi had no second-camera unit files (they had been installed straight into `/etc`). On its way out, its `> unit` redirect emptied `/etc/systemd/system/sunset-capture2.service`. The `daemon-reload` that followed for the UPS unit loaded the empty unit, and the 07:25:30 timer failed on it.
+  - **Fix:** the unit was restored from the repo (identical to what was there) at 07:25:31 and the timer restarted. It ran the slot at once (frame at 07:25:53) and has kept to schedule since.
+  - **So it can't happen again:** `install.sh` now writes each unit through a temp file and stops before touching anything if a source file is missing (new test in `61_install_lowwear.sh`). The four second-camera unit files and `sunset2.env.example` are now in `~/sunset/` on the Pi.
+- **Found, not changed: `sunshine` runs older copies of two files than `main`.**
+  - `/etc/systemd/system/sunset-diag.service` lacks the lines that pause capture while the diag page is on.
+  - `~/sunset/sunset-sun.py` lacks the sun-in-view code (`view`, `VIEW_*`, #32).
+  - Deploying them is a separate step: a full `install.sh` run would install the newer diag unit.
+
 ## 2026-11-19
 
+- **Hardware: 15 V supply into the UPS** (Steven, about 06:20 UTC Nov 20, 11:20 pm Nov 19). It replaces the 24 V 1 A supply into the OpenUPS2, and was the fallback already on the shopping list.
+  - **Why:** the 24 V supply read 24.24 V on the board, just over its 24 V input limit.
+  - **Fits both boards:** 15 V is inside the UPS's 11-24 V input (13 V or more is recommended for Li-ion) and the MyPi XT's 9-28 V. The board counts it as mains (first reading under Nov 20).
+  - Model and current rating of the new supply: not recorded.
+  - The OpenUPS2 is now plugged into `sunshine` by USB.
 - **Event and change (Pi): new Wi-Fi dongle on the CM4, an AIC8800D80, now working on 5 GHz** (Steven swapped it at about 06:05 UTC Nov 20, 11:05 pm Nov 19). The old Buffalo dongle ran at about 2.4 Mbit/s and dropped for 2 minutes about 1.4 times an hour (10 drops in 7 h on Nov 18-19).
   - **Outage:** from about 06:05 UTC there was no Wi-Fi: the new dongle came up as a USB disk (`a69c:5723`, "Aic MSC") with no Linux driver. Steven plugged in Ethernet at 06:13 UTC (11:13 pm). The NAS share had dropped with the network, so the syncs at 06:07 and 06:12 UTC failed ("share not mounted"). Opening the share at 06:16 UTC brought the automount back, and a sync then caught up (24 files). At 06:37 UTC (11:37 pm) the network watchdog rebooted the CM4 after 30 minutes without Wi-Fi, though Ethernet was up (it watches `wlan0` only).
   - **No frames lost:** `cm4wide` took every 5-minute slot. Capture is local-first, and the frames reached the NAS after each gap.

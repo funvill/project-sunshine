@@ -29,6 +29,10 @@ CONFIG_ENV="${SYNC_CONFIG_ENV:-$(dirname "$OUT_ROOT")/sunset.env}"
 CONFIG_ROOT="${SYNC_CONFIG_ROOT:-}"              # prefix for /etc and /boot (tests use a fixture)
 CONFIG_DIR="${SYNC_CONFIG_DIR:-$(dirname "${NAS_TARGET%/}")/project_sunshine_config/$(hostname 2>/dev/null || uname -n)}"
 CONFIG_STAMP="$LOG_FILE.config"                  # UTC day + hash of what was last backed up
+# UPS log (issue #29), mounted share only, with the config backup: ups.log and its rotated files,
+# written by sunset-ups.py on the CM4, go to <config folder>/ups/ as ups-<first line's UTC>.log.
+UPS_LOG="${SYNC_UPS_LOG:-$(dirname "$OUT_ROOT")/ups.log}"
+UPS_DIR="${SYNC_UPS_DIR:-$CONFIG_DIR/ups}"
 
 # Same approach as sunset-kernlog.sh: one old file kept, so the log stays under about 2x the cap.
 log() {
@@ -93,6 +97,32 @@ backup_config() {
   log "config backup ok dir=$CONFIG_DIR files=${copied:-none}"
 }
 
+# Copy the UPS log to the share (issue #29). A rotated file keeps its first line, so each file has
+# one name on the share for life, and a copy is made only when its size there differs: the live
+# file whenever the monitor has written to it, a rotated one once. Nothing is written on the Pi,
+# and nothing is done on a Pi without a UPS log. A failure is logged and does not fail the sync.
+backup_ups_log() {
+  [[ "$CONFIG_BACKUP" == 1 && "$NAS_TARGET" == /* ]] || return 0
+  local f first ts dst copied=0 failed=0
+  for f in "$UPS_LOG" "$UPS_LOG".[0-9] "$UPS_LOG".[0-9][0-9]; do
+    [[ -f "$f" && -r "$f" && -s "$f" ]] || continue
+    IFS= read -r first < "$f" || true
+    ts="${first%% *}"
+    [[ "$ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || continue
+    dst="$UPS_DIR/ups-${ts//[-:]/}.log"
+    [[ "$(stat -c %s "$dst" 2>/dev/null)" == "$(stat -c %s "$f" 2>/dev/null)" ]] && continue
+    if mkdir -p "$UPS_DIR" 2>/dev/null && cp "$f" "$dst.tmp" 2>/dev/null && mv -f "$dst.tmp" "$dst" 2>/dev/null; then
+      copied=$((copied + 1))
+    else
+      rm -f "$dst.tmp" 2>/dev/null || true
+      failed=$((failed + 1))
+    fi
+  done
+  if (( failed )); then log "ups log backup FAILED dir=$UPS_DIR copied=$copied failed=$failed"
+  elif (( copied )); then log "ups log backup ok dir=$UPS_DIR files=$copied"; fi
+  return 0
+}
+
 # First boot: the sync timer can fire before the first capture has created the outbox.
 [[ -d "$OUT_ROOT" ]] || exit 0
 
@@ -147,7 +177,7 @@ done < "$ALL"
 if (( PENDING == 0 )); then
   # Nothing to send; still keep the config backup current, but quietly skip it if the share is
   # not there (no failure line every few minutes for a run that had nothing to do).
-  if [[ "$NAS_TARGET" == /* && -z "$(share_problem)" ]]; then backup_config || true; fi
+  if [[ "$NAS_TARGET" == /* && -z "$(share_problem)" ]]; then backup_config || true; backup_ups_log || true; fi
   exit 0
 fi
 REMAINING="$PENDING"
@@ -161,6 +191,7 @@ if [[ "$NAS_TARGET" == /* ]]; then
     exit 1
   fi
   backup_config || true
+  backup_ups_log || true
 fi
 
 # -rt, not -a: the NAS user usually cannot set owner/group/perms, and a failed

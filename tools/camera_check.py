@@ -34,7 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOSTS_FILE = os.path.join(HERE, "camera_check.hosts")
 SLOT_S = 300
 UNITS = ["sunset-capture.timer", "sunset-dense.timer", "sunset-capture2.timer",
-         "sunset-dense2.timer", "sunset-sync.timer", "sunset-diag.service"]
+         "sunset-dense2.timer", "sunset-sync.timer", "sunset-diag.service", "sunset-ups.service"]
 
 # Runs on the Pi. Prints sections that parse() splits on "### name".
 REMOTE = r"""
@@ -52,6 +52,9 @@ echo "### netwatch"; awk -v t="START" '$1 >= t' $S/netwatch.log 2>/dev/null
 echo "### voltage"; grep -i 'under-voltage' $S/kernel.log 2>/dev/null | tail -n 3
 echo "### pending"; find $S/outbox -path '*/.partial' -prune -o -type f -name '*.jpg' -size +0 -printf '%T@ %p\n' 2>/dev/null
 echo "### empty"; find $S/outbox -path '*/.partial' -prune -o -type f -name '*.jpg' -size 0 -print 2>/dev/null
+# The UPS monitor's live status (RAM) and its events in the window; nothing on a Pi without it.
+echo "### ups"; cat /run/sunset-ups.json 2>/dev/null; echo
+echo "### upslog"; awk -v t="START" '$1 >= t && / EVENT /' $S/ups.log.1 $S/ups.log 2>/dev/null
 echo "### nas"; grep '^NAS_TARGET=' $S/sunset.env 2>/dev/null | cut -d= -f2-
 echo "### newest"
 # Newest regular frame still in the outbox, per camera (names are UTC, so it sorts last).
@@ -78,6 +81,55 @@ def ts(word):
         return dt.datetime.strptime(word, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
     except ValueError:
         return None
+
+
+def ups_summary(status_lines, log_lines, now):
+    """(lines to print, warnings) for the OpenUPS2, from the monitor's /run status and the EVENT
+    lines of ups.log. ([], []) when the Pi has no UPS monitor."""
+    import json
+    text = "".join(status_lines).strip()
+    if not text and not log_lines:
+        return [], []
+    out, warn = [], []
+    try:
+        st = json.loads(text) if text else None
+    except ValueError:
+        st = None
+    when = ts(st.get("time", "")) if isinstance(st, dict) else None
+    age = (now - when).total_seconds() if when else None
+    if not isinstance(st, dict) or age is None:
+        out.append("UPS: no status from the monitor (sunset-ups.service not running?)")
+        warn.append("UPS monitor status missing")
+    elif not st.get("ok"):
+        out.append("UPS: monitor cannot read the board: %s" % st.get("error", "?"))
+        warn.append("UPS not readable")
+    else:
+        cells = st.get("cells") or []
+        out.append("UPS: %s, %s%% charge, in %.1f V, out %.1f V, cells %s V, %s °C, charge %.2f A, "
+                   "discharge %.2f A, fw %s%s" % (
+                       st.get("source"), st.get("pct"), st.get("vin") or 0, st.get("vout") or 0,
+                       "/".join("%.2f" % c for c in cells), "/".join(str(x) for x in st.get("temps") or []),
+                       st.get("ichg") or 0, st.get("idchg") or 0, st.get("fw"),
+                       "" if age <= 120 else " (status %.0f min old)" % (age / 60)))
+        if age > 120:
+            warn.append("UPS status is %.0f min old" % (age / 60))
+        if st.get("source") != "mains":
+            warn.append("UPS on %s, not mains" % st.get("source"))
+        present = st.get("present") or []
+        if present and not all(present):
+            warn.append("UPS sees cells %s" % "".join("1" if p else "0" for p in present))
+        live = [c for c, p in zip(cells, present or [True] * len(cells)) if p]
+        if live and max(live) - min(live) > 0.10:
+            warn.append("UPS cells differ by %.2f V" % (max(live) - min(live)))
+        if max(st.get("temps") or [0]) >= 40:
+            warn.append("UPS cells at %s °C" % max(st.get("temps")))
+    for l in log_lines[-6:]:
+        t_ = ts(l.split()[0]) if l.split() else None
+        out.append("  %s %s" % (hm(t_) if t_ else "", " ".join(l.split()[1:3])))
+    bad = [l for l in log_lines if re.search(r"EVENT (mains_lost|low_battery|capture_paused|ups_lost|temp_high)", l)]
+    if bad:
+        warn.append("UPS events in the window: %s" % ", ".join(sorted({l.split()[2] for l in bad})))
+    return out, warn
 
 
 def capture_summary(lines, now, hours):
@@ -245,6 +297,10 @@ def main():
         warn.append("disk %s full" % used)
     for l in d.get("voltage", []):
         print("  kernel: " + l.strip())
+    ups_out, ups_warn = ups_summary(d.get("ups", []), d.get("upslog", []), now)
+    for l in ups_out:
+        print(l)
+    warn += ups_warn
 
     units = {}
     for l in d.get("units", []):
