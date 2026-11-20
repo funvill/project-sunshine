@@ -76,15 +76,15 @@ for eid, sc in sensors.items():
 result(cmd_ok, "every sensor command is 'sh /config/sunset/<script that exists>'")
 result(all("command_timeout" in s and "scan_interval" in s for s in sensors.values()), "every sensor has a timeout and a scan interval")
 
-# Each camera has its own sensor of each kind. cm4city (from 2026-11-17) has frame age and health
-# only: the NAS archive check and daily health jobs don't run for it yet.
+# Each camera has its own sensor of each kind. timelaps (wide) was retired on 2026-11-17 and its checks
+# removed. cm4city has frame age and health only: the NAS archive check and daily health jobs don't run
+# for it yet.
 for script in ("sunset_camera_health.sh", "sunset_frame_age.sh"):
     cams = [s["command"].split()[-1] for s in sensors.values() if script in s["command"]]
-    cams = ["wide" if c.endswith(".sh") else c for c in cams]
-    result(sorted(cams) == ["cm4city", "cm4wide", "wide"], "%s has one sensor per camera (%s)" % (script, ",".join(cams)))
+    result(sorted(cams) == ["cm4city", "cm4wide"], "%s has one sensor per camera (%s)" % (script, ",".join(cams)))
 for kind in ("verify", "health"):
     cams = [s["command"].split()[3] for s in sensors.values() if "sunset_result.sh %s " % kind in s["command"]]
-    result(sorted(cams) == ["cm4wide", "wide"], "result %s has one sensor per camera" % kind)
+    result(sorted(cams) == ["cm4wide"], "result %s has one sensor per camera" % kind)
 
 watched = set()
 for key, a in alerts.items():
@@ -159,15 +159,21 @@ for value, want in (("100", True), ("349", True), ("350", False), ("5000", False
     result(truth(free, with_state("sensor.sunset_nas_free_space", value)) is want, "NAS space low with free=%r is %s" % (value, want))
 result(truth(free, limit) is True, "NAS space low when the sensor does not exist yet")
 
-for entity, sensor in (("binary_sensor.sunset_camera_unhealthy", "sensor.sunset_camera_health"),
-                       ("binary_sensor.sunset_cm4_camera_unhealthy", "sensor.sunset_cm4_camera_health"),
-                       ("binary_sensor.sunset_archive_check_failed", "sensor.sunset_archive_check"),
+for entity, sensor in (("binary_sensor.sunset_cm4_camera_unhealthy", "sensor.sunset_cm4_camera_health"),
+                       ("binary_sensor.sunset_cm4city_camera_unhealthy", "sensor.sunset_cm4city_camera_health"),
                        ("binary_sensor.sunset_cm4_archive_check_failed", "sensor.sunset_cm4_archive_check"),
-                       ("binary_sensor.sunset_daily_health_failed", "sensor.sunset_daily_health"),
                        ("binary_sensor.sunset_cm4_daily_health_failed", "sensor.sunset_cm4_daily_health")):
     for value, want in (("ok", False), ("undervoltage temp=80", True), ("stale", True), ("unreadable", True),
                         ("unknown", True), ("unavailable", True), ("OK", True), ("", True)):
         result(truth(entity, with_state(sensor, value)) is want, "%s with %r is %s" % (entity, value, want))
+
+ups = "binary_sensor.sunset_ups_on_battery"
+for value, want in (("mains 100", False), ("mains", False), ("battery 87", True), ("battery", True),
+                    ("unknown stale", True), ("unknown none", True), ("unknown", True), ("unavailable", True), ("", True)):
+    result(truth(ups, with_state("sensor.sunset_ups", value)) is want, "UPS on battery with %r is %s" % (value, want))
+for value in ("battery 87", "battery", "unknown stale", "unknown"):
+    text = render(alerts["sunset_ups_on_battery"]["message"], with_state("sensor.sunset_ups", value))
+    result(("87%" in text) if value == "battery 87" else len(text) > 20, "UPS alert message for %r" % value)
 
 daily = "binary_sensor.sunset_daily_video_failed"
 for value, want in (("ok 2026-11-14 1d", False), ("skipped 2026-11-14 1d", True), ("failed 2026-11-14 1d", True),
@@ -175,13 +181,13 @@ for value, want in (("ok 2026-11-14 1d", False), ("skipped 2026-11-14 1d", True)
                     ("unreadable 2026-11-14 1d", True), ("unknown", True), ("unavailable", True), ("", True)):
     result(truth(daily, with_state("sensor.sunset_daily_video", value)) is want, "daily video with %r is %s" % (value, want))
 
-for entity, sensor in (("binary_sensor.sunset_frames_stale", "sensor.sunset_newest_frame_age"),
-                       ("binary_sensor.sunset_cm4_frames_stale", "sensor.sunset_cm4_newest_frame_age")):
+for entity, sensor in (("binary_sensor.sunset_cm4_frames_stale", "sensor.sunset_cm4_newest_frame_age"),
+                       ("binary_sensor.sunset_cm4city_frames_stale", "sensor.sunset_cm4city_newest_frame_age")):
     for value, want in (("0", False), ("60", False), ("61", True), ("unknown", True), ("unavailable", True)):
         result(truth(entity, with_state(sensor, value)) is want, "%s with age %r is %s" % (entity, value, want))
 
 for key, a in alerts.items():
-    for values in ({}, {"sensor.sunset_nas_free_space": "128", "sensor.sunset_newest_frame_age": "75"}):
+    for values in ({}, {"sensor.sunset_nas_free_space": "128", "sensor.sunset_cm4_newest_frame_age": "75"}):
         try:
             text = render(a["message"], dict(limit, **values))
             result(len(text) > 20, "alert %s message renders" % key)

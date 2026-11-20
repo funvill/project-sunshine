@@ -321,9 +321,14 @@ the Pi, so it also catches a dead Pi, a dead camera or a stuck sync. Written for
 4. **Add your phone.** Replace the commented line under `notifiers` in `sunset.yaml`. Your phone's
    name is under Developer Tools > Actions: search for `notify.mobile_app`.
 5. **Restart.** Developer Tools > YAML > Check configuration, then restart Home Assistant.
-6. **Check the age.** `sensor.sunset_newest_frame_age` should show under 20 minutes within 5 minutes.
-   The package also watches the CM4 (`cm4wide`) as `sensor.sunset_cm4_newest_frame_age`, with its
-   own alert. For another camera, copy those three blocks and pass its `CAM_NAME` to the script.
+6. **Check the age.** `sensor.sunset_cm4_newest_frame_age` (`cm4wide`) and
+   `sensor.sunset_cm4city_newest_frame_age` should show under 20 minutes within 5 minutes. Each camera
+   has its own sensor, binary sensor and alert. For another camera, copy those three blocks and pass its
+   `CAM_NAME` to the script. The Pi 3 `timelaps` (`wide`) was retired on 2026-11-17, and its blocks
+   were taken out of the package on 2026-11-20: in an installed copy, delete the `Sunset newest frame
+   age` sensor, the `Sunset frames stale` binary sensor and the `sunset_frames_stale` alert (and the
+   `wide` health, archive and daily-health blocks, if installed), plus their lines in the re-arm
+   automation.
    **Updating an installed copy:** HA's `sunset.yaml` holds your phone notifier, so don't overwrite
    it. Copy the new `sunset_frame_age.sh` over the old one, and paste the new CM4 blocks into HA's
    `sunset.yaml` (and your phone under the new alert's `notifiers`), then check and restart.
@@ -336,17 +341,27 @@ With the default settings, an alert comes 70 to 75 minutes after the last frame,
 
 ### Monitoring beyond frame age
 
-Not installed in Home Assistant yet. To install: copy `sunset_frame_age.sh`, `sunset_nas_free.sh`,
-`sunset_camera_health.sh`, `sunset_daily_status.sh` and `sunset_result.sh` from `homeassistant/` to
-`/config/sunset/`, and paste the new blocks from `sunset.yaml` into HA's copy. Don't overwrite HA's
-copy: it holds the phone notifier. Add the phone line under each new alert's `notifiers`.
+**Installed 2026-11-20, except the NAS-job blocks.** HA's copy (`/homeassistant/packages/sunset.yaml`,
+written with the File editor add-on; HA is on port 80) is `sunset.yaml` without the daily video,
+archive check and daily health blocks: those NAS jobs don't run yet, so their sensors would read
+"stale" and alert forever. Add those blocks once the jobs run. The scripts are in `/config/sunset/`:
+`sunset_frame_age.sh`, `sunset_nas_free.sh`, `sunset_camera_health.sh` and `sunset_ups.sh`. HA's copy
+adds the phone (`mobile_app_pixel_8`, from 2026-11-20) under every alert's `notifiers`; the repo keeps
+the placeholder. To update, copy the
+scripts over and re-make HA's `sunset.yaml` from the repo's (keeping any phone lines), check the
+configuration, restart.
 
-The new blocks add alerts for:
+The package alerts on:
+- each CM4 camera's frame age (`cm4wide`, `cm4city`);
 - NAS free space (default 100 GB, about a month of frames at about 3 GB a day with no DNGs);
-- each Pi's health from its newest frame's JSON: undervoltage and throttle bits, temperature,
+- each camera's health from its newest frame's JSON: undervoltage and throttle bits, temperature,
   frames waiting to sync, disk use, tiny or repeated JPEGs;
-- the daily video job's status;
-- the results of `nas/sunset-verify.py` and `nas/sunset-health.py` (see `nas/README.md`).
+- **the CM4 on battery** (`sensor.sunset_ups`, from `System.ups_source` and `ups_charge_pct` in the
+  newest `cm4wide` frame; `homeassistant/sunset_ups.sh`): anything but `mains` for 2 minutes, which
+  includes a stale UPS status, repeating hourly. A power cut shows up within about 5 to 10 minutes
+  (the next frame, then the 2-minute scan). Tested with a real cut on 2026-11-20;
+- in the repo only, until the NAS jobs run: the daily video job's status, and the results of
+  `nas/sunset-verify.py` and `nas/sunset-health.py` (see `nas/README.md`).
 
 Anything unknown counts as bad. Python 3 is needed in HA's container. An alert you acknowledge is
 re-armed after 12 hours.

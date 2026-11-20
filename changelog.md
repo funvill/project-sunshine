@@ -4,6 +4,31 @@ The history of Project Sunset, newest first: every change (code, settings, hardw
 
 ## 2026-11-20
 
+- **Event: power-cut test on `sunshine`** (Steven pulled the 15 V supply, 19:34:32 UTC, 12:34 pm). The UPS monitor logged `mains_lost` at once and the Pi kept running on the cells, output 12.2-12.3 V, with no capture lost. An earlier test the same day left no trace in `ups.log`. The monitor polls every 10 s, so a cut shorter than that can fall between reads.
+  - **Over 24 min on battery** the cells fell from 4.135 to 4.085 V.
+  - **No gauge on battery:** the board kept saying 100% charge, 0.00 A discharge and no run time (`rte_min` null), so it gives no current or runtime figure.
+  - **So the low-battery pause rests on the cell voltage alone** (`UPS_LOW_CELL_V`, 3.45 V). `UPS_LOW_PCT` (10%) would never trip on this board.
+  - Runtime has to come from the cell voltage over a longer cut.
+- **Home Assistant reconfigured** (19:55 UTC, 12:55 pm). This covers both the HA install and the matching repo change (new `sunset_ups.sh`, sensor and alert in `sunset.yaml`, tests `82b_ups_status.sh` and `84_ha_yaml.sh`).
+  - **Removed:** the `timelaps` frame-age alert, which had fired since the retirement, and its two entities from HA's entity registry.
+  - **Added:** frame age for `cm4city`, camera health for both CM4 cameras, NAS free space, and a new **"CM4 is on battery"** alert. That alert's sensor, `sensor.sunset_ups`, reads `System.ups_source` and `ups_charge_pct` from the newest `cm4wide` frame via `homeassistant/sunset_ups.sh`.
+  - **How:** the files were written with the File editor add-on. The old package and script are kept as `sunset/*.bak-2026-11-20` in HA's config. The configuration check passed and HA was restarted.
+  - **Left out:** the daily video, archive check and daily health blocks, because their NAS jobs don't run (no `health/` folder on the share).
+  - **Tested during the power cut:** the sensor read `battery 100`, and the alert fired at 19:57:59 UTC with its message.
+  - **Found:** HA's copy had no phone notifier, so every alert so far went only to HA's notification list. **Fixed at 20:22 UTC (1:22 pm):** the Pixel 8 (`mobile_app_pixel_8`) was added to all six alerts, in HA's copy only. The old file is `sunset/sunset.yaml.bak-2026-11-20-phone`. HA was restarted and a test notification sent at 20:23 UTC.
+  - HA is at `homeassistant.local` on port 80. Chrome could not resolve the name on 8123.
+- **Event: foam hood fitted** (Steven; time not recorded). `cm4city` moved about 10 px left and 5 px down between 23:30 UTC Nov 19 and 16:00 UTC Nov 20 (3:30 pm Nov 19 to 8 am Nov 20). That comes from phase correlation of its daylight frames every 30 minutes against Nov 18 19:00 UTC; there is no daylight frame in between. `cm4wide` did not move: under 1 px at 19:00 UTC on Nov 18, 19 and 20.
+- **Pi (`sunshine`): `SETUP_ID` changed for the hood** (19:16 UTC, 12:16 pm): `cm4-window-3` to `cm4-window-4` (`sunset.env`), and `cm4city-window-1` to `cm4city-window-2` (`sunset2.env`). Old copies are in `*.bak-20261120-hood`. Frames from the hood fitting to 19:15 UTC still carry the old ids. `nas/crop.cm4wide.json` has a `cm4-window-4` entry from Nov 20, carried over from `cm4-window-3` because the camera didn't move, and `tools/build_reports.py` has its horizon row. Both are to be rechecked on the next clear sunset.
+- **Decisions (Steven):**
+  - The sky score posting threshold stays at 60.
+  - Steven posts to Instagram by hand on his personal account, so no automated publisher is needed (#2).
+  - ToDo: the Instagram videos need open-source-licensed music added.
+  - ToDo: the keyed mount is waiting on Steven's 3D printer (#35).
+  - ToDo: the RTC coin cell.
+  - The SHT4x/TSL2591 sensors and the dew heater are dropped (#34 closed).
+- **UPS reviewed on `sunshine` (#29 stays open):** running and reporting since 07:24 UTC. Still open: a mains-cut test with the Pi as the load, the runtime, the low-battery thresholds and a Home Assistant alert. Details are on the issue.
+- **Checked: the NAS video image's time zone.** `nas/Dockerfile` pins tzdata 2026f. The built image gives UTC-7 for Vancouver in Nov 2026, Jan and Jul 2027, and Dec 2031, so the video's 7:30 start and its overlay times are right. A CI step now checks this in the built image, because `test_daily.py` takes its expected times from the same tzdata.
+- **Home Assistant: `timelaps` checks taken out of `homeassistant/sunset.yaml`.** That covers the `wide` frame age, health, archive check and daily health sensors, their binary sensors and alerts, and their lines in the re-arm automation. `docs/setup.md` says what to delete in an installed copy. HA itself is not yet changed.
 - **Event: no weather forecast from 04:07 UTC Nov 17 (9:07 pm Nov 16) to 18:03 UTC Nov 20 (11:03 am)** (Steven saw "no forecast" in the report for Nov 17-19). The hourly forecast job (`exp-weather.timer`, experiment 17) ran on `timelaps` and stopped when that Pi was retired; it was never set up on `sunshine`. 85 hourly forecasts missed.
 - **Pi (`sunshine`): forecast job installed** (18:03 UTC, 11:03 am). `exp-weather.service` and `.timer` from `experiments/systemd/`, with `User=sunshine` and its home, also copied to `~/sunset/experiments/systemd/`; `sunset-weather.py` there already matched the repo. A run by hand saved `forecast_20261120T180310Z.json` and copied it to `project_sunshine_experiments/weather/` on the NAS; the timer runs at :07 each hour. Nov 17-19 stay without a forecast in the report; from Nov 20 they're back.
 - **Fixed: `tools/camera_check.py` printed Vancouver times an hour out on machines with tzdata older than 2026b** (found running the tests in WSL, whose Ubuntu has 2026a and still falls back to UTC-8 in winter). It now uses a fixed UTC-7, as `build_reports.py` does. Also: the `.gitignore` tests in `62_env_example.sh` now check the rules in a scratch repo, so they pass in a worktree under WSL. The suite now runs with no known failures (1,203 passed). Still open: `nas/sunset-daily.py`, `tools/build_video.py`, `tools/sunset_stills.py` and `pi/sunset-sun.py` read the machine's tzdata, so a host older than 2026b would put their local times an hour out in winter.

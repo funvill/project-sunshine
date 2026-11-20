@@ -111,8 +111,10 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
     render, and **the sunrise dense frames stop**: `DENSE_WINDOWS=sunset` (default), patched into
     both Pis' running capture script at about 04:45 UTC Nov 16. How the long film handles gaps is decided when it is edited.
   - **Instagram (#2):** public posts are fine with the towers blurred and no location tag; captions
-    name the city only; a licensed music track; posting starts only once the sky score gates it, at
-    a threshold of **60** (retune later). Login method still open.
+    name the city only; posting starts only once the sky score gates it, at a threshold of **60**
+    (**kept at 60, Steven 2026-11-20**). **Steven uploads by hand to his personal account (2026-11-20)**, so
+    no automated publisher or login is needed. **ToDo: the Instagram videos need open-source-licensed
+    music added** (was "a licensed music track").
   - **Monitoring (#22):** no outside heartbeat.
   - **UPS cells (#29):** Li-ion on firmware 1.6. **R20 stays as fitted (Steven, 2026-11-16: the boards won't be modified)**, so the board stops charging at about 3.5-3.6 V per cell.
 - Capture every **5 min, 24/7**, day and night (changed from 15 min on 2026-11-07 at Steven's
@@ -335,8 +337,15 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   change `SETUP_ID`.
 - **Home Assistant alert (2026-11-05):** installed from `homeassistant/`. HA reads the NAS share
   directly at `/share/camera`, with its own copy of the `camera` login, and alerts about 70 to 75
-  minutes after the last frame. The phone notifier is set only in HA's copy of `sunset.yaml`.
-- **Not done yet:** confirming the new supply over several days, final mounting and framing, foam hood.
+  minutes after the last frame. **Reconfigured 2026-11-20:** the `timelaps` checks removed, and frame
+  age, camera health for both CM4 cameras, NAS free space and **"CM4 on battery"** (`sunset_ups.sh`)
+  installed. The NAS-job alerts are left out because those jobs don't run yet. HA is at
+  `homeassistant.local` on port 80 (not 8123), and its config is edited with the File editor add-on.
+  HA's copy had no phone notifier (found 2026-11-20). **The Pixel 8 (`mobile_app_pixel_8`) was added to all six
+  alerts at 20:22 UTC Nov 20**, in HA's copy only (the repo keeps the placeholder).
+- **Not done yet:** confirming the new supply over several days, final mounting and framing (keyed mount
+  waiting on Steven's 3D printer, #35). **Foam hood fitted** (between 23:30 UTC Nov 19 and 16:00 UTC Nov 20;
+  `SETUP_ID` `cm4-window-4` / `cm4city-window-2` from 19:16 UTC Nov 20).
 - **To do: heatsink on `timelaps` (2026-11-08).** SoC temperature at capture is 54.8 to 58.5 °C,
   and the Pi 3 B+ soft limit is 60 °C (`throttled=0x80000`: reached since boot). It runs close to
   the limit while experiments add load, and summer sun through the window will add more. On the
@@ -388,7 +397,7 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   login file (copied Pi to Pi on 2026-11-11, never displayed). Frames sync to `project_sunshine/cm4wide/`;
   `timelaps` and the CM4 have separate HA alerts, so CM4 frames can't hide a `timelaps` outage.
   The RTC sets the clock at boot and the kernel writes NTP time back to it every 11 min, but **there
-  is no coin cell in the RTC holder yet** (Steven will add one later), so it only keeps time through a
+  is no coin cell in the RTC holder yet** (ToDo, Steven), so it only keeps time through a
   reboot, not a power cut. Don't depend on it: capture keeps waiting for NTP (`REQUIRE_TIME_SYNC=1`). One test
   capture through `sunset-capture.service` (2026-11-11 23:44 UTC) went through cleanly and synced to
   `project_sunshine/cm4wide/`.
@@ -449,7 +458,7 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   written only when a value changes beyond its deadband, on events, and a keyframe every 4 h (minimal SD
   writes; live status only in `/run`), rotated by the script daily or at 256 KB, 14 files kept;
   tested on the bench before it goes on `sunshine`; on low battery pause the capture/dense/sync timers rather than halt
-  (a halted Pi stays off if mains returns before the UPS cuts out); HA alert later; `ups_source` and
+  (a halted Pi stays off if mains returns before the UPS cuts out); HA "on battery" alert installed 2026-11-20; `ups_source` and
   `ups_charge_pct` in each frame's `System` block after the pending `sunset-meta.py` work merges. The flasher (`HIDBootLoader.exe`) comes from
   Mini-Box's OpenUPS (v1) firmware pack; never flash that pack's hex files. **Reader built 2026-11-16; installed on `sunshine` 2026-11-20 07:24 UTC (`install.sh --ups`), its status on the NAS in every frame's `System.ups`/`ups_source`/`ups_charge_pct` and as `project_sunshine_config/sunshine/ups/*.log`:** `pi/sunset-ups.py` (`--once`, `--raw`, `--run`), `pi/systemd/sunset-ups.service` (root, not yet in `install.sh`), `tests/test_ups.py`. Bench-tested on the PC in WSL (USB passed through with usbipd-win, busid 1-14) against the real board: steady values wrote only keyframes, and an unplug wrote one lost and one found line. Settings are `UPS_*` in `sunset.env` (defaults in the script). Deadbands to tune once the cells are in. Bench runs: `tools/ups_bench.py` (WSL as root; summarises the log, warns on cells under 2.5 V).
   **Cells fitted 2026-11-16 (5:46 pm, 00:46 UTC Nov 17):** three charged Li-ion 18650s (4.17 V, matched; rated 2,500 mAh each, model not recorded; `CAPACITY` set to 2500, 03:57 UTC Nov 17), so the Li-ion route stands (firmware 1.6). **R20 stays unchanged (decided 2026-11-16)**: the cells start full and settle at the board's ~3.5-3.6 V charge stop, trading runtime for cell life. The board wakes from ship mode on P10 or input power; a 12 V supply is too low to count as mains, so it runs from the cells. Reader bench-tested on battery (values match the tool, `low_battery` fires). **15 V supply from 2026-11-20 06:20 UTC** (Steven), replacing the 24 V 1 A one that read just over the 24 V input limit (board 24.24 V); the board counts 15 V as mains. Mains lost/back by hand: the output goes 24.2 V on mains, 12.4 V on cells (both inside the MyPi XT's 9-28 V). The reader logged each switch once (`mains_lost`/`mains_back`, no flapping; bench run 03:48-03:56 UTC Nov 17).
@@ -470,7 +479,8 @@ Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi
   over USB PC Remote with gphoto2) + wide lens (e.g. Sony 10–18 mm).
 - **Tight (downtown) camera:** IMX477 + 16 mm lens on a **Pi Zero W** (~180 px/degree — best
   distant detail of any option considered).
-- Sensors: SHT4x temp/humidity at the glass, TSL2591 lux sensor, MOSFET + dew-heater strip on GPIO.
+- Sensors (SHT4x, TSL2591, dew heater): **dropped, Steven 2026-11-20** (#34 closed). Condensation is
+  watched from the frames only (`tools/fog_scan.py`, #33).
 - 64 GB High Endurance SD cards, small UPS, spare camera of each type, ND filter for the 16 mm lens.
 - IP cameras considered: UniFi G6 Bullet (US$199, 1/1.8") and G6 Pro Bullet (US$479 / ~CA$685,
   1/1.2", 2.36× zoom, ~114°–45.5° H). Good as an always-on backup record, but no RAW and heavy
@@ -481,7 +491,7 @@ Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi
 |---|---|
 | Silent failure | HA alert on newest NAS file age; `capture.log` on the Pi |
 | NAS/Wi-Fi outage | Local-first capture, rsync catch-up |
-| Condensation | Humidity sensor, low-contrast "fog" frame detection, dew heater |
+| Condensation | Low-contrast "fog" frame detection (no sensors: dropped 2026-11-20) |
 | Software rot | Frozen OS image on NAS |
 | SD wear | `sunset-lowwear.sh` for OS writes; High Endurance card for the real run; frames are the main wear |
 | Bumps when watering plants | Keyed mount, post-alignment against the tower |
@@ -532,7 +542,7 @@ Steven reviewed the Nov 12 `cm4wide` video (07:30 to dark, tighter crop, merged 
    Jul 11-Sep 23. Software can't protect the sensor (no shutter): the iris or an ND filter is Steven's call.
 5. **Fog detection**: flag low-contrast frames (#33).
 6. Port capture to **Picamera2** if finer control is needed than `rpicam-still` gives.
-7. SHT4x + TSL2591 logging (#34).
+7. ~~SHT4x + TSL2591 logging (#34)~~ **Dropped** (Steven, 2026-11-20).
 8. ~~Home Assistant config for the stale-file alert~~ **Done** (`homeassistant/`, steps in `docs/setup.md`).
 9. Mount design: start from Printables model 250692 or design a keyed plate + foam hood (#35).
 10. Post-processing pipeline: deflicker, stabilisation, "sunset along the horizon" sequence
@@ -547,8 +557,8 @@ Steven reviewed the Nov 12 `cm4wide` video (07:30 to dark, tighter crop, merged 
     `sky` block and `tools/build_video.py` prints it. On the pilot so far (wide camera): grey evenings
     5 to 13 (Nov 4-7, 9, 10), a part-clearing one 40 (Nov 11), the good ones Nov 8 and Nov 12 about 69 and 67.
     The CM4 camera read 11.9% warm sky on Nov 12 against the wide camera's 6.7%, so it has its own
-    scale (0.178) that gives it 67 as well. Still to do: pick the posting threshold with Steven, make the
-    publisher post only days above it, and retune once there are more good and grey sunsets. The saturation
+    scale (0.178) that gives it 67 as well. The posting threshold is 60 (Steven, kept 2026-11-20);
+    Steven posts by hand, and retune once there are more good and grey sunsets. The saturation
     of blue overcast rules out saturation as a signal. Needs a recheck after any lens or camera change.
 
 ## Creative outputs (later)

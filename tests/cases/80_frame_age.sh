@@ -113,7 +113,8 @@ PKG="$HA/sunset.yaml"
 check "package exists" test -f "$PKG"
 check "runs the age script" grep -q 'sunset_frame_age.sh' "$PKG"
 check "unknown age counts as stale" grep -q 'not is_number(age)' "$PKG"
-check "alert watches the stale sensor" grep -q 'entity_id: binary_sensor.sunset_frames_stale' "$PKG"
+check "alert watches the CM4 stale sensor" grep -q 'entity_id: binary_sensor.sunset_cm4_frames_stale' "$PKG"
+check "no timelaps (wide) checks left (retired 2026-11-17)" bash -c "! grep -Eq 'sunset_frames_stale|frame_age.sh\"|\.sh wide| verify wide | health wide ' '$PKG'"
 check "threshold starts at an hour" grep -q 'initial: 60' "$PKG"
 
 section "frame age: another camera by name"
@@ -134,7 +135,7 @@ section "Home Assistant package: the CM4"
 check "CM4 age sensor runs the script for cm4wide" grep -q 'sunset_frame_age.sh cm4wide' "$PKG"
 check "CM4 stale sensor" grep -q 'unique_id: sunset_cm4_frames_stale' "$PKG"
 check "CM4 alert watches it" grep -q 'entity_id: binary_sensor.sunset_cm4_frames_stale' "$PKG"
-check "CM4 unknown age counts as stale" test "$(grep -c 'not is_number(age)' "$PKG")" = 3
+check "CM4 unknown age counts as stale" test "$(grep -c 'not is_number(age)' "$PKG")" = 2
 check "cm4city age sensor runs the script for cm4city" grep -q 'sunset_frame_age.sh cm4city' "$PKG"
 check "cm4city alert watches its stale sensor" grep -q 'entity_id: binary_sensor.sunset_cm4city_frames_stale' "$PKG"
 
