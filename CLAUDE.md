@@ -309,7 +309,8 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
 - **Weather forecast (experiment 17, from 2026-11-09 00:22 UTC):** Steven asked about adapting
   settings to the weather. Plan agreed: record the forecast for at least two weeks first, then check
   whether it predicts which settings work, before it changes anything. `experiments/sunset-weather.py`
-  runs hourly at :07 from `exp-weather.timer` (a unit file, not a transient timer, so it survives a
+  runs hourly at :07 from `exp-weather.timer` (on `sunshine` from 2026-11-20 18:03 UTC; it ran on
+  `timelaps` until that Pi was retired, so there is no forecast from 04:07 UTC Nov 17 to then; a unit file, not a transient timer, so it survives a
   reboot). It saves Open-Meteo forecast (best match and GEM) and air quality to
   `project_sunshine_experiments/weather/` on the NAS, requested with the position rounded to 0.1°
   and with no position saved. The likely end state: measured scene data sets exposure, and the
