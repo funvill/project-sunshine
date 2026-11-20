@@ -174,19 +174,15 @@ def runs(slots):
     return [(f(a), f(b), n) for a, b, n in out]
 
 
-try:
-    from zoneinfo import ZoneInfo
-    VAN_TZ = ZoneInfo("America/Vancouver")
-except Exception:                       # no tzdata on this machine
-    VAN_TZ = None
+# BC is on UTC-7 all year from Nov 2026 (tzdata 2026b on), and the check only reads recent frames,
+# so this is a fixed offset rather than the machine's tzdata: tzdata older than 2026b (Ubuntu 22.04
+# shipped 2026a) still falls back to UTC-8 in winter and put every time an hour out.
+VAN_TZ = dt.timezone(dt.timedelta(hours=-7))
 
 
 def van(t):
-    """UTC -> Vancouver wall time. BC is on UTC-7 all year from 2026 (tzdata 2026b on); without
-    tzdata, a fixed UTC-7, which is right for the whole project (it starts after the change)."""
-    if VAN_TZ is not None:
-        return t.astimezone(VAN_TZ)
-    return t.astimezone(dt.timezone(dt.timedelta(hours=-7)))
+    """UTC -> Vancouver wall time (UTC-7 all year)."""
+    return t.astimezone(VAN_TZ)
 
 
 def hm(t):
