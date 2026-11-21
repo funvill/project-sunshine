@@ -198,6 +198,21 @@ check "skip logged" grep -q 'config backup skipped .*fstab.*password' "$SYNC_LOG
 check "password not logged" bash -c "! grep -q hunter2 '$SYNC_LOG_FILE'"
 check "password not on the share" bash -c "! grep -rq hunter2 '$W/share'"
 
+section "config backup: a secret under a longer setting name is caught too"
+# The filter once needed a non-letter before the keyword, so NAS_PASSWORD= or IG_ACCESS_TOKEN= passed.
+for secret in 'NAS_PASSWORD=hunter2' 'IG_ACCESS_TOKEN=hunter2' 'API_SECRET=hunter2' 'export SMB_PASS=hunter2' 'IG_TOKEN_2 = hunter2'; do
+  rb_env; cfg_fixture
+  printf 'CAM_NAME=wide
+%s
+' "$secret" > "$W/sunset.env"
+  sync_
+  check "$secret: sunset.env not copied" test ! -e "$(cfg_dir)/sunset.env"
+  check "$secret: not on the share" bash -c "! grep -rq hunter2 '$W/share'"
+done
+rb_env; cfg_fixture
+sync_
+check "an ordinary sunset.env is still copied" test -e "$(cfg_dir)/sunset.env"
+
 section "config backup: a missing sunset.env is logged, the rest copied"
 rb_env; cfg_fixture; rm -f "$W/sunset.env"
 sync_

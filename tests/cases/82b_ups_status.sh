@@ -40,6 +40,23 @@ d="$W/cm4wide/2026/11/20"; mkdir -p "$d"
 printf '{"Capture":{"kind":"auto"},"System":{"cpu_temp_c":40}}\n' > "$d/cm4wide_20261120T175500Z.json"
 ha_out "a frame from before the UPS fields (no ups_source)" "unknown none" "$SH" cm4wide
 
+section "ups: an old frame says nothing about the power now"
+# With captures failing (Nov 19-20) the newest frame can be hours old; its "mains" is no evidence.
+fresh_ups
+uframe cm4wide 20261120T163000Z '"mains"' 100
+ha_out "a frame 90 minutes old is unknown" "unknown old_frame" "$SH" cm4wide
+fresh_ups
+uframe cm4wide 20261120T170100Z '"battery"' 80
+ha_out "59 minutes is still read" "battery 80" "$SH" cm4wide
+fresh_ups
+uframe cm4wide 20261120T171500Z '"mains"' 100
+export UPS_MAX_AGE_MIN=30
+ha_out "the limit is a setting" "unknown old_frame" "$SH" cm4wide
+unset UPS_MAX_AGE_MIN
+fresh_ups
+uframe cm4wide 20261120T163000Z '"battery"' 80 '"cpu_temp_c":40,"ups":{"ok":true,"vin":0.0,"cells":[3.9,3.9,3.9]}'
+check "old frame: no numbers in --json" test "$(sh "$SH" cm4wide --json | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['state'], d['power'], d['cell1_v'], d['cpu_temp_c'])")" = "unknown old_frame None None None"
+
 section "ups: nothing to read"
 fresh_ups
 ha_fails "no frame in two days" "$SH" cm4wide

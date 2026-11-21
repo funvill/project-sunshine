@@ -58,6 +58,9 @@ DEADBANDS = {
 # Any change in these is a change.
 EXACT = ("source", "fw", "ups_state", "chg_state", "present", "flags")
 
+# The diag page (sunset-diag.service) stops these while it is on and starts them when it ends.
+DIAG_UNIT = "sunset-diag.service"
+DIAG_STOPS = ("sunset-capture.timer", "sunset-dense.timer", "sunset-capture2.timer", "sunset-dense2.timer")
 PAUSE_UNITS = ("sunset-capture.timer sunset-dense.timer sunset-capture2.timer "
                "sunset-dense2.timer sunset-sync.timer")
 
@@ -82,7 +85,9 @@ class Settings:
         self.log_max = env("UPS_LOG_MAX_BYTES", 262144, int)
         self.log_keep = max(1, env("UPS_LOG_KEEP", 14, int))
         self.status_file = env("UPS_STATUS_FILE", "/run/sunset-ups.json")
-        self.low_cell_v = env("UPS_LOW_CELL_V", 3.45, float)
+        # 3.3 V, was 3.45 V: with R20 unchanged the cells rest at the ~3.5-3.6 V charge stop, and 3.45 V
+        # would have paused capture early in a short cut (review, 2026-11-21).
+        self.low_cell_v = env("UPS_LOW_CELL_V", 3.3, float)
         self.low_pct = env("UPS_LOW_PCT", 10, int)
         self.warn_temp = env("UPS_WARN_TEMP_C", 40, int)
         self.pause = env("UPS_PAUSE", 1, int) == 1
@@ -262,6 +267,22 @@ class Monitor:
         except OSError:
             pass
 
+    def resume_units(self):
+        """What to start when mains returns: what the pause stopped, plus any timers the diag page
+        handed over by appending them to the flag when it ended during the pause (it stops the
+        camera timers while it is on, so the pause may not have seen them running). While diag is
+        still on, the camera timers are left for it to start when it ends."""
+        units = list(self.cfg.pause_units if self.paused_units is None else self.paused_units)
+        if self.cfg.pause_flag:
+            try:
+                with open(self.cfg.pause_flag) as f:
+                    units += [u for u in f.read().split() if u != "-" and u not in units]
+            except OSError:
+                pass
+        if self.active(DIAG_UNIT):
+            units = [u for u in units if u not in DIAG_STOPS]
+        return units
+
     def event(self, name, s=None):
         self.write("EVENT " + name, s)
 
@@ -299,7 +320,7 @@ class Monitor:
             else:
                 self.event("capture_pause_skipped_UPS_PAUSE=0", s)
         elif self.paused and s["source"] == "mains":
-            units = self.cfg.pause_units if self.paused_units is None else self.paused_units
+            units = self.resume_units()
             self.paused_units = None
             self.set_paused(False)
             if self.cfg.pause:
@@ -389,16 +410,35 @@ def open_device(cfg):
     return Device(path)
 
 
+def log_writer(log, report=None, clock=time.time):
+    """A writer for Monitor that never raises. ups.log is on the SD card: if it is full, read-only or
+    the file has the wrong owner, a failed write must not stop the monitor (it used to crash-loop,
+    and then never paused or resumed capture). The first failure of a run is reported to the journal."""
+    report = report or (lambda msg: print(msg, file=sys.stderr, flush=True))
+    state = {"failing": False}
+
+    def write(tag, s):
+        try:
+            log.write(fmt_line(clock(), tag, s))
+            state["failing"] = False
+        except OSError as e:
+            if not state["failing"]:
+                report("ups.log not written (%s); still monitoring" % e)
+            state["failing"] = True
+    return write
+
+
 def run_forever(cfg):
     log = RotatingLog(cfg.log_file, cfg.log_max, cfg.log_keep)
-    mon = Monitor(cfg, lambda tag, s: log.write(fmt_line(time.time(), tag, s)))
+    write = log_writer(log)
+    mon = Monitor(cfg, write)
     stop = {"now": False}
 
     def on_term(*_):
         stop["now"] = True
     signal.signal(signal.SIGTERM, on_term)
     signal.signal(signal.SIGINT, on_term)
-    log.write(fmt_line(time.time(), "START pid=%d poll=%gs keyframe=%gs" % (os.getpid(), cfg.poll_s, cfg.keyframe_s), None))
+    write("START pid=%d poll=%gs keyframe=%gs" % (os.getpid(), cfg.poll_s, cfg.keyframe_s), None)
     dev = None
     while not stop["now"]:
         t0 = time.time()
@@ -418,7 +458,7 @@ def run_forever(cfg):
             time.sleep(0.5)
     if dev is not None:
         dev.close()
-    log.write(fmt_line(time.time(), "STOP", None))
+    write("STOP", None)
 
 
 def main(argv=None):

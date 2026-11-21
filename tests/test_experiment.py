@@ -45,6 +45,10 @@ class ClearToStart(unittest.TestCase):
     def test_refuses_while_the_real_capture_may_still_be_running(self):
         self.assertFalse(exp.clear_to_start(SLOT + 20, est_s=5))
 
+    def test_refuses_while_the_second_camera_takes_its_slot(self):
+        # The second camera's regular frame starts 30 s after the slot and takes about 20 s.
+        self.assertFalse(exp.clear_to_start(SLOT + 46, est_s=3))
+
     def test_allows_after_the_real_capture_has_had_its_time(self):
         self.assertTrue(exp.clear_to_start(SLOT + exp.AFTER_SLOT_S + 1, est_s=5))
 
@@ -72,6 +76,15 @@ class DenseFrameGuard(unittest.TestCase):
     def test_night_exposures_too_long_for_a_minute_are_not_held_to_it(self):
         # Only scheduled at night, outside the dense windows (sun below -9 degrees).
         self.assertTrue(exp.clear_to_start(self.MID_GAP + 30, est_s=exp.estimate_s(16_000_000)))
+
+    def test_second_camera_dense_frame_at_half_past(self):
+        # With the second camera on (cm4city), its dense frame starts at :30 each minute and skips
+        # itself if the camera is busy: a short shot keeps clear of both :00 and :30.
+        for s in list(range(exp.DENSE_AFTER_S)) + [30 + s for s in range(exp.DENSE_AFTER_S)]:
+            self.assertFalse(exp.clear_to_start(self.MID_GAP + s, est_s=3, period=30), s)
+        self.assertTrue(exp.clear_to_start(self.MID_GAP + exp.DENSE_AFTER_S, est_s=3, period=30))
+        self.assertTrue(exp.clear_to_start(self.MID_GAP + 30 + exp.DENSE_AFTER_S, est_s=3, period=30))
+        self.assertFalse(exp.clear_to_start(self.MID_GAP + 20, est_s=10, period=30))   # runs into :30
 
     def test_twilight_ladders_fit_the_minute_guard(self):
         # The dusk and dawn ladders run inside the dense windows, so they must not be exempt.
@@ -729,7 +742,7 @@ class ShotWithTheCaptureLock(unittest.TestCase):
                        "sd_low_reason")}
         exp.EXP_ROOT = pathlib.Path(self.tmp.name) / "runs"
         exp.sd_low_reason = lambda usage: None      # whatever the test machine's disk holds
-        exp.clear_to_start = lambda now, est: True
+        exp.clear_to_start = lambda now, est, period=60: True
         exp.camera_busy = lambda: False
         exp.read_text = lambda cmd: ""
         self.run_ = exp.Run("t")
@@ -904,7 +917,7 @@ class SdGuard(unittest.TestCase):
         saved = exp.EXP_ROOT, exp.sd_low_reason, exp.clear_to_start, exp.camera_busy
         exp.EXP_ROOT = pathlib.Path(tmp.name)
         exp.sd_low_reason = lambda usage: "SD 90% used"
-        exp.clear_to_start, exp.camera_busy = (lambda now, est: True), (lambda: False)
+        exp.clear_to_start, exp.camera_busy = (lambda now, est, period=60: True), (lambda: False)
         try:
             run = exp.Run("t")
             run.camera_lock = FakeLock()
@@ -943,6 +956,42 @@ class FinalUpload(unittest.TestCase):
         finally:
             exp.experiment_lock, exp.run_program, exp.Run.upload, exp.EXP_ROOT, exp.load_site_env = saved
         self.assertIs(state["held_at_upload"], False)
+
+
+class Camera(unittest.TestCase):
+    """The runner shoots the camera named by CAMERA in sunset.env, like the production capture."""
+
+    LIST = ("Available cameras\n-----------------\n"
+            "0 : imx477 [4056x3040 12-bit RGGB] (/base/soc/i2c0mux/i2c@1/imx477@1a)\n"
+            "    Modes: 'SRGGB10_CSI2P' : 1332x990 [120.05 fps - (696, 528)/2664x1980 crop]\n"
+            "1 : imx477 [4056x3040 12-bit RGGB] (/base/soc/i2c0mux/i2c@0/imx477@1a)\n")
+
+    def test_port_id_picks_the_index(self):
+        self.assertEqual(exp.camera_index("i2c@0", self.LIST), "1")
+        self.assertEqual(exp.camera_index("i2c@1", self.LIST), "0")
+
+    def test_plain_number_is_the_index(self):
+        self.assertEqual(exp.camera_index("0", ""), "0")
+
+    def test_no_camera_setting_means_rpicams_default(self):
+        self.assertIsNone(exp.camera_index("", self.LIST))
+
+    def test_no_match_or_two_matches_is_refused(self):
+        with self.assertRaises(ValueError):
+            exp.camera_index("i2c@5", self.LIST)
+        with self.assertRaises(ValueError):
+            exp.camera_index("imx477", self.LIST)
+        with self.assertRaises(ValueError):
+            exp.camera_index("i2c@0", "")
+
+    def test_command_passes_the_camera(self):
+        os.environ["CAM_INDEX"] = "1"
+        try:
+            cmd = exp.Shot("t").command("/x/t")
+        finally:
+            del os.environ["CAM_INDEX"]
+        self.assertEqual(cmd[cmd.index("--camera") + 1], "1")
+        self.assertNotIn("--camera", exp.Shot("t").command("/x/t"))
 
 
 if __name__ == "__main__":

@@ -271,7 +271,9 @@ rescue_partial() {
   done
 }
 rescue_partial
-find "$STAGE" -type f -mmin +60 -delete 2>/dev/null || true   # incomplete leftovers from a killed capture
+# Incomplete leftovers from a killed capture, this camera's only: the two CM4 cameras share .partial,
+# and the other camera's unpublished frame is for its own next run to rescue (review, 2026-11-21).
+find "$STAGE" -maxdepth 1 -type f \( -name "${CAM_NAME}_*" -o -name ".${CAM_NAME}_*" \) -mmin +60 -delete 2>/dev/null || true
 BASE="$STAGE/$NAME"
 ERR_FILE="$STAGE/.last-error"
 

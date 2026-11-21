@@ -13,11 +13,13 @@ EnvironmentFile=-/run/sunset-diag.env
 # every 5 minutes while a camera is being aimed or focused. "+" runs these as root. ExecStopPost
 # also runs when the page times out or fails, so capture always comes back.
 # The second camera's timers too, where they exist (the "-" ignores a failure on a Pi without them).
+# Except during a UPS low-battery pause (/run/sunset-ups.paused, pi/sunset-ups.py): then the timers
+# are added to the pause's list, and the UPS monitor starts them when mains returns (review 2026-11-21).
 ExecStartPre=+/bin/systemctl stop sunset-capture.timer sunset-dense.timer
 ExecStartPre=-+/bin/systemctl stop sunset-capture2.timer sunset-dense2.timer
 ExecStart=/usr/bin/python3 /home/pi/sunset/sunset-diag.py
-ExecStopPost=+/bin/systemctl start sunset-capture.timer sunset-dense.timer
-ExecStopPost=-+/bin/sh -c 'systemctl is-enabled -q sunset-capture2.timer && systemctl start sunset-capture2.timer sunset-dense2.timer'
+ExecStopPost=+/bin/sh -c 'if [ -e /run/sunset-ups.paused ]; then echo sunset-capture.timer sunset-dense.timer >> /run/sunset-ups.paused; else systemctl start sunset-capture.timer sunset-dense.timer; fi'
+ExecStopPost=-+/bin/sh -c 'systemctl is-enabled -q sunset-capture2.timer || exit 0; if [ -e /run/sunset-ups.paused ]; then echo sunset-capture2.timer sunset-dense2.timer >> /run/sunset-ups.paused; else systemctl start sunset-capture2.timer sunset-dense2.timer; fi'
 # The link file for the diag command. In RAM, so it costs no SD writes.
 RuntimeDirectory=sunset-diag
 NoNewPrivileges=yes

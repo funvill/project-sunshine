@@ -357,6 +357,7 @@ alert:
       {% set ups = states('sensor.sunset_ups') %}
       {% if ups.startswith('battery') %}The CM4 (sunshine) lost mains power and is running on the UPS cells, {{ ups.split(' ')[1] if ' ' in ups else '?' }}% charge.
       At low battery the Pi pauses capture and waits for mains (issue #29).
+      {% elif ups == 'unknown old_frame' %}Home Assistant can't tell whether the CM4 has power: the newest cm4wide frame is over an hour old, so its UPS reading is out of date. See the "no new frames" alert.
       {% elif ups in ['unknown', 'unavailable', ''] %}Home Assistant has no UPS reading yet: it may have just restarted (it reads a frame within 2 minutes), or no recent frame JSON is readable.
       {% else %}Home Assistant can't tell whether the CM4 is on mains: the UPS reads "{{ ups }}" (the UPS monitor's status is stale or missing).{% endif %}
     done_message: The CM4 is back on mains power.

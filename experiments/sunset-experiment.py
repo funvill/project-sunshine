@@ -31,6 +31,7 @@ import dataclasses
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -51,7 +52,8 @@ ENV_FILE = HERE.parent / "sunset.env"
 LOCK_FILE = HERE / ".experiment.lock"
 
 SLOT_S = 300  # must match OnCalendar in pi/systemd/sunset-capture.timer
-AFTER_SLOT_S = 45  # the real capture took 17 s with a night frame; leave it plenty of room
+AFTER_SLOT_S = 72  # the real capture took 17 s with a night frame, and on the CM4 the second camera's
+# starts 30 s after the slot and takes about 20 s more (review 2026-11-21; was 45)
 BEFORE_SLOT_S = 5
 SUNSET_WINDOW_S = 45 * 60
 SUN_LADDER_BEFORE_S = 5 * 3600
@@ -75,14 +77,16 @@ DENSE_BEFORE_S = 3  # and skips itself if the camera is busy, so stay clear of b
 MINUTE_GUARD_MAX_S = 45  # longer shots are night exposures, only run outside the dense windows
 
 
-def clear_to_start(now, est_s):
-    """True if a shot taking est_s can start now and finish clear of the real captures."""
+def clear_to_start(now, est_s, period=60):
+    """True if a shot taking est_s can start now and finish clear of the real captures. period is
+    the gap between dense frames: 60 s with one camera, 30 s with the second camera on, whose dense
+    frame starts at :30 (so a shot over about 15 s waits for the night outside the dense windows)."""
     phase = now % SLOT_S
     if phase < AFTER_SLOT_S:
         return False
     if est_s <= MINUTE_GUARD_MAX_S:
-        second = now % 60
-        if second < DENSE_AFTER_S or second + est_s + DENSE_BEFORE_S >= 60:
+        second = now % period
+        if second < DENSE_AFTER_S or second + est_s + DENSE_BEFORE_S >= period:
             return False
     return phase + est_s + BEFORE_SLOT_S < SLOT_S
 
@@ -192,6 +196,8 @@ class Shot:
 
     def command(self, base):
         cmd = ["rpicam-still", "-n", "-t", str(self.settle_ms)]
+        if os.environ.get("CAM_INDEX", "").strip():   # from CAMERA in sunset.env, see camera_index
+            cmd += ["--camera", os.environ["CAM_INDEX"].strip()]
         if os.environ.get("ROTATION", "").strip() == "180":  # camera mounted upside down
             cmd += ["--rotation", "180"]
         if self.immediate:
@@ -438,6 +444,27 @@ def read_text(cmd):
         return ""
 
 
+def camera_index(camera, listing):
+    """rpicam's index for CAMERA, as the production capture finds it (pi/sunset-capture.sh): a port
+    ID such as i2c@0 matched against the --list-cameras lines, or a plain number. None if CAMERA is
+    not set. No match, or more than one, raises ValueError: shooting the other camera would put its
+    pictures in this camera's run (on the CM4, rpicam's camera 0 is CAM1, review 2026-11-21)."""
+    camera = (camera or "").strip()
+    if not camera:
+        return None
+    if camera.isdigit():
+        return camera
+    lines = [l for l in listing.splitlines() if re.match(r"^\s*\d+ : ", l) and camera in l]
+    if len(lines) != 1:
+        raise ValueError("CAMERA=%s matches %d cameras" % (camera, len(lines)))
+    return re.match(r"^\s*(\d+) : ", lines[0]).group(1)
+
+
+def second_camera_on():
+    """The second camera's dense frames run at :30 each minute while this timer is active."""
+    return read_text(["systemctl", "is-active", "sunset-dense2.timer"]) == "active"
+
+
 def camera_busy():
     for name in ("rpicam-vid", "rpicam-still"):
         if subprocess.run(["pgrep", "-x", name], capture_output=True).returncode == 0:
@@ -445,7 +472,8 @@ def camera_busy():
     if read_text(["systemctl", "is-active", "sunset-diag.service"]) == "active":
         return True  # someone may be looking at the page; the stream comes first
     return any(read_text(["systemctl", "is-active", unit]) in ("active", "activating")
-               for unit in ("sunset-capture.service", "sunset-dense.service"))
+               for unit in ("sunset-capture.service", "sunset-dense.service",
+                            "sunset-capture2.service", "sunset-dense2.service"))
 
 
 def load_site_env():
@@ -456,7 +484,7 @@ def load_site_env():
         return
     for line in lines:
         line = line.split("#", 1)[0].strip()
-        if line.startswith(("SITE_LAT=", "SITE_LON=", "ROTATION=")):
+        if line.startswith(("SITE_LAT=", "SITE_LON=", "ROTATION=", "CAMERA=")):
             key, value = line.split("=", 1)
             os.environ[key] = value.strip().strip("\"'")
 
@@ -509,9 +537,10 @@ class Run:
             self.record(utc=stamp, label=shot.label, status=f"skipped: SD low ({low})")
             return
         est = estimate_s(shot.shutter_us)
+        period = 30 if second_camera_on() else 60
         waited = time.time()
         while True:
-            if not clear_to_start(time.time(), est) or camera_busy():
+            if not clear_to_start(time.time(), est, period) or camera_busy():
                 reason = "camera not clear"
             elif self.camera_lock.acquire():
                 break
@@ -727,6 +756,13 @@ def main(argv=None):
     args = parse_args(argv)
 
     load_site_env()
+    try:
+        index = camera_index(os.environ.get("CAMERA", ""), read_text(["rpicam-still", "--list-cameras"])
+                             if os.environ.get("CAMERA", "").strip() and not os.environ["CAMERA"].strip().isdigit() else "")
+    except ValueError as e:
+        sys.exit("not running: %s" % e)
+    if index is not None:
+        os.environ["CAM_INDEX"] = index
     with experiment_lock(LOCK_FILE):
         run = Run(args.run)
         run_program(run, args)

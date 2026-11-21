@@ -6,7 +6,7 @@
 # in a window rather than in a row. On that log, 3 in 60 minutes would have rebooted at 14:46 UTC.
 # Runs every 5 minutes as root from sunset-camwatch.timer, and does nothing unless CAMWATCH=1.
 #   - reads capture.log (both cameras log there, each line says cam=<name>)
-#   - counts, per camera, failed captures (5-minute, dense and night) since this boot within the
+#   - counts, per camera, failed captures (5-minute, dense, night, empty JPEG) since this boot within the
 #     last CAMWATCH_WINDOW_MIN; "FAILED publish" (storage), skips and retried WARNs don't count
 #   - CAMWATCH_FAILS or more: reboots, at most once every 6 hours, so a dead camera can't cause a
 #     reboot loop. With a trusted clock it first leaves the time for the capture after the reboot,
@@ -46,7 +46,7 @@ cutoff="$(date -u -d "@$since" +%FT%TZ)"
 until="$(date -u -d "@$NOW" +%FT%TZ)"
 
 worst="$(tail -n 3000 "$CAPTURE_LOG" | awk -v cutoff="$cutoff" -v until="$until" '
-  $1 >= cutoff && $1 <= until && $2 ~ /^cam=/ && / FAILED (capture|night)( |$)/ { n[substr($2, 5)]++ }
+  $1 >= cutoff && $1 <= until && $2 ~ /^cam=/ && / FAILED (capture|night)([ (]|$)/ { n[substr($2, 5)]++ }
   END { for (c in n) print n[c], c }' | sort -rn | head -n 1)"
 [[ -n "$worst" ]] || exit 0
 read -r count cam <<< "$worst"

@@ -79,7 +79,7 @@ backup_config() {
       log "config backup skipped $src: a credential file"
     elif [[ ! -f "$src" || ! -r "$src" ]]; then
       log "config backup: $src missing"
-    elif grep -Eiq '(^|[^a-z_])(password|passwd|pass|secret|token)[[:space:]]*=' "$src" 2>/dev/null; then
+    elif grep -Eiq '(password|passwd|pass|secret|token)[a-z0-9_]*[[:space:]]*=' "$src" 2>/dev/null; then
       log "config backup skipped $src: it holds a password"
     elif cp "$src" "$CONFIG_DIR/.${names[$i]}.tmp" 2>/dev/null &&
          mv -f "$CONFIG_DIR/.${names[$i]}.tmp" "$CONFIG_DIR/${names[$i]}" 2>/dev/null; then
