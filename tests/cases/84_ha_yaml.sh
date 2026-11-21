@@ -110,7 +110,7 @@ ups_sensor = sensors["sensor.sunset_ups"]
 result("--json" in ups_sensor["command"] and ups_sensor.get("value_template") == "{{ value_json.state }}",
        "the UPS sensor reads --json and keeps the plain line as its state")
 numbers_t = [x for t in main["template"] for x in t.get("sensor", [])]
-result(len(numbers_t) == 10, "ten UPS number sensors (charge, 3 voltages, 3 cells x volts and temperature)")
+result(len(numbers_t) == 11, "eleven number sensors (UPS charge, 3 voltages, 3 cells x volts and temperature; CM4 CPU temperature)")
 for t in numbers_t:
     attr = re.findall(r"state_attr\('sensor\.sunset_ups', '([a-z0-9_]+)'\)", t["state"])
     ok_attr = len(attr) == 1 and attr[0] in ups_sensor["json_attributes"] and attr[0] in t.get("availability", "")

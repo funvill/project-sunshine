@@ -367,7 +367,8 @@ The package alerts on:
   and graphs: charge %, input, output and pack voltage, each cell's voltage and temperature
   (`sensor.sunset_ups_cell_1_voltage` and so on). Input voltage stands in for "mains": about 15.2 V on
   mains, 0 on the cells. The board reports no discharge current or run time, so there are no sensors
-  for those. A value the frame lacks (stale UPS status) is a gap in the graph, never a 0;
+  for those. A value the frame lacks (stale UPS status) is a gap in the graph, never a 0. The same
+  script also gives the CM4's CPU temperature from that frame (`sensor.sunset_cm4_cpu_temperature`);
 - in the repo only, until the NAS jobs run: the daily video job's status, and the results of
   `nas/sunset-verify.py` and `nas/sunset-health.py` (see `nas/README.md`).
 
