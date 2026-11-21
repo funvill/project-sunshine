@@ -74,6 +74,12 @@ fail 20 cm4city
 camwatch
 check "dense and night failures count" grep -q 'systemctl reboot' "$STUB_CALLS"
 cam_env
+line 40 cm4city "FAILED capture(empty jpg) rc=0 err=|"
+line 30 cm4city "FAILED capture(empty jpg) rc=0 err=|"
+line 20 cm4city "dense window=sunset FAILED capture(empty jpg) rc=0 err=|"
+camwatch
+check "empty-JPEG failures count" grep -q 'systemctl reboot' "$STUB_CALLS"
+cam_env
 line 40 cm4city "FAILED publish cm4city_x.jpg err=No space left|"
 line 30 cm4city "FAILED publish cm4city_y.jpg err=No space left|"
 line 20 cm4city "FAILED publish cm4city_z.jpg err=No space left|"

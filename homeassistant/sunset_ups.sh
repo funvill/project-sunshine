@@ -5,7 +5,9 @@
 #   mains 100      on mains, with the charge in percent (left out if the board didn't give one)
 #   battery 87     on the cells
 #   unknown <why>  the frame has no usable source: <why> is the monitor's error (e.g. stale), the
-#                  unrecognised source, or "none"
+#                  unrecognised source, or "none"; "old_frame" if the newest frame is older than
+#                  UPS_MAX_AGE_MIN (60) minutes, since its reading says nothing about the power now
+#                  (captures failing; review 2026-11-21)
 # Prints nothing and exits 1 if there is no readable frame JSON in the last two UTC days or python3 is
 # missing: Home Assistant shows that as unknown. The alert treats anything but "mains" as bad.
 # Runs in Home Assistant's container: POSIX sh, with python3 (which that container has) for the JSON.
@@ -21,7 +23,7 @@ case "$MODE" in ""|--json) ;; *) echo "unknown option: $MODE" >&2; exit 2 ;; esa
 ROOT="${FRAME_ROOT:-${FRAME_BASE:-/share/camera/project_sunshine}/$CAM}"
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found" >&2; exit 1; }
 exec python3 -I - "$ROOT" "$CAM" "$MODE" <<'PY'
-import json, os, re, sys, time
+import calendar, json, os, re, sys, time
 
 root, cam, mode = sys.argv[1], sys.argv[2], sys.argv[3]
 now = float(os.environ.get("SUNSET_NOW") or time.time())
@@ -36,6 +38,7 @@ for t in (now, now - 86400):
     found += [(m.group(1), bool(m.group(2)), folder, n) for n in names for m in [pattern.match(n)] if m]
 found.sort(reverse=True)
 
+max_age_s = float(os.environ.get("UPS_MAX_AGE_MIN") or 60) * 60
 data = None
 for entry in found[:3]:     # the newest file can be half copied: try the next one
     try:
@@ -49,6 +52,9 @@ for entry in found[:3]:     # the newest file can be half copied: try the next o
 if data is None:
     sys.exit(1)
 
+old = now - calendar.timegm(time.strptime(entry[0], "%Y%m%dT%H%M%SZ")) > max_age_s
+if old:
+    data = {}      # too old to say anything about the power now: every value unknown
 system = data.get("System") if isinstance(data.get("System"), dict) else {}
 src = system.get("ups_source")
 pct = system.get("ups_charge_pct")
@@ -57,7 +63,7 @@ ups = system.get("ups") if isinstance(system.get("ups"), dict) else {}
 if src in ("mains", "battery"):
     state = src if pct is None else "%s %g" % (src, pct)
 else:
-    why = src if isinstance(src, str) and src else ups.get("error") or "none"
+    why = "old_frame" if old else src if isinstance(src, str) and src else ups.get("error") or "none"
     state = "unknown %s" % re.sub(r"\s+", "_", str(why))
 if mode != "--json":
     print(state)

@@ -247,10 +247,17 @@ How it reaches the NAS, without extra writes to the eMMC:
   `project_sunshine_config/<host>/ups/ups-<UTC of its first line>.log`. A file is copied again only
   when its size on the share differs.
 
-On battery with a cell under `UPS_LOW_CELL_V` (3.45 V) or charge at or under `UPS_LOW_PCT` (10%),
-it stops whichever of the capture, dense (both cameras) and sync timers are running, flushes the
-disks and logs `capture_paused units=...`; when mains returns it starts the same ones again. It
-never halts the Pi. Settings: `UPS_*` in `sunset.env.example`. No Home Assistant alert on it yet.
+On battery with a cell under `UPS_LOW_CELL_V` (3.3 V; 3.45 V until 2026-11-21, which sat just
+under where the cells rest with R20 unchanged) or charge at or under `UPS_LOW_PCT` (10%; the board
+keeps saying 100% on battery, so in practice the cell voltage decides), it stops whichever of the
+capture, dense (both cameras) and sync timers are running, flushes the disks and logs
+`capture_paused units=...`; when mains returns it starts the same ones again. It never halts the
+Pi. If the diag page ends during a pause, it adds its camera timers to the pause
+(`/run/sunset-ups.paused`) instead of starting them on battery; while diag is on when mains
+returns, the camera timers are left for diag to start. A full or read-only SD card no longer stops
+the monitor: the failure goes to the journal once and polling continues. Settings: `UPS_*` in
+`sunset.env.example`. Home Assistant's on-battery alert is described under "Monitoring beyond
+frame age".
 
 ### Next sunset, for scheduling
 ```
@@ -358,7 +365,9 @@ The package alerts on:
   frames waiting to sync, disk use, tiny or repeated JPEGs;
 - **the CM4 on battery** (`sensor.sunset_ups`, from `System.ups_source` and `ups_charge_pct` in the
   newest `cm4wide` frame; `homeassistant/sunset_ups.sh`): anything but `mains` for 2 minutes, which
-  includes a stale UPS status, repeating hourly. A power cut shows up within about 5 to 10 minutes
+  includes a stale UPS status, and a newest frame over `UPS_MAX_AGE_MIN` (60) minutes old
+  (`unknown old_frame`: with captures failing, an old "mains" says nothing about the power now),
+  repeating hourly. A power cut shows up within about 5 to 10 minutes
   (the next frame, then the 2-minute scan). Tested with a real cut on 2026-11-20. Just after HA
   restarts the sensor is `unknown` for up to 2 minutes, and the alert can fire once in that time;
   its message says so;

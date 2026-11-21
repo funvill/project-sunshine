@@ -103,6 +103,21 @@ touch -d '2 hours ago' "$OUT_ROOT/.partial"/*
 capture
 check "an old complete set is rescued, not deleted" test -e "$OUT_ROOT/wide/2026/11/01/wide_20261101T001000Z.jpg"
 
+section "capture: another camera's leftovers in the shared .partial are not touched"
+# Two cameras share .partial. A frame the other camera finished but never published (a power cut,
+# then that camera failing to start) is its own run's to rescue: this camera must not delete it.
+fail_env; mkdir -p "$OUT_ROOT/.partial"
+printf x > "$OUT_ROOT/.partial/city_20261101T001030Z.jpg"; printf '{}' > "$OUT_ROOT/.partial/city_20261101T001030Z.json"
+printf x > "$OUT_ROOT/.partial/.city_20261101T001030Z.json.1234.tmp"
+printf x > "$OUT_ROOT/.partial/wide_20261101T000000Z.jpg"     # this camera's own: incomplete
+printf x > "$OUT_ROOT/.partial/.wide_20261101T000000Z.json.99.tmp"
+touch -d '2 hours ago' "$OUT_ROOT/.partial"/* "$OUT_ROOT/.partial"/.*.tmp
+capture
+check "the other camera's finished frame is kept" test -e "$OUT_ROOT/.partial/city_20261101T001030Z.jpg" -a -e "$OUT_ROOT/.partial/city_20261101T001030Z.json"
+check "the other camera's temp file is kept" test -e "$OUT_ROOT/.partial/.city_20261101T001030Z.json.1234.tmp"
+check "this camera's old incomplete leftover is deleted" test ! -e "$OUT_ROOT/.partial/wide_20261101T000000Z.jpg"
+check "this camera's old temp file is deleted" test ! -e "$OUT_ROOT/.partial/.wide_20261101T000000Z.json.99.tmp"
+
 section "capture: df gives nothing"
 fail_env; export STUB_DF=empty
 capture; rc=$?

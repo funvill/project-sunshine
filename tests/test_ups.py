@@ -67,11 +67,11 @@ class Clock:
 
 
 def monitor(cfg=None, flag="", running=None):
-    """running: the units systemd reports active (default: all of them)."""
+    """running: the units systemd reports active (default: all the pause units; the diag page off)."""
     cfg = cfg or Cfg()
     cfg.pause_flag = flag
     lines, calls, clock = [], [], Clock()
-    active = (lambda u: True) if running is None else (lambda u: u in running)
+    active = (lambda u: u != "sunset-diag.service") if running is None else (lambda u: u in running)
     m = ups.Monitor(cfg, lambda tag, s: lines.append(tag), run=lambda argv: calls.append(argv) or 0,
                     clock=clock, active=active)
     return m, lines, calls, clock
@@ -289,6 +289,81 @@ class Events(unittest.TestCase):
         self.assertEqual([l for l in lines if l.startswith("EVENT")], ["EVENT ups_lost TimeoutError", "EVENT ups_found"])
 
 
+class Diag(unittest.TestCase):
+    """The diag page stops the camera timers while it is on and starts them when it ends."""
+
+    CAMS = ["sunset-capture.timer", "sunset-dense.timer", "sunset-capture2.timer", "sunset-dense2.timer"]
+
+    def test_diag_ending_during_a_pause_hands_its_timers_to_the_resume(self):
+        # Diag stopped the cameras, so the pause stopped only the sync. Diag ended while paused and
+        # appended its timers to the flag instead of starting them (sunset-diag.service).
+        with tempfile.TemporaryDirectory() as d:
+            flag = os.path.join(d, "paused")
+            m, _, calls, _ = monitor(flag=flag, running={"sunset-sync.timer"})
+            m.poll(reply("battery", vin=0.0, cells=(3.20, 3.20, 3.20), pct=5))
+            self.assertEqual(calls[0], ["systemctl", "stop", "sunset-sync.timer"])
+            with open(flag, "a") as f:
+                f.write("sunset-capture.timer\nsunset-dense.timer\n")
+            m.active = lambda u: False   # diag is no longer running
+            m.poll(reply("mains", pct=6))
+            self.assertEqual(calls[-1], ["systemctl", "start", "sunset-sync.timer", "sunset-capture.timer", "sunset-dense.timer"])
+
+    def test_diag_ending_after_a_pause_from_an_empty_list(self):
+        with tempfile.TemporaryDirectory() as d:
+            flag = os.path.join(d, "paused")
+            m, _, calls, _ = monitor(flag=flag, running=set())
+            m.poll(reply("battery", vin=0.0, cells=(3.20, 3.20, 3.20), pct=5))
+            with open(flag, "a") as f:
+                f.write("sunset-capture.timer\n")
+            m.poll(reply("mains", pct=6))
+            self.assertEqual(calls[-1], ["systemctl", "start", "sunset-capture.timer"])
+
+    def test_resume_leaves_the_cameras_to_diag_while_it_is_on(self):
+        # Mains returns with the diag page open: starting the camera timers would take the camera
+        # from the page. Diag starts them itself when it ends (the flag is gone by then).
+        m, lines, calls, _ = monitor(running=set(Cfg.pause_units))
+        m.poll(reply("battery", vin=0.0, cells=(3.20, 3.20, 3.20), pct=5))
+        m.active = lambda u: u == "sunset-diag.service"
+        m.poll(reply("mains", pct=6))
+        self.assertEqual(calls[-1], ["systemctl", "start", "sunset-sync.timer"])
+        self.assertIn("EVENT capture_resumed", lines)
+
+    def test_the_unit_file_checks_the_pause_flag(self):
+        unit = open(os.path.join(os.path.dirname(HERE), "pi", "systemd", "sunset-diag.service")).read()
+        stops = [l for l in unit.splitlines() if l.startswith("ExecStopPost=")]
+        self.assertTrue(stops)
+        for l in stops:
+            self.assertIn("/run/sunset-ups.paused", l)
+        for u in self.CAMS:
+            self.assertIn(u, "".join(stops))
+
+
+class Writer(unittest.TestCase):
+    """A log that can't be written (SD full or read-only) must not stop the monitor."""
+
+    def test_failed_write_is_reported_not_raised(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = ups.RotatingLog(os.path.join(d, "missing", "ups.log"), 1000, 2)
+            err = []
+            write = ups.log_writer(log, err.append)
+            write("EVENT low_battery", reply("battery", vin=0.0, cells=(3.2, 3.2, 3.2), pct=5))
+            write("EVENT capture_paused", None)
+            self.assertEqual(len(err), 1)   # reported once per run of failures, not every line
+            os.makedirs(os.path.join(d, "missing"))
+            write("KEY", None)
+            write("KEY", None)
+            self.assertEqual(len(err), 1)
+
+    def test_pause_still_happens_when_the_log_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = ups.RotatingLog(os.path.join(d, "missing", "ups.log"), 1000, 2)
+            calls = []
+            m = ups.Monitor(Cfg(), ups.log_writer(log, lambda msg: None),
+                            run=lambda argv: calls.append(argv) or 0, clock=Clock(), active=lambda u: True)
+            m.poll(reply("battery", vin=0.0, cells=(3.20, 3.20, 3.20), pct=5))
+            self.assertEqual(calls[0], ["systemctl", "stop"] + Cfg.pause_units)
+
+
 class Log(unittest.TestCase):
     def test_line_format(self):
         line = ups.fmt_line(0, "KEY", reply("battery", vin=0.0, cells=(3.8, 3.8, 3.8), pct=60, rte=300))
@@ -348,6 +423,8 @@ class Discovery(unittest.TestCase):
         self.assertEqual(c.log_max, 262144)
         self.assertTrue(c.pause)
         self.assertEqual(c.status_file, "/run/sunset-ups.json")
+        # 3.45 V sat just under the ~3.5-3.6 V the cells rest at with R20 unchanged (review 2026-11-21).
+        self.assertEqual(c.low_cell_v, 3.3)
 
     def test_hid_id(self):
         self.assertEqual(ups.HID_ID, "0003:000004D8:0000D005")

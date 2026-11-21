@@ -2,6 +2,19 @@
 
 The history of Project Sunset, newest first: every change (code, settings, hardware, including changes made only on a Pi, marked **Pi**) and every event that affects the record (outages and lost frames, power cuts, camera moves, weather that matters, good sunsets, solstices, the moon, milestones). Dates are Vancouver local time; times are given in UTC and Vancouver. Decisions and their reasons are in `CLAUDE.md`.
 
+## 2026-11-21
+
+- **Code review, and fixes for its eight most serious findings** (Steven asked for a review by subagents; four reviewers, one per area, findings checked against the code before fixing). Nothing found deletes an unverified frame, names a frame with a wrong UTC time, or leaks the location. Fixed, each with tests:
+  - **Capture:** a run deleted every file over an hour old in the shared `.partial`, so cm4wide could delete a cm4city frame stranded there by a power cut. Each camera now cleans only its own leftovers.
+  - **UPS monitor:** a failed write to `ups.log` (SD full or read-only) crashed it in a loop, with no low-battery pause or resume. Write failures now go to the journal once and polling continues.
+  - **Diag page and UPS pause:** ending diag restarted capture even during a low-battery pause, on battery. Now it adds its timers to the pause instead, and the UPS monitor starts them when mains returns (leaving the camera timers to diag if it is still on).
+  - **Low-battery limit lowered from 3.45 V to 3.3 V a cell** (`UPS_LOW_CELL_V` default). With R20 unchanged the cells rest at about 3.5-3.6 V, so 3.45 V would have paused capture early in a short cut.
+  - **Home Assistant:** `sunset_ups.sh` took the UPS state from the newest frame however old, so a power cut during a capture outage looked like "mains". A frame over an hour old now reads `unknown old_frame` (and no numbers), and the alert message says why.
+  - **Camera watchdog:** `FAILED capture(empty jpg)` didn't count toward its reboot. It does now.
+  - **Experiment runner:** it never passed `--camera`, so on the CM4 it shot CAM1 (cm4city) whatever the run said, and it ignored the second camera's :30 dense frames and its slot. It now picks the camera from `CAMERA` in `sunset.env` like the capture does (refusing to run if it doesn't match exactly one camera), keeps clear of :30 when `sunset-dense2.timer` is on (so shots over about 15 s wait for the night), waits 72 s after each slot (was 45 s), and treats `sunset-capture2`/`sunset-dense2` as busy.
+  - **Config backup:** the password filter missed longer setting names (`NAS_PASSWORD=`, `IG_ACCESS_TOKEN=`); any name containing password, pass, secret or token now stops `sunset.env` being copied to the share.
+  - **Not deployed to `sunshine` yet.** Lower-priority findings (read-back treating two unreadable files as a match, `sunset-sun.py`'s temp file in `.partial`, `sunset2.env` not backed up, `sunset-verify.py` skipping the bracket frames, the per-folder blend marker in `fuse_sunset.py`, `build_video.py` also building the day before, `posted` reset by a failed redo) are listed on the PR for later.
+
 ## 2026-11-20
 
 - **Home Assistant: CM4 CPU temperature sensor, and the Sunset sensors on the floor plan** (Steven asked; 23:00-23:20 UTC, 4:00-4:20 pm). `sunset_ups.sh --json` also gives `cpu_temp_c` from the same frame (`System.cpu_temp_c`), and `sensor.sunset_cm4_cpu_temperature` graphs it (first reading 38.5 °C). Installed by reloading the command-line and template integrations, not restarting HA. In HA only, not in the repo: the UPS, CM4 health, frame age and temperature sensors are in the Living Room area; the Floor plan dashboard has labels for UPS state, pack voltage, cell temperature (cell 2), CM4 health, CPU temperature and frame age next to the fireplace (old dashboard kept as `sunset/floor-plan.lovelace.bak-2026-11-20.json`); voltage sensors show 2 decimals, cells 3.
