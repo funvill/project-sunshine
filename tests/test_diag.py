@@ -26,7 +26,6 @@ def epoch(text):
 NOW = epoch("2026-11-04T12:00:00Z")
 JPEG_A = b"\xff\xd8AAAA\xff\xd9"
 JPEG_B = b"\xff\xd8BB\xff\xd9"
-FAR_TIMER = '[{"next":9999999999000000}]'
 
 
 def write(path, text):
@@ -34,14 +33,6 @@ def write(path, text):
     with open(path, "w") as f:
         f.write(text)
 
-
-
-def timer_spacing_s():
-    """Minutes between regular captures, read from the production capture timer."""
-    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pi", "systemd", "sunset-capture.timer")
-    with open(path) as f:
-        spec = [l.split("=", 1)[1].strip() for l in f if l.startswith("OnCalendar=")][0]
-    return int(spec.split("/")[1]) * 60
 
 
 class Throttled(unittest.TestCase):
@@ -397,66 +388,6 @@ class CameraChoice(unittest.TestCase):
             self.assertEqual(c[c.index("--rotation") + 1], "180")
 
 
-class NextCapture(unittest.TestCase):
-    # Format from `systemctl list-timers --output=json` on the pilot Pi (systemd 252), with a time
-    # off the 5-minute slots so that the fallback cannot pass these by accident.
-    RUNNING = ('[{"next":1793774760000000,"left":1793774760000000,"last":0,"passed":0,'
-               '"unit":"sunset-capture.timer","activates":"sunset-capture.service"}]\n')
-
-    def test_reads_the_timer(self):
-        self.assertEqual(diag.parse_next_capture(self.RUNNING, 1793774285), 1793774760)
-
-    def test_a_time_already_passed_is_not_used(self):
-        self.assertEqual(diag.parse_next_capture(self.RUNNING, 1793774761), (1793774761 // 300 + 1) * 300)
-
-    def test_timer_stopped_falls_back_to_the_next_slot(self):
-        self.assertEqual(diag.parse_next_capture("[]\n", epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:10:00Z"))
-
-    def test_unexpected_json_falls_back(self):
-        self.assertEqual(diag.parse_next_capture('[{"next":null}]', epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:10:00Z"))
-        self.assertEqual(diag.parse_next_capture('{"a":1}', epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:10:00Z"))
-
-    def test_timer_disabled_falls_back_to_the_next_slot(self):
-        # A timer change must never remove the protection.
-        self.assertEqual(diag.parse_next_capture("\n", epoch("2026-11-04T12:07:30Z")), epoch("2026-11-04T12:10:00Z"))
-        self.assertEqual(diag.parse_next_capture(None, epoch("2026-11-04T12:15:00Z")), epoch("2026-11-04T12:20:00Z"))
-        self.assertEqual(diag.parse_next_capture("n/a", epoch("2026-11-04T12:59:59Z")), epoch("2026-11-04T13:00:00Z"))
-
-    def test_fallback_spacing_matches_the_capture_timer(self):
-        self.assertEqual(diag.SLOT_S, timer_spacing_s())
-
-
-SLOT = epoch("2026-11-04T12:15:00Z")
-NEXT = SLOT + 300
-
-
-class Handover(unittest.TestCase):
-    def setUp(self):
-        self.p = diag.HandoverPolicy(margin_s=20, settle_s=5)
-
-    def test_streams_when_far_from_a_capture(self):
-        self.assertFalse(self.p.should_pause(SLOT - 60, SLOT, False))
-
-    def test_pauses_before_the_slot(self):
-        self.assertTrue(self.p.should_pause(SLOT - 20, SLOT, False))
-
-    def test_stays_paused_after_the_timer_moves_on_before_the_service_starts(self):
-        self.p.should_pause(SLOT - 20, SLOT, False)
-        self.assertTrue(self.p.should_pause(SLOT + 1, NEXT, False))
-
-    def test_stays_paused_while_the_capture_runs(self):
-        self.p.should_pause(SLOT - 20, SLOT, False)
-        self.assertTrue(self.p.should_pause(SLOT + 60, NEXT, True))
-
-    def test_resumes_once_the_capture_has_finished(self):
-        self.p.should_pause(SLOT - 20, SLOT, False)
-        self.p.should_pause(SLOT + 1, NEXT, True)
-        self.assertFalse(self.p.should_pause(SLOT + 12, NEXT, False))
-
-    def test_a_capture_started_by_hand_pauses_too(self):
-        self.assertTrue(self.p.should_pause(SLOT - 300, SLOT, True))
-
-
 FAKE_CAMERA = """
 import sys, time
 frame = b"\\xff\\xd8" + b"frame" + b"\\xff\\xd9"
@@ -485,35 +416,21 @@ class CameraTests(unittest.TestCase):
 
     def test_does_not_touch_the_camera_without_a_viewer(self):
         cam = self.camera()
-        cam.tick(NOW, wanted=False, paused=False)
+        cam.tick(NOW, wanted=False)
         self.assertFalse(cam.running())
         self.assertEqual(cam.state(), "idle")
 
     def test_streams_frames_when_wanted(self):
         cam = self.camera()
-        cam.tick(NOW, wanted=True, paused=False)
+        cam.tick(NOW, wanted=True)
         self.assertTrue(wait_until(lambda: cam.latest()[1] is not None))
         self.assertEqual(cam.latest()[1], b"\xff\xd8frame\xff\xd9")
         self.assertEqual(cam.state(), "streaming")
 
-    def test_releases_the_camera_when_paused(self):
-        cam = self.camera()
-        cam.tick(NOW, wanted=True, paused=False)
-        cam.tick(NOW + 1, wanted=True, paused=True)
-        self.assertFalse(cam.running())
-        self.assertEqual(cam.state(), "paused for capture")
-
-    def test_resumes_after_a_pause(self):
-        cam = self.camera()
-        cam.tick(NOW, wanted=True, paused=True)
-        self.assertFalse(cam.running())
-        cam.tick(NOW + 1, wanted=True, paused=False)
-        self.assertTrue(cam.running())
-
     def test_stops_when_the_last_viewer_leaves(self):
         cam = self.camera()
-        cam.tick(NOW, wanted=True, paused=False)
-        cam.tick(NOW + 1, wanted=False, paused=False)
+        cam.tick(NOW, wanted=True)
+        cam.tick(NOW + 1, wanted=False)
         self.assertFalse(cam.running())
 
     def test_changing_view_restarts_with_the_new_command(self):
@@ -525,9 +442,9 @@ class CameraTests(unittest.TestCase):
 
         cam = diag.Camera(build)
         self.addCleanup(cam.stop)
-        cam.tick(NOW, wanted=True, paused=False)
+        cam.tick(NOW, wanted=True)
         cam.set_view("focus")
-        cam.tick(NOW + 1, wanted=True, paused=False)
+        cam.tick(NOW + 1, wanted=True)
         self.assertEqual(views, ["full", "focus"])
 
     def test_crash_is_reported_and_retried_with_a_delay(self):
@@ -539,12 +456,12 @@ class CameraTests(unittest.TestCase):
 
         cam = diag.Camera(build, retry_s=5)
         self.addCleanup(cam.stop)
-        cam.tick(NOW, wanted=True, paused=False)
+        cam.tick(NOW, wanted=True)
         self.assertTrue(wait_until(lambda: not cam.running() and "no cameras" in (cam.error() or "")))
-        cam.tick(NOW + 1, wanted=True, paused=False)
+        cam.tick(NOW + 1, wanted=True)
         self.assertEqual(len(starts), 1)
         self.assertEqual(cam.state(), "camera error")
-        cam.tick(NOW + 6, wanted=True, paused=False)
+        cam.tick(NOW + 6, wanted=True)
         self.assertEqual(len(starts), 2)
 
     def test_a_process_ignoring_terminate_is_killed(self):
@@ -569,20 +486,6 @@ class CameraTests(unittest.TestCase):
         cam._proc = stuck
         cam.stop()
         self.assertTrue(stuck.killed)
-
-
-class CaptureSlotEndToEnd(unittest.TestCase):
-    def test_camera_is_free_for_every_capture(self):
-        cam = diag.Camera(lambda view: [sys.executable, "-c", FAKE_CAMERA])
-        self.addCleanup(cam.stop)
-        policy = diag.HandoverPolicy(margin_s=20, settle_s=5)
-        for t in range(SLOT - 30, SLOT + 40, 2):
-            capture_active = SLOT <= t < SLOT + 12
-            next_capture = SLOT if t < SLOT else NEXT
-            cam.tick(t, wanted=True, paused=policy.should_pause(t, next_capture, capture_active))
-            if capture_active:
-                self.assertFalse(cam.running(), "camera busy during capture at +%ds" % (t - SLOT))
-        self.assertTrue(cam.running(), "stream did not come back")
 
 
 def diag_config():
@@ -649,39 +552,38 @@ class CameraLockTests(unittest.TestCase):
         self.addCleanup(cam.stop)
         return cam
 
-    def test_holds_the_lock_while_streaming_and_lets_go_when_paused(self):
+    def test_holds_the_lock_while_streaming(self):
         lock = FakeLock()
         cam = self.camera(lock)
-        cam.tick(NOW, wanted=True, paused=False)
+        cam.tick(NOW, wanted=True)
         self.assertTrue(cam.running())
         self.assertTrue(lock.held)
-        cam.tick(NOW + 2, wanted=True, paused=True)
-        self.assertFalse(cam.running())
-        self.assertFalse(lock.held)
+        cam.tick(NOW + 2, wanted=True)
+        self.assertTrue(lock.held, "the lock stays held while the stream runs")
 
     def test_lets_go_when_the_last_viewer_leaves(self):
         lock = FakeLock()
         cam = self.camera(lock)
-        cam.tick(NOW, wanted=True, paused=False)
-        cam.tick(NOW + 2, wanted=False, paused=False)
+        cam.tick(NOW, wanted=True)
+        cam.tick(NOW + 2, wanted=False)
         self.assertFalse(lock.held)
 
     def test_does_not_start_while_a_capture_holds_it(self):
         lock = FakeLock(free=False)
         cam = self.camera(lock)
-        cam.tick(NOW, wanted=True, paused=False)
+        cam.tick(NOW, wanted=True)
         self.assertFalse(cam.running())
         self.assertIn("capture has the camera", cam.state())
         lock.free = True
-        cam.tick(NOW + 2, wanted=True, paused=False)
+        cam.tick(NOW + 2, wanted=True)
         self.assertTrue(cam.running())
 
     def test_lets_go_when_rpicam_dies(self):
         lock = FakeLock()
         cam = self.camera(lock, source=CRASHING_CAMERA)
-        cam.tick(NOW, wanted=True, paused=False)
+        cam.tick(NOW, wanted=True)
         self.assertTrue(wait_until(lambda: not cam.running()))
-        cam.tick(NOW + 1, wanted=True, paused=False)
+        cam.tick(NOW + 1, wanted=True)
         self.assertFalse(lock.held)
 
     @unittest.skipIf(diag.fcntl is None, "flock needs Linux")
@@ -689,11 +591,11 @@ class CameraLockTests(unittest.TestCase):
         import fcntl
         path = os.path.join(tempfile.mkdtemp(), ".sunset-capture.lock")
         cam = self.camera(diag.CaptureLock(path))
-        cam.tick(NOW, wanted=True, paused=False)
+        cam.tick(NOW, wanted=True)
         with open(path) as other:
             with self.assertRaises(OSError):
                 fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)   # what `flock -n 9` does
-        cam.tick(NOW + 2, wanted=True, paused=True)
+        cam.tick(NOW + 2, wanted=False)
         with open(path) as other:
             fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
@@ -716,114 +618,11 @@ class CameraLockTests(unittest.TestCase):
             self.assertEqual(diag.config_from_env().lock_file, "/x/y.lock")
 
 
-MINUTE = epoch("2026-11-14T00:31:00Z")   # inside the Nov 13 sunset window, not a regular slot
-
-
-class DenseWindow(unittest.TestCase):
-    """#14: in a sunrise or sunset window sunset-dense.timer takes a frame every minute. The stream
-    used to know only sunset-capture, so with the page open it cost one dense frame a minute."""
-
-    def setUp(self):
-        self.window = "sunset"
-        self.dense_timer = "active"
-        self.dense_service = "inactive"
-        self.calls = []
-        cam = diag.Camera(lambda view: [sys.executable, "-c", FAKE_CAMERA])
-        self.addCleanup(cam.stop)
-        self.svc = diag.Service(diag_config(), cam, deadline=MINUTE + 3600, run=self.fake_run)
-        self.svc.viewer_joined()
-
-    def fake_run(self, cmd):
-        self.calls.append(cmd)
-        if cmd[-1] == "dense":
-            return self.window + "\n"
-        if cmd[:2] == ["systemctl", "is-active"]:
-            return {"sunset-capture.service": "inactive\n", "sunset-dense.service": self.dense_service + "\n",
-                    "sunset-dense.timer": self.dense_timer + "\n"}.get(cmd[2])
-        if cmd[:2] == ["systemctl", "list-timers"] and cmd[2] == "sunset-dense.timer":
-            return '[{"next":%d}]' % ((MINUTE + 60) * 1000000)
-        return FAR_TIMER
-
-    def test_streams_in_the_middle_of_the_minute(self):
-        self.svc.step(MINUTE + 20)
-        self.assertTrue(self.svc.camera.running())
-
-    def test_yields_before_each_minute_and_says_why(self):
-        self.svc.step(MINUTE + 20)
-        self.svc.step(MINUTE + 45)
-        self.assertFalse(self.svc.camera.running())
-        state = self.svc.camera_status(MINUTE + 45)
-        self.assertIn("1-a-minute", state["camera"])
-        self.assertEqual(state["dense_window"], "sunset")
-
-    def test_stays_off_while_the_dense_frame_runs_then_comes_back(self):
-        self.svc.step(MINUTE + 45)
-        self.dense_service = "active"
-        self.svc.step(MINUTE + 62)
-        self.svc.step(MINUTE + 70)
-        self.assertFalse(self.svc.camera.running())
-        self.dense_service = "inactive"
-        self.svc.step(MINUTE + 75)
-        self.assertTrue(self.svc.camera.running())
-
-    def test_a_running_dense_frame_pauses_the_stream_even_outside_a_window(self):
-        self.window = "none"
-        self.dense_service = "activating"
-        self.svc.step(MINUTE + 20)
-        self.assertFalse(self.svc.camera.running())
-        self.assertIn("1-a-minute", self.svc.camera.state())
-
-    def test_no_yield_outside_a_window(self):
-        self.window = "none"
-        self.svc.step(MINUTE + 50)
-        self.assertTrue(self.svc.camera.running())
-        self.assertIsNone(self.svc.camera_status(MINUTE + 50)["dense_window"])
-
-    def test_no_yield_when_the_dense_timer_is_off(self):
-        self.dense_timer = "inactive"
-        self.svc.step(MINUTE + 50)
-        self.assertTrue(self.svc.camera.running())
-
-    def test_regular_slot_still_wins(self):
-        slot = epoch("2026-11-14T00:35:00Z")
-        self.window = "none"
-        self.run_regular = '[{"next":%d}]' % (slot * 1000000)
-        base = self.fake_run
-
-        def run(cmd):
-            if cmd[:3] == ["systemctl", "list-timers", "sunset-capture.timer"]:
-                return self.run_regular
-            return base(cmd)
-        self.svc.run = run
-        self.svc.step(slot - 10)
-        self.assertEqual(self.svc.camera.state(), "paused for capture")
-
-    def test_window_is_not_recomputed_every_step(self):
-        for t in range(MINUTE, MINUTE + 30, 2):
-            self.svc.step(t)
-        self.assertLessEqual(len([c for c in self.calls if c[-1] == "dense"]), 2)
-
-    def test_whole_window_frees_the_camera_for_every_dense_frame(self):
-        busy, streamed = [], 0
-        for t in range(MINUTE + 20, MINUTE + 620, 2):     # the page opened mid-minute
-            second = t % 60
-            # The dense service shows as active a moment after the minute, for about 10 s.
-            self.dense_service = "active" if 1 <= second < 12 and (t // 60) % 5 else "inactive"
-            self.svc.step(t)
-            if second < 1 or self.dense_service == "active":
-                if self.svc.camera.running():
-                    busy.append(t - MINUTE)
-            streamed += self.svc.camera.running()
-        self.assertEqual(busy, [])
-        self.assertGreater(streamed, 100)    # still a usable stream between the frames
-
-
 class Http(unittest.TestCase):
     def setUp(self):
         self.cam = diag.Camera(lambda view: [sys.executable, "-c", FAKE_CAMERA])
-        # The clock here is real: a far-off timer keeps the test from landing in a capture window.
         self.svc = diag.Service(diag_config(), self.cam, deadline=time.time() + 1800,
-                                run=lambda cmd: FAR_TIMER)
+                                run=lambda cmd: None)
         self.server = diag.make_server(self.svc, "127.0.0.1", 0)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.base = "http://127.0.0.1:%d" % self.server.server_address[1]
@@ -893,12 +692,6 @@ class Http(unittest.TestCase):
         for needle in ('id="centre"', 'aria-pressed="false"', 'id="guide"', "x1=\"50%\"",
                        'toggleAttribute("hidden"'):  # an SVG has no .hidden property
             self.assertIn(needle, body)
-
-    def test_page_explains_the_pauses_in_a_dense_window(self):
-        body = self.get("/").read().decode()
-        self.assertIn('id="denseNote"', body)
-        self.assertIn("d.dense_window", body)
-        self.assertIn("dense_window", json.loads(self.get("/camera.json").read()))
 
     def test_unknown_path(self):
         self.assertEqual(self.status_of("/nope"), 404)

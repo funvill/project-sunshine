@@ -81,69 +81,17 @@ record. An error in one day, of any kind, doesn't stop the other days.
 | `OVERLAY_LOCATION` | `Burnaby, BC, Canada` | Small text under the date. Empty for none |
 | `OVERLAY_SKY` | `1` | `0` leaves the day's sky score off the video (it stays in the record) |
 | `FONT_FILE` | `/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf` | Font for the text on the video. The image installs this one |
-| `SUNSET_CUT` | off | `1` makes the sunset-only cut as well (see below) |
-| `SUNSET_CUT_BEFORE_MIN` | `60` | The cut starts this many minutes before sunset |
-| `SUNSET_CUT_END_ELEVATION` | `-9` | The cut ends on the first frame after sunset with the sun at or below this, in degrees |
-| `SUNSET_CUT_AFTER_MIN` | `60` | Where the cut ends instead when no frame has reached that elevation (for example, frames with no `elevation_deg`). An estimate: -9° comes about 45 to 70 minutes after sunset here |
-| `SUNSET_CUT_MAX_GAP_MIN` | `MAX_SUNSET_GAP_MIN` | A longer stretch with no frame inside the cut skips the cut |
-| `MASTER` | off | `1` makes the master render as well (see below) |
-| `MASTER_CODEC` | `libx264` | ffmpeg encoder for the master. `libx265` for HEVC. One this ffmpeg lacks skips the master |
-| `MASTER_CRF` | `14` | Quality, lower is better and bigger |
-| `MASTER_PRESET` | `slow` | Encoder preset |
-| `MASTER_WIDTH` | `3840` | The master is scaled to this width, never up |
-| `MASTER_PIX_FMT` | `yuv420p` | `yuv420p10le` with `libx265` gives 10-bit HEVC |
 | `REDO_OLDER_THAN_VERSION` | unset | Make finished days again if their record was made by an older `SCRIPT_VERSION` (see Redoing days) |
-| `REDO_MISSING_OUTPUTS` | off | `1` makes encoded days again if they lack an output that is turned on, or it failed |
 | `REDO_FROM`, `REDO_TO` | unset | Local dates (`YYYY-MM-DD`): redo within these instead of `LOOKBACK_DAYS`. Days in the range with no record are made too |
-
-For the on/off settings, unset, empty and `0` mean off.
-
-## Sunset-only cut (`SUNSET_CUT=1`)
-
-A second video of the same day, made only from the frames from an hour before sunset until the sun
-is 9° below the horizon, where the frames are one minute apart, so the speed doesn't change half way.
-A frame's place comes from `Sun.minutes_from_sunset` in its JSON (from its time if it has none), and
-the end from `Sun.elevation_deg`. Same crop, blur, mask and text as the daily video, and fused frames
-when `FUSED_DIR` is set. Written beside it as `YYYY-MM-DD_sunset.mp4`.
-
-It goes through the same checks as the daily video: unreadable frames are left out, the encoded frame
-count is checked, and it is skipped with the reason when it has under `MIN_FRAME_FRACTION` of one frame a
-minute or a gap over `SUNSET_CUT_MAX_GAP_MIN`. Days before the 1-minute frames (2026-11-09) have only
-5-minute frames there, so they get no cut. A skipped or failed cut never affects the daily video.
-
-It is only made when the daily video is: a day skipped for gaps or too few frames gets
-`"sunset_cut": {"status": "skipped", ...}` and no cut, even if its sunset was complete.
-
-## Master render (`MASTER=1`)
-
-A second encode of the same frames as the daily video, for keeping and for later edits: no text, no
-blur and no mask, at high quality (H.264 CRF 14, `slow`, by default). It is the full frame scaled to fit
-`MASTER_WIDTH` (4,056 x 3,040 becomes 3,840 x 2,878), or, when the calibration entry in force has a
-`master_view` box `{"x", "y", "width", "height"}` in full-frame pixels, that box (made even and kept inside
-the frame), never scaled up. BT.709, converted and tagged like the daily video. Written as
-`YYYY-MM-DD_master.mp4`.
-
-It is made on days with a setup mismatch, since it has no blur boxes to misplace, but not on days skipped
-for gaps or too few frames. An encoder this ffmpeg doesn't have (asked with `ffmpeg -encoders`) skips it
-with the reason. 10-bit HEVC is `MASTER_CODEC=libx265 MASTER_PIX_FMT=yuv420p10le`, tagged `hvc1`; the
-tests only run it where the ffmpeg has libx265. Encoders without `-crf` (hardware ones) fail.
-
-A 4K master of a whole day at CRF 14 is far bigger and slower than the daily video. Not yet measured on
-real frames or on the NAS. On 30 synthetic 4,056 x 3,040 frames with fresh noise in every frame (worse
-than a real sky) on a 12-thread PC with ffmpeg 7.1.1, H.264 CRF 14 `slow` took 1.4 s and 4.3 MB per frame,
-and 10-bit HEVC CRF 14 `slow` 4.1 s and 3.7 MB. For a ~500-frame day that is an estimate of up to about
-2 GB and 12 minutes (H.264) or 35 minutes (HEVC) on that PC, and longer on a NAS CPU.
 
 ## Redoing days
 
-A finished day is never redone by default, and turning an output on later doesn't change that. Two
-settings ask for it, both limited to `LOOKBACK_DAYS` unless `REDO_FROM`/`REDO_TO` give a range:
+A finished day is never redone by default. `REDO_OLDER_THAN_VERSION` asks for it, limited to
+`LOOKBACK_DAYS` unless `REDO_FROM`/`REDO_TO` give a range:
 
 - `REDO_OLDER_THAN_VERSION=2026-11-15.2` makes again every encoded or skipped day whose record was made by
   an older version (`provenance.script_version`; a record with none counts as older). Versions are
   `YYYY-MM-DD.N` and compare by date, then number.
-- `REDO_MISSING_OUTPUTS=1` makes again every encoded day that lacks an output that is turned on, or whose
-  output failed.
 
 A redo makes the whole day again, daily video included, and replaces the record. The record gets a
 `redo` block (`reason`, `previous_status`, `previous_script_version`), and keeps `posted` and any other
@@ -222,8 +170,6 @@ For each day, named by the local date of the sunset:
 | `YYYY-MM-DD.mp4` | The video: 1080x1920, H.264, `yuv420p`, BT.709 (converted from the JPEGs' BT.601 and tagged), 24 fps, no audio |
 | `YYYY-MM-DD.txt` | The caption |
 | `YYYY-MM-DD_check.jpg` | The full view with the crop (green) and predicted sun (red) drawn on it |
-| `YYYY-MM-DD_sunset.mp4` | The sunset-only cut, with `SUNSET_CUT=1`. Same format as the daily video |
-| `YYYY-MM-DD_master.mp4` | The master, with `MASTER=1` |
 
 A day with too few regular frames, or a gap longer than the limits, gets a record with
 `"status": "skipped"` and the reason, and no video. A skipped day is not tried again. A failed day (see
@@ -244,13 +190,7 @@ The record also has:
 | `setup_id_expected`, `setup_id_frame`, `setup_mismatch` | The calibration's `setup_id` and the sunset frame's `Capture.setup_id`. `true` when they differ, `null` when either is missing |
 | `post_ok`, `post_blockers` | Whether anything here stops the day being posted: `not_encoded`, `setup_mismatch`, `no_sky_score`. The sky threshold is a separate check, not built yet |
 | `provenance` | `script_version`, the `ffmpeg -version` line, the SHA-256 of `crop.json`, and frames by kind (regular, dense, fused, dropped) |
-| `sunset_cut` | Only with `SUNSET_CUT=1`. `status` (`encoded`, `skipped` with `reason`, or `failed` with `error`), `video`, `frames`, `expected_frames` (one a minute over the window), `dropped_frames`, `dropped`, `largest_gap_min`, `largest_gap_at_utc`, and `window`: the settings (`before_min`, `end_elevation_deg`, `after_min_limit`), `end_by` (`elevation` or `minutes`) and what it covered (`first_utc`, `last_utc`, `first_minutes`, `last_minutes`) |
-| `master` | Only with `MASTER=1`. `status` as above, `video`, `frames`, `codec`, `crf`, `preset`, `pix_fmt`, `width` and `height` of the video, `source` (the box used and `from`: `full_frame` or `master_view`), `color`, `overlay`, `blur` and `mask` (all `false`), `encode_seconds`, `size_bytes` |
 | `redo` | Only on a redone day: `reason`, `previous_status`, `previous_script_version` |
-
-A failed extra output gives the run exit code 1 but leaves the day encoded; `REDO_MISSING_OUTPUTS=1`
-makes it again. With neither output on, the record and the files are the same as before these settings
-existed (apart from `provenance.script_version`).
 
 Sunset's UTC date is one day ahead of its local date here, all year. The sunset of 21 December is
 named `2026-12-21`, but its frames are in the `2026/12/22` folder.
@@ -281,8 +221,7 @@ named `2026-12-21`, but its frames are in the `2026/12/22` folder.
 The values above are examples. All positions are in full-frame pixels.
 
 **Everything tied to the camera position goes in its calibration entry:** `setup_id`, `offset_px`,
-`mask`, `view`, `blur`, `blur_sigma`, `sky_rows`, `sky_full_warm`, `sky_min_frames` and the optional
-`master_view` box for the master render (see above). The entry in
+`mask`, `view`, `blur`, `blur_sigma`, `sky_rows`, `sky_full_warm` and `sky_min_frames`. The entry in
 force on a day (the last one whose `start` is on or before it) is used, so rebuilding an old day uses
 that day's boxes. Any of them can also be at the top level, which is used when the entry doesn't set
 it; files from before 2026-11-15 have them there and still work.

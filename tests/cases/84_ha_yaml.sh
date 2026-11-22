@@ -1,5 +1,5 @@
-# The Home Assistant packages beyond grep: homeassistant/sunset.yaml and sunset_heartbeat.yaml.
-# Always: every script a command names exists, and every script is used. With PyYAML: both files parse
+# The Home Assistant package beyond grep: homeassistant/sunset.yaml.
+# Always: every script a command names exists, and every script is used. With PyYAML: the file parses
 # (the !secret tag is accepted), alerts watch sensors that exist, the sensors read entities that exist,
 # the re-arm automation covers every alert, ids are unique. With PyYAML and jinja2 as well: the binary
 # sensors' templates and the alerts' messages are rendered with stand-in states() and is_number(), and
@@ -10,11 +10,7 @@ for s in $used; do check "$s exists" test -f "$HA/$s"; done
 for f in "$HA"/*.sh; do
   check "$(basename "$f") is used by sunset.yaml" grep -q "$(basename "$f")" "$HA/sunset.yaml"
 done
-check "the heartbeat package is separate from the main one" bash -c "! grep -q 'sunset_heartbeat_url' '$HA/sunset.yaml'"
-check "the heartbeat reads its URL from secrets" grep -q '!secret sunset_heartbeat_url' "$HA/sunset_heartbeat.yaml"
-check "the heartbeat says it needs an external service" grep -qi 'dead-man service' "$HA/sunset_heartbeat.yaml"
 check "no phone notifier name in the package (placeholder only)" bash -c "! grep -E '^[[:space:]]*- mobile_app_' '$HA/sunset.yaml'"
-check "no real URLs in the heartbeat file" bash -c "! grep -Eo 'https?://[^ \"]+' '$HA/sunset_heartbeat.yaml' | grep -v example.invalid"
 
 section "Home Assistant package: parsed"
 # Not -I: PyYAML and jinja2 often live in the user site-packages, which -I hides. cwd is homeassistant/, which holds no .py.
@@ -49,8 +45,7 @@ def result(ok, text):
 
 
 main = load("sunset.yaml")
-beat = load("sunset_heartbeat.yaml")
-result(isinstance(main, dict) and isinstance(beat, dict), "both files parse as YAML mappings")
+result(isinstance(main, dict), "the file parses as a YAML mapping")
 
 sensors = {}
 for entry in main["command_line"]:
@@ -126,11 +121,6 @@ result(auto["trigger"][0]["to"] == "idle" and auto["trigger"][0]["for"] == "12:0
 result(auto["action"][0]["service"] == "alert.turn_on", "re-arm calls alert.turn_on")
 
 result(main["input_number"]["sunset_min_free_gb"]["initial"] == 100, "free-space limit starts at 100 GB")
-result(beat["rest_command"]["sunset_heartbeat"]["url"].startswith("<secret "), "heartbeat URL comes from a secret")
-hb = beat["automation"][0]
-result(hb["trigger"][0]["platform"] == "time_pattern" and hb["trigger"][0]["minutes"] == "7"
-       and "hours" not in hb["trigger"][0], "heartbeat runs once an hour")
-result(hb["action"][0]["service"] == "rest_command.sunset_heartbeat", "heartbeat calls the rest command")
 
 # ---- Templates, if jinja2 is here ----
 try:

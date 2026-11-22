@@ -1,3 +1,4 @@
+# needs: 40_selftest
 share_env() {
   fresh_env; unset STUB_SAME_FS
   export NAS_TARGET="$W/mnt/share/"

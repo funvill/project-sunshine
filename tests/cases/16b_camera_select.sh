@@ -1,3 +1,4 @@
+# needs: 15_dense
 # CAMERA: which camera to use when the Pi has more than one. rpicam numbers cameras in the order
 # they are found, which changed on the CM4 when CAM1 was enabled (2026-11-17), so CAMERA is matched
 # against the camera's ID in `rpicam-still --list-cameras` (e.g. i2c@0), not a fixed number.

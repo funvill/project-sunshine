@@ -1,3 +1,4 @@
+# needs: 80_frame_age
 # Per-camera health from the newest frame's JSON (issue #22): homeassistant/sunset_camera_health.sh,
 # under sh and busybox sh. Field names are the ones pi/sunset-meta.py writes (System.throttled,
 # System.cpu_temp_c, System.disk.used_pct, System.outbox_pending.files, Capture.files.jpg.sha256).

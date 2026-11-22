@@ -1557,68 +1557,6 @@ class RealEncoding(unittest.TestCase):
         self.assertGreater(row[500], 230, "inside of the crop should stay clear")
 
 
-def add_dense(tree, first=-60, last=30, skip=()):
-    """1-a-minute frames around SUNSET between the 15-minute ones, as the Pi adds them."""
-    for m in range(first, last + 1):
-        if m % 15 and m not in skip:
-            tree.add(SUNSET + timedelta(minutes=m), schedule="dense")
-
-
-class SunsetCutWindow(unittest.TestCase):
-    def test_from_the_minutes_before_sunset_to_the_first_frame_at_the_end_elevation(self):
-        frames = [frame_at(-70), frame_at(-60), frame_at(-30), frame_at(0), frame_at(20),
-                  frame_at(30, elevation=-9.0), frame_at(40, elevation=-10.0)]
-        got, info = daily.sunset_cut_frames(frames, SUNSET, 60, -9.0, 60)
-        self.assertEqual([f.sun["minutes_from_sunset"] for f in got], [-60, -30, 0, 20, 30])
-        self.assertEqual(info["end_by"], "elevation")
-
-    def test_the_end_elevation_can_be_lower(self):
-        frames = [frame_at(-10), frame_at(30, elevation=-9.0), frame_at(40, elevation=-10.0),
-                  frame_at(50, elevation=-12.5)]
-        got, _ = daily.sunset_cut_frames(frames, SUNSET, 60, -12.0, 90)
-        self.assertEqual([f.sun["minutes_from_sunset"] for f in got], [-10, 30, 40, 50])
-
-    def test_with_no_elevation_it_stops_at_the_minutes_limit(self):
-        frames = [frame_at(m) for m in (-5, 20, 44, 45, 46)]
-        for f in frames:
-            del f.sun["elevation_deg"]
-        got, info = daily.sunset_cut_frames(frames, SUNSET, 60, -9.0, 45)
-        self.assertEqual([f.sun["minutes_from_sunset"] for f in got], [-5, 20, 44, 45])
-        self.assertEqual(info["end_by"], "minutes")
-
-    def test_frames_of_another_sunset_are_left_out(self):
-        later = SUNSET + timedelta(days=1)
-        frames = [frame_at(-10), frame_at(-10, sunset=later), frame_at(30, elevation=-9.0)]
-        got, _ = daily.sunset_cut_frames(frames, SUNSET, 60, -9.0, 60)
-        self.assertEqual(len(got), 2)
-
-    def test_a_frame_with_no_sun_block_goes_by_its_time(self):
-        frames = [daily.Frame(SUNSET - timedelta(minutes=61), "early", None),
-                  daily.Frame(SUNSET - timedelta(minutes=10), "in", None), frame_at(30, elevation=-9.0)]
-        got, _ = daily.sunset_cut_frames(frames, SUNSET, 60, -9.0, 60)
-        self.assertEqual([f.jpg for f in got], ["in", "unused.jpg"])
-
-
-class MasterGeometry(unittest.TestCase):
-    def test_full_frame_is_scaled_to_3840_wide_and_kept_even(self):
-        g = daily.master_geometry(4056, 3040, None, 3840)
-        self.assertEqual((g["x"], g["y"], g["width"], g["height"], g["out_width"], g["out_height"], g["from"]),
-                         (0, 0, 4056, 3040, 3840, 2878, "full_frame"))
-
-    def test_a_master_view_box_is_used_and_never_scaled_up(self):
-        g = daily.master_geometry(4056, 3040, {"x": 101, "y": 200, "width": 2001, "height": 1001}, 3840)
-        self.assertEqual((g["x"], g["y"], g["width"], g["height"], g["out_width"], g["out_height"], g["from"]),
-                         (100, 200, 2000, 1000, 2000, 1000, "master_view"), "even, for yuv420p")
-
-    def test_a_box_is_kept_inside_the_frame(self):
-        g = daily.master_geometry(4056, 3040, {"x": 4000, "y": 3000, "width": 1000, "height": 500}, 3840)
-        self.assertEqual((g["x"], g["y"], g["width"], g["height"]), (3056, 2540, 1000, 500))
-
-    def test_the_width_can_be_lower(self):
-        g = daily.master_geometry(4056, 3040, None, 1920)
-        self.assertEqual((g["out_width"], g["out_height"]), (1920, 1440), "1439.05 rounds to the nearest even")
-
-
 class ScriptVersions(unittest.TestCase):
     def test_versions_compare_by_date_then_number(self):
         key = daily.version_key
@@ -1632,222 +1570,28 @@ class ScriptVersions(unittest.TestCase):
         self.assertLess(daily.version_key("2026-11-15.1"), daily.version_key(daily.SCRIPT_VERSION))
 
 
-class ExtraOutputs(unittest.TestCase):
-    """The sunset-only cut, the master and the redo rule, with stand-in encoders."""
+class Redo(unittest.TestCase):
+    """Redoing finished days (REDO_*), with a stand-in encoder."""
     NOW = SUNSET + timedelta(hours=1)
 
     def setUp(self):
         self.tree = Tree(self)
         self.encoded = []
-        self.masters = []
 
-    def run_job(self, now=NOW, cut_fails=False, **over):
+    def run_job(self, now=NOW, **over):
         def fake_encode(cfg, frames, crop, mask, out):
-            if cut_fails and "_sunset" in out:
-                raise daily.EncodeError("cut broke")
             self.encoded.append((os.path.basename(out), [f.time for f in frames], dict(crop)))
             with open(out, "wb") as f:
                 f.write(b"video")
-
-        def fake_master(cfg, frames, geometry, out):
-            self.masters.append((os.path.basename(out), [f.time for f in frames], dict(geometry)))
-            with open(out, "wb") as f:
-                f.write(b"master")
         return daily.run(self.tree.config(**over), now, encode=fake_encode, frame_size=lambda path: (4056, 3040),
-                         check_image=lambda *a: None, master_encode=fake_master)
+                         check_image=lambda *a: None)
 
-    def write_crop(self, **cfg):
-        with open(self.tree.crop_file, "w") as f:
-            json.dump(cfg, f)
-
-    def files(self):
-        return sorted(os.listdir(self.tree.daily))
-
-    def test_both_are_off_by_default_and_the_record_is_unchanged(self):
-        self.tree.add_day()
-        add_dense(self.tree)
-        self.assertEqual(self.run_job(), 0)
-        self.assertEqual(len(self.encoded), 1)
-        self.assertEqual(self.masters, [])
+    def age_record(self, version="2026-11-14.1"):
+        """Make the day's record look as if an older script version wrote it."""
         rec = self.tree.record()
-        for key in ("sunset_cut", "master", "redo"):
-            self.assertNotIn(key, rec)
-        self.assertEqual(self.files(), ["2026-12-21.json", "2026-12-21.mp4", "2026-12-21.txt"])
-
-    def test_sunset_cut_is_the_hour_before_sunset_to_dark(self):
-        self.tree.add_day()
-        add_dense(self.tree)
-        self.assertEqual(self.run_job(sunset_cut=True), 0)
-        self.assertEqual([e[0] for e in self.encoded], [".2026-12-21.mp4.tmp", ".2026-12-21_sunset.mp4.tmp"])
-        times = self.encoded[1][1]
-        self.assertEqual(times, [SUNSET + timedelta(minutes=m) for m in range(-60, 31)])
-        self.assertEqual(self.encoded[1][2], self.encoded[0][2], "the same crop, blur and overlay as the daily video")
-        rec = self.tree.record()
-        cut = rec["sunset_cut"]
-        self.assertEqual((cut["status"], cut["video"], cut["frames"], cut["expected_frames"], cut["dropped_frames"]),
-                         ("encoded", "2026-12-21_sunset.mp4", 91, 91, 0))
-        self.assertEqual(cut["largest_gap_min"], 1.0)
-        w = cut["window"]
-        self.assertEqual((w["before_min"], w["end_elevation_deg"], w["end_by"]), (60, -9.0, "elevation"))
-        self.assertEqual((w["first_utc"], w["last_utc"]), ("2026-12-21T23:14:00Z", "2026-12-22T00:44:00Z"))
-        self.assertEqual((w["first_minutes"], w["last_minutes"]), (-60.0, 30.0))
-        self.assertIn("2026-12-21_sunset.mp4", self.files())
-        self.assertEqual(rec["status"], "encoded")
-
-    def test_the_cut_window_can_be_changed(self):
-        self.tree.add_day()
-        add_dense(self.tree)
-        self.run_job(sunset_cut=True, cut_before_min=30)
-        self.assertEqual(len(self.encoded[1][1]), 61)
-        self.assertEqual(self.tree.record()["sunset_cut"]["window"]["first_minutes"], -30.0)
-
-    def test_too_few_frames_in_the_cut_window_skips_only_the_cut(self):
-        self.tree.add_day()   # 15-minute frames only: 7 of the 91 one-minute frames
-        self.assertEqual(self.run_job(sunset_cut=True), 0)
-        self.assertEqual(len(self.encoded), 1)
-        rec = self.tree.record()
-        self.assertEqual(rec["status"], "encoded")
-        cut = rec["sunset_cut"]
-        self.assertEqual((cut["status"], cut["frames"]), ("skipped", 7))
-        self.assertIn("7 of 91", cut["reason"])
-        self.assertNotIn("video", cut)
-        self.assertNotIn("2026-12-21_sunset.mp4", self.files())
-
-    def test_a_gap_in_the_cut_window_skips_the_cut(self):
-        self.tree.add_day()
-        add_dense(self.tree, skip=range(-29, -15))   # -30 to -15 with nothing between
-        self.run_job(sunset_cut=True, cut_max_gap_min=10)
-        cut = self.tree.record()["sunset_cut"]
-        self.assertEqual((cut["status"], cut["largest_gap_min"]), ("skipped", 15.0))
-        self.assertIn("15-minute gap", cut["reason"])
-
-    def test_by_default_the_cut_gap_limit_is_the_sunset_one(self):
-        self.tree.add_day()
-        add_dense(self.tree, skip=range(-29, -15))
-        self.run_job(sunset_cut=True)
-        self.assertEqual(self.tree.record()["sunset_cut"]["status"], "encoded")
-
-    def test_an_unreadable_frame_is_left_out_of_the_cut(self):
-        self.tree.add_day()
-        add_dense(self.tree)
-        t = SUNSET - timedelta(minutes=20)
-        open(os.path.join(self.tree.frames, "2026", "12", "21", "wide_%s.jpg" % t.strftime("%Y%m%dT%H%M%SZ")), "wb").close()
-        self.run_job(sunset_cut=True)
-        cut = self.tree.record()["sunset_cut"]
-        self.assertEqual((cut["frames"], cut["dropped_frames"], cut["dropped"]),
-                         (90, 1, ["wide_20261221T235400Z.jpg"]))
-        self.assertNotIn(t, self.encoded[1][1])
-
-    def test_a_failed_cut_keeps_the_daily_video_and_says_why(self):
-        self.tree.add_day()
-        add_dense(self.tree)
-        self.assertEqual(self.run_job(sunset_cut=True, cut_fails=True), 1)
-        rec = self.tree.record()
-        self.assertEqual((rec["status"], rec["video"]), ("encoded", "2026-12-21.mp4"))
-        self.assertEqual(rec["sunset_cut"]["status"], "failed")
-        self.assertIn("cut broke", rec["sunset_cut"]["error"])
-        self.assertEqual(self.files(), ["2026-12-21.json", "2026-12-21.mp4", "2026-12-21.txt"])
-
-    def test_a_skipped_day_makes_neither_and_says_so(self):
-        self.tree.add_day(10)
-        self.run_job(sunset_cut=True, master=True)
-        rec = self.tree.record()
-        self.assertEqual(rec["status"], "skipped")
-        self.assertEqual((rec["sunset_cut"]["status"], rec["master"]["status"]), ("skipped", "skipped"))
-        self.assertIn("day was skipped", rec["master"]["reason"])
-        self.assertEqual((self.encoded, self.masters), ([], []))
-
-    def test_master_is_the_whole_day_full_frame_at_3840_wide(self):
-        self.tree.add_day()
-        add_dense(self.tree)
-        self.assertEqual(self.run_job(master=True), 0)
-        self.assertEqual(len(self.masters), 1)
-        name, times, geometry = self.masters[0]
-        self.assertEqual(name, ".2026-12-21_master.mp4.tmp")
-        self.assertEqual(times, self.encoded[0][1], "the same frames as the daily video")
-        self.assertEqual((geometry["out_width"], geometry["out_height"], geometry["from"]), (3840, 2878, "full_frame"))
-        m = self.tree.record()["master"]
-        self.assertEqual((m["status"], m["video"], m["frames"]), ("encoded", "2026-12-21_master.mp4", 180))
-        self.assertEqual((m["codec"], m["crf"], m["preset"], m["pix_fmt"]), ("libx264", 14, "slow", "yuv420p"))
-        self.assertEqual((m["width"], m["height"]), (3840, 2878))
-        self.assertEqual(m["source"], {"x": 0, "y": 0, "width": 4056, "height": 3040, "from": "full_frame"})
-        self.assertEqual((m["overlay"], m["blur"], m["mask"]), (False, False, False))
-        self.assertEqual(m["size_bytes"], 6)
-        self.assertIn("2026-12-21_master.mp4", self.files())
-
-    def test_master_settings_are_recorded(self):
-        self.tree.add_day()
-        self.run_job(master=True, master_codec="libx265", master_crf=16, master_preset="medium",
-                     master_pix_fmt="yuv420p10le", master_width=1920)
-        m = self.tree.record()["master"]
-        self.assertEqual((m["codec"], m["crf"], m["preset"], m["pix_fmt"], m["width"]),
-                         ("libx265", 16, "medium", "yuv420p10le", 1920))
-
-    def test_master_view_in_the_calibration_sets_the_box(self):
-        self.write_crop(blur=[[0, 0, 10, 10]], calibrations=[
-            {"start": "2026-12-01", "cx": 2028, "master_view": {"x": 0, "y": 100, "width": 4056, "height": 2440},
-             "fits": [{"date": "2026-12-10", "f_px": 2000.0, "az0_deg": 250.0}]}])
-        self.tree.add_day()
-        self.run_job(master=True)
-        g = self.masters[0][2]
-        self.assertEqual((g["x"], g["y"], g["width"], g["height"], g["out_width"], g["out_height"], g["from"]),
-                         (0, 100, 4056, 2440, 3840, 2310, "master_view"))
-        self.assertEqual(self.tree.record()["master"]["source"]["from"], "master_view")
-
-    def test_master_is_made_when_the_camera_position_does_not_match(self):
-        self.write_crop(calibrations=[{"start": "2026-12-01", "setup_id": "pilot-3", "cx": 2028,
-                                       "fits": [{"date": "2026-12-10", "f_px": 2000.0, "az0_deg": 250.0}]}])
-        last = SUNSET + timedelta(minutes=30)
-        for i in range(96):
-            self.tree.add(last - timedelta(minutes=15 * i), setup_id="pilot-4")
-        self.run_job(master=True)
-        rec = self.tree.record()
-        self.assertTrue(rec["setup_mismatch"])
-        self.assertEqual(rec["master"]["status"], "encoded", "no blur boxes to misplace")
-
-    def test_a_failed_master_keeps_the_daily_video(self):
-        self.tree.add_day()
-
-        def broken(*a):
-            raise daily.EncodeError("4K broke")
-
-        def fake_encode(cfg, frames, crop, mask, out):
-            open(out, "wb").close()
-        rc = daily.run(self.tree.config(master=True), self.NOW, encode=fake_encode,
-                       frame_size=lambda path: (4056, 3040), check_image=lambda *a: None, master_encode=broken)
-        self.assertEqual(rc, 1)
-        rec = self.tree.record()
-        self.assertEqual((rec["status"], rec["master"]["status"]), ("encoded", "failed"))
-        self.assertIn("4K broke", rec["master"]["error"])
-
-    # The redo rule.
-
-    def test_turning_an_output_on_later_does_not_redo_a_finished_day(self):
-        self.tree.add_day()
-        self.run_job()
-        first = self.tree.record()
-        self.run_job(self.NOW + timedelta(minutes=30), master=True, sunset_cut=True)
-        self.assertEqual((len(self.encoded), self.masters), (1, []))
-        self.assertEqual(self.tree.record(), first)
-
-    def test_redo_missing_outputs_redoes_a_day_without_them(self):
-        self.tree.add_day()
-        self.run_job()
-        self.run_job(self.NOW + timedelta(minutes=30), master=True, redo_missing_outputs=True)
-        self.assertEqual((len(self.encoded), len(self.masters)), (2, 1))
-        rec = self.tree.record()
-        self.assertEqual(rec["master"]["status"], "encoded")
-        self.assertIn("master", rec["redo"]["reason"])
-        self.run_job(self.NOW + timedelta(minutes=60), master=True, redo_missing_outputs=True)
-        self.assertEqual(len(self.masters), 1, "once it has them, it is left alone")
-
-    def test_redo_missing_outputs_also_redoes_a_failed_output(self):
-        self.tree.add_day()
-        add_dense(self.tree)
-        self.run_job(sunset_cut=True, cut_fails=True)
-        self.assertEqual(self.tree.record()["sunset_cut"]["status"], "failed")
-        self.run_job(self.NOW + timedelta(minutes=30), sunset_cut=True, redo_missing_outputs=True)
-        self.assertEqual(self.tree.record()["sunset_cut"]["status"], "encoded")
+        rec["provenance"]["script_version"] = version
+        with open(os.path.join(self.tree.daily, "2026-12-21.json"), "w") as f:
+            json.dump(rec, f)
 
     def test_redo_older_than_a_version(self):
         self.tree.add_day()
@@ -1881,19 +1625,21 @@ class ExtraOutputs(unittest.TestCase):
     def test_redo_is_limited_to_the_lookback_unless_a_range_is_given(self):
         self.tree.add_day()
         self.run_job()
+        self.age_record()
         later = SUNSET + timedelta(days=5)
-        self.run_job(later, master=True, redo_missing_outputs=True)
-        self.assertEqual(self.masters, [])
-        self.run_job(later, master=True, redo_missing_outputs=True,
+        self.run_job(later, redo_older_than=daily.SCRIPT_VERSION)
+        self.assertEqual(len(self.encoded), 1)
+        self.run_job(later, redo_older_than=daily.SCRIPT_VERSION,
                      redo_from=datetime(2026, 12, 21).date(), redo_to=datetime(2026, 12, 21).date())
-        self.assertEqual(len(self.masters), 1)
+        self.assertEqual(len(self.encoded), 2)
 
     def test_days_outside_the_range_are_left_alone(self):
         self.tree.add_day()
         self.run_job()
-        self.run_job(master=True, redo_missing_outputs=True,
+        self.age_record()
+        self.run_job(redo_older_than=daily.SCRIPT_VERSION,
                      redo_from=datetime(2026, 12, 22).date(), redo_to=datetime(2026, 12, 30).date())
-        self.assertEqual(self.masters, [])
+        self.assertEqual(len(self.encoded), 1)
 
     def test_a_range_also_makes_days_that_were_never_made(self):
         self.tree.add_day()
@@ -1908,132 +1654,14 @@ class EnvironmentSettings(unittest.TestCase):
         real_tz()
         return daily.config_from_env(dict(self.BASE, **env))
 
-    def test_new_outputs_and_redo_are_off_by_default(self):
+    def test_redo_is_off_by_default(self):
         cfg = self.config()
-        self.assertEqual((cfg.sunset_cut, cfg.master, cfg.redo_missing_outputs, cfg.redo_older_than,
-                          cfg.redo_from, cfg.redo_to), (False, False, False, None, None, None))
-        self.assertEqual((cfg.cut_before_min, cfg.cut_end_elevation, cfg.cut_after_min, cfg.cut_max_gap_min),
-                         (60.0, -9.0, 60.0, None))
-        self.assertEqual((cfg.master_codec, cfg.master_crf, cfg.master_preset, cfg.master_width, cfg.master_pix_fmt),
-                         ("libx264", 14, "slow", 3840, "yuv420p"))
+        self.assertEqual((cfg.redo_older_than, cfg.redo_from, cfg.redo_to), (None, None, None))
 
     def test_settings_are_read(self):
-        cfg = self.config(SUNSET_CUT="1", SUNSET_CUT_BEFORE_MIN="45", SUNSET_CUT_END_ELEVATION="-12",
-                          SUNSET_CUT_AFTER_MIN="70", SUNSET_CUT_MAX_GAP_MIN="5", MASTER="1",
-                          MASTER_CODEC="libx265", MASTER_CRF="18", MASTER_PRESET="medium", MASTER_WIDTH="1920",
-                          MASTER_PIX_FMT="yuv420p10le", REDO_OLDER_THAN_VERSION="2026-11-15.2",
-                          REDO_MISSING_OUTPUTS="1", REDO_FROM="2026-11-01", REDO_TO="2026-11-30")
-        self.assertEqual((cfg.sunset_cut, cfg.cut_before_min, cfg.cut_end_elevation, cfg.cut_after_min,
-                          cfg.cut_max_gap_min), (True, 45.0, -12.0, 70.0, 5.0))
-        self.assertEqual((cfg.master, cfg.master_codec, cfg.master_crf, cfg.master_preset, cfg.master_width,
-                          cfg.master_pix_fmt), (True, "libx265", 18, "medium", 1920, "yuv420p10le"))
-        self.assertEqual((cfg.redo_older_than, cfg.redo_missing_outputs, cfg.redo_from.isoformat(),
-                          cfg.redo_to.isoformat()), ("2026-11-15.2", True, "2026-11-01", "2026-11-30"))
-
-    def test_zero_and_empty_mean_off(self):
-        cfg = self.config(SUNSET_CUT="0", MASTER="", REDO_MISSING_OUTPUTS="0")
-        self.assertEqual((cfg.sunset_cut, cfg.master, cfg.redo_missing_outputs), (False, False, False))
-
-
-def ffmpeg_encoders():
-    if not HAVE_FFMPEG:
-        return ""
-    return subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True).stdout
-
-
-@unittest.skipUnless(HAVE_FFMPEG and TEST_FONT, "ffmpeg or a bold font not installed")
-class RealExtraOutputs(unittest.TestCase):
-    """The sunset cut and the master with the real ffmpeg."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.dir = tempfile.mkdtemp()
-        cls.white = os.path.join(cls.dir, "white.jpg")
-        make_image(cls.white)
-        cls.edge = os.path.join(cls.dir, "edge.jpg")
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
-                        "color=c=white:s=640x480:d=1,drawbox=x=320:y=0:w=320:h=480:color=black:t=fill",
-                        "-frames:v", "1", "-q:v", "2", cls.edge], check=True)
-
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls.dir, True)
-
-    def run_real(self, tree, **over):
-        return daily.run(tree.config(**over), SUNSET + timedelta(hours=1))
-
-    def test_sunset_cut_is_a_reel_of_the_cut_frames(self):
-        tree = Tree(self, self.white)
-        tree.add_day()
-        add_dense(tree)
-        self.assertEqual(self.run_real(tree, sunset_cut=True), 0)
-        cut = tree.record()["sunset_cut"]
-        self.assertEqual(cut["status"], "encoded")
-        path = os.path.join(tree.daily, cut["video"])
-        v = probe(path)["streams"][0]
-        self.assertEqual((v["codec_name"], v["width"], v["height"], v["color_space"]), ("h264", 1080, 1920, "bt709"))
-        # The job's own check allows VIDEO_FRAME_SLACK: ffmpeg 7.1 on Windows gave 185 for 91 pictures
-        # (expected 183, from rounding 1/12 s durations), ffmpeg 4.4 gave 183.
-        self.assertAlmostEqual(daily.count_video_frames(tree.config(), path), daily.expected_video_frames(91),
-                               delta=daily.VIDEO_FRAME_SLACK)
-        self.assertTrue(os.path.exists(os.path.join(tree.daily, "2026-12-21.mp4")))
-
-    def master(self, image, crop=None, **over):
-        tree = Tree(self, image)
-        tree.add_day(68)
-        if crop:
-            with open(tree.crop_file, "w") as f:
-                json.dump(crop, f)
-        self.assertEqual(self.run_real(tree, master=True, **over), 0)
-        return tree, tree.record()
-
-    def test_master_is_high_quality_bt709_with_no_text(self):
-        tree, rec = self.master(self.white)
-        m = rec["master"]
-        self.assertEqual(m["status"], "encoded", m)
-        path = os.path.join(tree.daily, m["video"])
-        info = probe(path)
-        v = info["streams"][0]
-        self.assertEqual((v["codec_name"], v["pix_fmt"], v["width"], v["height"], v["r_frame_rate"]),
-                         ("h264", "yuv420p", 640, 480, "24/1"), "a 640 frame is not scaled up")
-        self.assertEqual((v.get("color_space"), v.get("color_transfer"), v.get("color_primaries"), v.get("color_range")),
-                         ("bt709", "bt709", "bt709", "tv"))
-        self.assertEqual(daily.count_video_frames(tree.config(), path), daily.expected_video_frames(68))
-        for y in (20, 240, 400, 460):   # white frames with nothing drawn on them
-            row = gray_row(path, y, width=640, seek=0.05)
-            self.assertLess(max(row) - min(row), 20, "row %d should be untouched" % y)
-        self.assertEqual(m["size_bytes"], os.path.getsize(path))
-        self.assertGreaterEqual(m["encode_seconds"], 0)
-        self.assertEqual(sorted(os.listdir(tree.daily)), ["2026-12-21.json", "2026-12-21.mp4", "2026-12-21.txt",
-                                                          "2026-12-21_check.jpg", "2026-12-21_master.mp4"])
-
-    def test_master_has_no_blur(self):
-        tree, rec = self.master(self.edge, crop={"blur": [[300, 0, 40, 480]], "blur_sigma": 5})
-        row = gray_row(os.path.join(tree.daily, rec["master"]["video"]), 240, width=640, seek=0.05)
-        self.assertLess(len([v for v in row[280:360] if 60 < v < 190]), 4, "the edge stays a step")
-
-    def test_master_view_crops_the_box(self):
-        tree, rec = self.master(self.edge, crop={"master_view": {"x": 300, "y": 0, "width": 40, "height": 480}})
-        v = probe(os.path.join(tree.daily, rec["master"]["video"]))["streams"][0]
-        self.assertEqual((v["width"], v["height"]), (40, 480))
-        row = gray_row(os.path.join(tree.daily, rec["master"]["video"]), 240, width=40, seek=0.05)
-        self.assertGreater(row[5], 200)
-        self.assertLess(row[35], 50)
-
-    @unittest.skipUnless("libx265" in ffmpeg_encoders(), "this ffmpeg has no libx265")
-    def test_master_can_be_10_bit_hevc(self):
-        tree, rec = self.master(self.white, master_codec="libx265", master_pix_fmt="yuv420p10le")
-        self.assertEqual(rec["master"]["status"], "encoded", rec["master"])
-        v = probe(os.path.join(tree.daily, rec["master"]["video"]))["streams"][0]
-        self.assertEqual((v["codec_name"], v["pix_fmt"], v.get("codec_tag_string"), v.get("color_space")),
-                         ("hevc", "yuv420p10le", "hvc1", "bt709"))
-
-    def test_an_encoder_this_ffmpeg_lacks_skips_the_master_cleanly(self):
-        tree, rec = self.master(self.white, master_codec="libnosuchcodec")
-        self.assertEqual(rec["status"], "encoded")
-        self.assertEqual(rec["master"]["status"], "skipped")
-        self.assertIn("libnosuchcodec", rec["master"]["reason"])
-        self.assertNotIn("2026-12-21_master.mp4", os.listdir(tree.daily))
+        cfg = self.config(REDO_OLDER_THAN_VERSION="2026-11-15.2", REDO_FROM="2026-11-01", REDO_TO="2026-11-30")
+        self.assertEqual((cfg.redo_older_than, cfg.redo_from.isoformat(), cfg.redo_to.isoformat()),
+                         ("2026-11-15.2", "2026-11-01", "2026-11-30"))
 
 
 class CommandLine(unittest.TestCase):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live focus meter for setting the lens by hand. Stdlib only, so it runs on the Zero.
+"""Live focus meter for setting the lens by hand. Stdlib only.
 
     python3 sunset-focus.py [--count N] [--roi X,Y,W,H]
 

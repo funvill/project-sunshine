@@ -1,3 +1,4 @@
+# needs: 15_dense
 # Issue #23: capture refuses to run when sunset.env is missing. The systemd units load it with
 # EnvironmentFile=-, so a missing file is silently fine to systemd. A rebuilt CM4 started
 # without one would default to CAM_NAME=wide with no ROTATION: its frames would land in the

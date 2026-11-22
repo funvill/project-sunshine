@@ -8,7 +8,7 @@ host_keys()    { sed -nE 's/^([A-Z][A-Z0-9_]*)=.*/\1/p' "$1" | sort -u; }
 script_vars()  { grep -ohE '\$\{[A-Z][A-Z0-9_]*:-' "$SRC"/*.sh | sed -E 's/^\$\{//; s/:-$//' | sort -u; }
 
 section "pi/hosts: reference copies"
-for h in timelaps cm4; do
+for h in cm4; do
   f="$SRC/hosts/$h.env"
   check "$h.env exists" test -s "$f"
   missing="$(comm -23 <(host_keys "$f") <(example_keys) | tr '\n' ' ')"
@@ -23,7 +23,6 @@ for h in timelaps cm4; do
     bash -c "! grep -E '^[A-Z][A-Z0-9_]*=[^\"]*[[:space:]]#' '$f'"
   check "$h.env: sets CAM_NAME, SETUP_ID, NAS_TARGET" bash -c "grep -q '^CAM_NAME=' '$f' && grep -q '^SETUP_ID=' '$f' && grep -q '^NAS_TARGET=/' '$f'"
 done
-check "timelaps is the wide camera" grep -qx 'CAM_NAME=wide' "$SRC/hosts/timelaps.env"
 check "cm4 is not in the wide series" grep -qx 'CAM_NAME=cm4wide' "$SRC/hosts/cm4.env"
 # Upright from 2026-11-17 (ROTATION=180 from 2026-11-12); chosen by port, not number.
 check "cm4 is upright" grep -qx 'ROTATION=0' "$SRC/hosts/cm4.env"
@@ -33,8 +32,7 @@ check "second camera has its own name" grep -qx 'CAM_NAME=cm4city' "$SRC/sunset2
 check "cm4 has the dongle watchdog on" grep -qx 'NETWATCH=1' "$SRC/hosts/cm4.env"
 check "cm4 night settings for its lens" grep -qx 'NIGHT_SHUTTER_US=8000000' "$SRC/hosts/cm4.env"
 check "cm4 night colour gains" grep -qx 'NIGHT_AWB=2.20,2.80' "$SRC/hosts/cm4.env"
-check "timelaps is upright" bash -c "! grep -q '^ROTATION=' '$SRC/hosts/timelaps.env'"
-check "values not confirmed on the Pi are marked unverified" grep -qi 'unverified' "$SRC/hosts/cm4.env" "$SRC/hosts/timelaps.env"
+check "values not confirmed on the Pi are marked unverified" grep -qi 'unverified' "$SRC/hosts/cm4.env"
 
 section "sunset.env.example: every setting the scripts read"
 # Not settings: variables the scripts read only as scratch values or test hooks (a path or a
@@ -73,6 +71,5 @@ check "sunset.env.bak-pilot3 is ignored" ign pi/sunset.env.bak-pilot3
 check "credential files are ignored" ign sunset-nas.cred
 check "a credential file in a subfolder is ignored" ign pi/x/my.cred
 check "the example is not ignored" bash -c "! git -c safe.directory='*' -C '$GI' check-ignore -q --no-index pi/sunset.env.example"
-check "pi/hosts/timelaps.env is not ignored" bash -c "! git -c safe.directory='*' -C '$GI' check-ignore -q --no-index pi/hosts/timelaps.env"
 check "pi/hosts/cm4.env is not ignored" bash -c "! git -c safe.directory='*' -C '$GI' check-ignore -q --no-index pi/hosts/cm4.env"
 rm -rf "$GI"

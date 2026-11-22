@@ -1,5 +1,5 @@
-# Dense mode: 1-a-minute frames around sunrise and sunset, on top of the 5-minute slots.
-# sun_wrap answers "dense" from STUB_DENSE (sunrise|sunset|none) and hands everything
+# Dense mode: 1-a-minute frames around sunset, on top of the 5-minute slots.
+# sun_wrap answers "dense" from STUB_DENSE (sunset|none, or junk) and hands everything
 # else to the real sunset-sun.py, so the tests don't depend on today's sun.
 dense_env() {
   fresh_env
@@ -48,26 +48,6 @@ check "exits 0" test "$rc" = 0
 check "no frames" test -z "$(frames)"
 check "camera not touched" test ! -s "$STUB_CALLS"
 check "nothing logged" test ! -s "$LOG_FILE"
-
-section "dense: sunrise is off by default (decided 2026-11-16)"
-dense_env; export STUB_DENSE=sunrise STUB_LUX=1
-dense; rc=$?
-check "exits 0" test "$rc" = 0
-check "no frames" test -z "$(frames)"
-check "camera not touched" test ! -s "$STUB_CALLS"
-check "nothing logged" test ! -s "$LOG_FILE"
-
-section "dense: DENSE_WINDOWS can turn sunrise back on"
-dense_env; export STUB_DENSE=sunrise STUB_LUX=1 DENSE_WINDOWS="sunrise sunset"
-dense; rc=$?
-check "exits 0" test "$rc" = 0
-check "one sunrise frame" test "$(count 'wide_*Z.jpg')" = 1
-check "logged as sunrise" grep -q ' dense window=sunrise .* ok$' "$LOG_FILE"
-
-section "dense: DENSE_WINDOWS=sunrise leaves sunset out"
-dense_env; export DENSE_WINDOWS=sunrise
-dense
-check "no frames" test -z "$(frames)"
 
 section "dense: the regular slot minute is left to the regular capture"
 dense_env; export SLOT_EVERY_MIN=1

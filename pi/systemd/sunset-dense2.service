@@ -8,6 +8,6 @@ WorkingDirectory=/home/pi/sunset
 EnvironmentFile=-/home/pi/sunset/sunset.env
 # The second camera (CAM1): its own name, camera, setup and exposure over sunset.env.
 EnvironmentFile=/home/pi/sunset/sunset2.env
-# Exits at once outside the sunrise and sunset windows and on regular slot minutes.
+# Exits at once outside the sunset window and on regular slot minutes.
 ExecStart=/home/pi/sunset/sunset-capture.sh --dense
 TimeoutStartSec=120

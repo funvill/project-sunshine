@@ -65,7 +65,6 @@ frame_age() { FRAME_ROOT="$W/wide" FRAME_AGE_NOW="$NOW" sh "$HA/sunset_frame_age
 frame() { mkdir -p "$W/wide/$1"; : > "$W/wide/$1/$2"; }
 age_is() { [ "$(frame_age)" = "$1" ]; }
 
-HA="$(dirname "$SRC")/homeassistant"
 NOW=$(date -u -d "2026-11-05 18:00:00" +%s)
 
 section "frame age: reads the newest frame's UTC name"

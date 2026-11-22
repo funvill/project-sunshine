@@ -112,7 +112,6 @@ def main(argv=None):
     ap.add_argument("--poll", type=float, default=2, help="seconds between readings (production: 10)")
     ap.add_argument("--keyframe", type=float, default=600, help="seconds between keyframes (production: 14400)")
     ap.add_argument("--low-cell", type=float, default=3.45, help="low-battery cell voltage (production: 3.45)")
-    ap.add_argument("--low-pct", type=float, default=10, help="low-battery charge %% (production: 10)")
     ap.add_argument("--summary-only", action="store_true", help="just summarise an earlier run in --dir")
     a = ap.parse_args(argv)
 
@@ -130,9 +129,9 @@ def main(argv=None):
                UPS_PAUSE_FLAG=os.path.join(a.dir, "paused"),
                UPS_PAUSE="0",
                UPS_POLL_S=str(a.poll), UPS_KEYFRAME_S=str(a.keyframe),
-               UPS_LOW_CELL_V=str(a.low_cell), UPS_LOW_PCT=str(a.low_pct))
-    print("bench: %g min, poll %gs, keyframe %gs, low cell %.2f V, low charge %g%%, pause off, files in %s"
-          % (a.minutes, a.poll, a.keyframe, a.low_cell, a.low_pct, a.dir))
+               UPS_LOW_CELL_V=str(a.low_cell))
+    print("bench: %g min, poll %gs, keyframe %gs, low cell %.2f V, pause off, files in %s"
+          % (a.minutes, a.poll, a.keyframe, a.low_cell, a.dir))
     print("unplug and replug the adapter or the USB lead now to see events; Ctrl+C stops early")
     with open(os.path.join(a.dir, "reader.out"), "w") as out:
         proc = subprocess.Popen([sys.executable, "-I", READER, "--run"], env=env, stdout=out, stderr=out)

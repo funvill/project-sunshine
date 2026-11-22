@@ -1,3 +1,4 @@
+# needs: 66_netwatch 15_dense
 # Issue #8: netwatch's reboot must not stop the capture until the network returns. Before it
 # reboots with a trusted clock, netwatch leaves a "clock trusted at <epoch>" marker on the SD
 # card; the first capture after the reboot accepts it once, if the time is at or just after it.

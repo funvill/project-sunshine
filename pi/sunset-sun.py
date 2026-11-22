@@ -11,8 +11,8 @@ refraction. "Sunset" is the upper limb touching the horizon (zenith 90.833 deg).
     sunset-sun.py annotate  FRAME.json [FRAME2.json ...] [--time T]
                                           a missing or unreadable FRAME.json is started
                                           from {} with "rpicam_metadata": "missing"/"invalid"
-    sunset-sun.py dense     [--time T]    exit 0 and "sunrise"/"sunset" inside a
-                                          1-a-minute window, exit 1 and "none" outside
+    sunset-sun.py dense     [--time T]    exit 0 and "sunset" inside the 1-a-minute
+                                          window, exit 1 and "none" outside
     sunset-sun.py view      [--time T]    exit 0 and "in ..." if the sun is in the camera's view
                                           (plus VIEW_MARGIN), exit 1 and "out ..." if not
     sunset-sun.py view-calendar [--from YYYY-MM-DD] [--days N]
@@ -41,8 +41,8 @@ from datetime import datetime, timedelta, timezone
 
 UTC = timezone.utc
 SUNSET_ZENITH = 90.833
-DENSE_DARK_DEG = -9.0      # dense windows reach out to the sun at this elevation
-DENSE_DAY_MIN = 60         # and this far into the day from sunrise / sunset
+DENSE_DARK_DEG = -9.0      # the dense window ends with the sun at this elevation
+DENSE_DAY_MIN = 60         # and starts this long before sunset
 # Names the formula behind the Sun block. Change it whenever the numbers a frame would get change
 # (formula, sunset zenith, refraction), so frames from before and after can be told apart.
 ALGORITHM = "noaa-1"
@@ -166,23 +166,13 @@ def sunsets_around(dt, lat, lon, span=2, sign=1):
     return sorted(out)
 
 
-def next_sunrise(after, lat, lon):
-    for s in sunsets_around(after, lat, lon, sign=-1):
-        if s > after:
-            return s
-    return None
-
-
 def dense_window(dt, lat, lon):
-    """"sunrise" from the sun at DENSE_DARK_DEG until DENSE_DAY_MIN after sunrise, "sunset" from
-    DENSE_DAY_MIN before sunset until the sun is down to DENSE_DARK_DEG, otherwise None."""
+    """"sunset" from DENSE_DAY_MIN before sunset until the sun is down to DENSE_DARK_DEG,
+    otherwise None. (A sunrise window was dropped on 2026-11-16: a west window has nothing to see.)"""
     if sun_position(dt, lat, lon)[1] < DENSE_DARK_DEG:
         return None
     day = timedelta(minutes=DENSE_DAY_MIN)
-    dark = timedelta(hours=3)   # the sun reaches -9 deg well within this of sunrise/sunset here
-    for rise in sunsets_around(dt, lat, lon, span=1, sign=-1):
-        if rise - dark <= dt <= rise + day:
-            return "sunrise"
+    dark = timedelta(hours=3)   # the sun reaches -9 deg well within this of sunset here
     for sset in sunsets_around(dt, lat, lon, span=1):
         if sset - day <= dt <= sset + dark:
             return "sunset"

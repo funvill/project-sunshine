@@ -12,9 +12,9 @@ more likely to be current.
 
 ## How it works
 
-1. **Capture (Pi):** a frame every 5 minutes, day and night, plus one a minute around sunrise and
-   sunset. Each regular frame is a JPEG, a DNG and a JSON metadata file; a night frame (4 s on `wide`,
-   8 s on `cm4wide` since 2026-11-12) is added when it is dark. Frames are written to the SD card first.
+1. **Capture (Pi):** a frame every 5 minutes, day and night, plus one a minute around sunset, on
+   each camera. Each frame is a JPEG and a JSON metadata file (no DNG since 2026-11-16); a long night
+   frame is added when it is dark. Frames are written to the Pi's own storage first.
 2. **Sync (Pi to NAS):** frames are copied to an SMB share on the NAS and deleted from the SD card
    only once the copy is confirmed, so a NAS or network outage loses nothing.
 3. **Alert (Home Assistant):** warns when the newest frame on the NAS is more than about an hour old.
@@ -32,71 +32,26 @@ How the parts connect: power in solid orange, data dashed. Dashed boxes are plan
 Frame layout on the NAS, with UTC names:
 
 ```
-project_sunshine/<camera>/YYYY/MM/DD/<camera>_<UTC>.{jpg,dng,json}   (+ <camera>_<UTC>_night.*)
+project_sunshine/<camera>/YYYY/MM/DD/<camera>_<UTC>.{jpg,json}   (+ <camera>_<UTC>_night.*)
 ```
 
-`<camera>` is `wide` (Pi 3 B+ with the 6 mm lens) or `cm4wide` (CM4 with the 3.2 mm lens, capturing since 2026-11-12).
+`<camera>` is `cm4wide` (3.2 mm lens, from 2026-11-12) or `cm4city` (6 mm lens, from 2026-11-17).
+`wide` holds the retired Pi 3's frames (to 2026-11-17).
 
 Each `.json` holds the camera settings, a `Sun` block (azimuth, elevation, minutes from sunset), a
 `Capture` block (how and why the frame was taken) and a `System` block (temperature, disk, checksums).
 A `system.json` in each day folder holds what rarely changes.
 
-## Current state (2026-11-15)
+## Current state
 
-| Part | State |
-|---|---|
-| Capture, two cameras | Running: `wide` (Pi 3 B+, 6 mm lens) and `cm4wide` (CM4, 3.2 mm lens), 5-minute frames plus 1-a-minute frames at sunrise and sunset |
-| Sync to the NAS | Running |
-| Home Assistant alert | Installed and working |
-| Daily video job | Tested on real frames from a PC; **never run on the NAS**, the Docker image has never been built. Changes since 2026-11-12 (committed 2026-11-13): tighter crop (`view`), tower blur, 07:30 start, location text, sky score, `FUSED_DIR`, `tools/build_video.py`, `tools/fuse_sunset.py` |
-| Sunset video quality | **Not good enough to post.** The Nov 12 `cm4wide` video still flickers around sunset (about 15 to 20 min before). See "Next steps" |
-| Instagram posting | Not started: no account, Meta app or publishing code |
-| Pilot experiments | Running on the Pi between captures; results on issue #3 |
-| Final mount, foam hood | Not done. Both cameras sit loose behind the glass; the CM4's 3.2 mm lens is the wide one |
+One CM4 (`sunshine`) runs two cameras: `cm4wide` (3.2 mm, the five-year series) and `cm4city`
+(6 mm, downtown). Each takes a frame every 5 minutes, adds one a minute around sunset, and brackets
+the sunset (ev+0 and ev-2). Frames sync to the NAS, and Home Assistant alerts on stale frames and
+on the UPS. The real run starts on the winter solstice, 2026-12-21.
 
-Known problems:
-
-- **`wide` lens too narrow.** The `wide` camera has the official Pi 6 mm CS lens, about 58° wide. The
-  sunset swings about 75° over a year. Measured on the Nov 8 sunset, it is out of frame on the left
-  from about Nov 24 to Jan 16 (the solstice start is about 4.7° past the edge) and, predicted, on the
-  right from about May 12 to Jul 30. `cm4wide` (3.2 mm) should cover the whole swing, but that is
-  estimated from landmarks, not yet measured on the sun, and the June end is tight. See issue #4.
-- **Power:** `timelaps` had undervoltage and one hard freeze. A new supply went in on 2026-11-08; the
-  only warnings since were three on 2026-11-12 while the cameras were moved. Keep watching before
-  calling it fixed.
-- **Heat:** `timelaps` runs at 55 to 60 °C at capture, at its soft limit. A heatsink is on the to-do list.
-- **Sunset flicker (blocks posting).** Between about 00:12 and 00:19 UTC on Nov 12 the sun and its glow
-  brighten and dim minute to minute, in the raw frames too. Measured on 2026-11-15: it is real cloud crossing
-  the glow (the same minutes on both cameras), not auto exposure. `fuse_sunset.py` now blends each sunset
-  minute with its neighbours (1:2:1), which cut the Nov 12 video's worst change from 17 to 11. Waiting on
-  Steven's view of the result.
-- **Few clear sunsets.** Nov 8 and Nov 12 were the good ones. The 9° dusk cut-off, the `cm4wide`
-  calibration and the tower blur boxes haven't been checked on a clear sunset yet.
-
-## Next steps (from 2026-11-15)
-
-1. **Sunset flicker:** Steven to judge the blended Nov 12 video. Still open: the 5-minute frames inside the
-   merge window are not real merges (the runner skips that minute), and no clear sunset yet. Notes in
-   `CLAUDE.md` under "Next session" and on issue #3.
-2. ~~Look at the 7-minute hole~~ in the sunset bracket on Nov 12: the runner's NAS upload, fixed 2026-11-13.
-3. Put `nas/crop.cm4wide.json` on the NAS as `daily/crop.json` when the NAS job is set up.
-4. **Steven's calls:** the sky score threshold for posting; Instagram login and public posting (issue #2);
-   DNG yes or no (issue #5); a production sunset bracket (backlog #3), which removes the dependency on
-   experiment frames for the merged exposure.
-5. **Later:** build the Docker image and run the job on the NAS, the publisher, the heatsink and the final
-   mount, hood and wide-lens decisions.
-
-## Open issues
-
-| Issue | What it is | Waiting on |
-|---|---|---|
-| [#2](https://github.com/funvill/project-sunshine/issues/2) | Daily sunset video to Instagram. Its latest comment is the handoff for that work | Owner decisions on login and public posting; the NAS run |
-| [#3](https://github.com/funvill/project-sunshine/issues/3) | Pilot experiments: night exposure, capture rate, sunset, direct sun | Clear evenings |
-| [#4](https://github.com/funvill/project-sunshine/issues/4) | The 6 mm lens can't see both ends of the sunset swing | A lens choice (buying decision) |
-| [#5](https://github.com/funvill/project-sunshine/issues/5) | Keep the DNG files or not | Owner decision |
-
-Other owner decisions not yet made: a High Endurance SD card for the real run, an RTC, the heatsink,
-and the final mount and hood. The longer backlog is at the end of `CLAUDE.md`.
+What is decided and current is in [`CLAUDE.md`](CLAUDE.md). Open work is in the
+[issues](https://github.com/funvill/project-sunshine/issues). Every event and change, with dates,
+is in [`changelog.md`](changelog.md).
 
 ## Layout
 
@@ -116,7 +71,7 @@ and the final mount and hood. The longer backlog is at the end of `CLAUDE.md`.
 **To work on the code:** no Pi or NAS is needed. Run the tests:
 
 ```bash
-bash tests/run.sh
+bash tests/run.sh            # all; or name some: bash tests/run.sh 17_ dense test_ups
 ```
 
 ```bash

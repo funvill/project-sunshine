@@ -50,7 +50,6 @@ class Cfg:
     poll_s = 10.0
     keyframe_s = 4 * 3600.0
     low_cell_v = 3.45
-    low_pct = 10
     warn_temp = 40
     pause = True
     pause_units = ["sunset-capture.timer", "sunset-dense.timer", "sunset-capture2.timer",
@@ -216,11 +215,12 @@ class Events(unittest.TestCase):
         self.assertIn("EVENT capture_resumed", lines)
         self.assertEqual(calls, [["sync"]])
 
-    def test_low_charge_alone_pauses(self):
+    def test_charge_percentage_is_not_used(self):
+        # The board says 100% on battery until the end (2026-11-20), so only the cells decide.
         m, lines, calls, _ = monitor()
-        m.poll(reply("battery", vin=0.0, cells=(3.70, 3.70, 3.70), pct=10))
-        self.assertIn("EVENT low_battery", lines)
-        self.assertTrue(calls)
+        m.poll(reply("battery", vin=0.0, cells=(3.70, 3.70, 3.70), pct=5))
+        self.assertNotIn("EVENT low_battery", lines)
+        self.assertEqual(calls, [])
 
     def test_low_cells_on_mains_do_not_pause(self):
         m, lines, calls, _ = monitor()

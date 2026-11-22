@@ -87,23 +87,6 @@ COMPASS = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "
 BLUR_SIGMA = 5                  # pixels of the full frame; windows go, the outline and decks stay
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
-# The sunset-only cut (SUNSET_CUT=1, issue #21): the frames from SUNSET_CUT_BEFORE_MIN before sunset
-# to the first one with the sun at SUNSET_CUT_END_ELEVATION, where the 1-a-minute frames are. With no
-# elevation in the frames it stops SUNSET_CUT_AFTER_MIN after sunset (an estimate: -9 deg comes about
-# 45 to 70 minutes after sunset here over the year, not measured).
-SUNSET_CUT_BEFORE_MIN = 60
-SUNSET_CUT_AFTER_MIN = 60
-SUNSET_CUT_INTERVAL_MIN = 1      # the dense frames' spacing: the cut expects one frame per this
-
-# The master render (MASTER=1, issue #21): no text, no blur, no mask, full frame or crop.json's
-# "master_view" box, scaled to fit MASTER_WIDTH wide (never up). 10-bit HEVC is MASTER_CODEC=libx265
-# with MASTER_PIX_FMT=yuv420p10le.
-MASTER_CODEC = "libx264"
-MASTER_CRF = 14
-MASTER_PRESET = "slow"
-MASTER_WIDTH = 3840
-MASTER_PIX_FMT = "yuv420p"
-
 # source: the original, if jpg is a fused copy. capture: the frame's Capture block, if it has one.
 Frame = collections.namedtuple("Frame", "time jpg sun source capture", defaults=(None, None))
 
@@ -111,15 +94,11 @@ Frame = collections.namedtuple("Frame", "time jpg sun source capture", defaults=
 # The top level of crop.json is the fallback for each, so older files keep working.
 DAY_SETTINGS = {"setup_id": None, "offset_px": 0, "mask": [], "view": None, "blur": None,
                 "blur_sigma": BLUR_SIGMA, "sky_rows": SKY_ROWS, "sky_full_warm": SKY_FULL_SCORE_WARM,
-                "sky_min_frames": SKY_MIN_FRAMES, "master_view": None}
+                "sky_min_frames": SKY_MIN_FRAMES}
 
 
 class EncodeError(Exception):
     """ffmpeg or ffprobe failed. The day gets a failed record, and runs within LOOKBACK_DAYS retry it."""
-
-
-class EncoderMissing(EncodeError):
-    """This ffmpeg can't encode with the codec asked for. The output is skipped, not failed."""
 
 
 @dataclasses.dataclass
@@ -143,22 +122,8 @@ class Config:
     max_sunset_gap_min: float = MAX_SUNSET_GAP_MIN
     ffmpeg: str = "ffmpeg"
     ffprobe: str = "ffprobe"
-    # Extra outputs, off unless asked for (issue #21); see nas/README.md.
-    sunset_cut: bool = False
-    cut_before_min: float = SUNSET_CUT_BEFORE_MIN
-    cut_end_elevation: float = DARK_ELEVATION_DEG
-    cut_after_min: float = SUNSET_CUT_AFTER_MIN
-    cut_interval_min: float = SUNSET_CUT_INTERVAL_MIN
-    cut_max_gap_min: object = None      # None: the same as max_sunset_gap_min
-    master: bool = False
-    master_codec: str = MASTER_CODEC
-    master_crf: int = MASTER_CRF
-    master_preset: str = MASTER_PRESET
-    master_width: int = MASTER_WIDTH
-    master_pix_fmt: str = MASTER_PIX_FMT
     # Redoing finished days, off unless asked for.
     redo_older_than: object = None      # a SCRIPT_VERSION: redo records made by an older one
-    redo_missing_outputs: bool = False  # redo encoded days that lack an enabled output, or where it failed
     redo_from: object = None            # local dates: redo within these instead of LOOKBACK_DAYS
     redo_to: object = None
 
@@ -412,35 +377,6 @@ def day_end(frames, sunset):
 def select_window(frames, start, end):
     """Frames after start, up to and including end. Start is the last video's final frame."""
     return [f for f in frames if start < f.time <= end]
-
-
-def minutes_from(frame, sunset):
-    """Minutes from `sunset`: the frame's Sun.minutes_from_sunset when it is for this sunset,
-    else from its time."""
-    if frame_sunset(frame) == sunset and frame.sun.get("minutes_from_sunset") is not None:
-        return float(frame.sun["minutes_from_sunset"])
-    return (frame.time - sunset).total_seconds() / 60.0
-
-
-def sunset_cut_end(frames, sunset, end_elevation, after_min):
-    """(Time of the sunset cut's last frame, "elevation" or "minutes"): the first frame after this
-    sunset with the sun at or below `end_elevation`, else `after_min` after sunset."""
-    for frame in frames:
-        if frame_sunset(frame) != sunset:
-            continue
-        minutes, elevation = frame.sun.get("minutes_from_sunset"), frame.sun.get("elevation_deg")
-        if minutes is not None and elevation is not None and minutes > 0 and elevation <= end_elevation:
-            return frame.time, "elevation"
-    return sunset + timedelta(minutes=after_min), "minutes"
-
-
-def sunset_cut_frames(frames, sunset, before_min, end_elevation, after_min):
-    """(Frames for the sunset-only cut, {"end_utc", "end_by"}): from `before_min` before sunset up
-    to and including sunset_cut_end."""
-    frames = sorted(frames, key=lambda f: f.time)
-    end, end_by = sunset_cut_end(frames, sunset, end_elevation, after_min)
-    chosen = [f for f in frames if minutes_from(f, sunset) >= -before_min and f.time <= end]
-    return chosen, {"end_utc": end, "end_by": end_by}
 
 
 def nearest_frame(frames, sunset):
@@ -724,78 +660,6 @@ def probe_frame_size(cfg, path):
     return stream["width"], stream["height"]
 
 
-def master_geometry(frame_w, frame_h, master_view, width=MASTER_WIDTH):
-    """Where the master comes from and its size: the full frame, or the `master_view` box
-    ({"x", "y", "width", "height"} in full-frame pixels, kept inside the frame and even), scaled
-    to `width` wide, never up, with the height in proportion and even."""
-    if master_view:
-        w = max(2, min(frame_w, int(master_view["width"])) // 2 * 2)
-        h = max(2, min(frame_h, int(master_view["height"])) // 2 * 2)
-        x = max(0, min(frame_w - w, int(master_view["x"]))) // 2 * 2
-        y = max(0, min(frame_h - h, int(master_view["y"]))) // 2 * 2
-        source = "master_view"
-    else:
-        x, y, w, h, source = 0, 0, frame_w, frame_h, "full_frame"
-    out_w = max(2, min(int(width), w) // 2 * 2)
-    out_h = max(2, int(round(h * out_w / w / 2.0)) * 2)
-    return {"x": x, "y": y, "width": w, "height": h, "out_width": out_w, "out_height": out_h, "from": source}
-
-
-def encoder_names(cfg):
-    """The encoders this ffmpeg lists, or None if it can't be asked."""
-    try:
-        out = subprocess.run([cfg.ffmpeg, "-hide_banner", "-encoders"], capture_output=True, text=True,
-                             timeout=60).stdout
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return {parts[1] for parts in (line.split() for line in out.splitlines()) if len(parts) > 1}
-
-
-def encode_master(cfg, frames, geometry, out):
-    """The master: the same frames and timing as the daily video, with no text, blur or mask, at
-    MASTER_* quality, converted to BT.709 and tagged like the daily video. EncoderMissing if this
-    ffmpeg lacks the codec."""
-    names = encoder_names(cfg)
-    if names is not None and cfg.master_codec not in names:
-        raise EncoderMissing("this ffmpeg has no %s encoder" % cfg.master_codec)
-    fd, list_path = tempfile.mkstemp(prefix=".concat-", suffix=".txt", dir=os.path.dirname(out))
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(concat_list(frames))
-    chain = []
-    if geometry["from"] != "full_frame":
-        chain.append("crop=%d:%d:%d:%d" % (geometry["width"], geometry["height"], geometry["x"], geometry["y"]))
-    chain += ["scale=%d:%d:flags=lanczos:in_color_matrix=bt601:in_range=pc:out_color_matrix=bt709:out_range=tv"
-              % (geometry["out_width"], geometry["out_height"]),
-              "format=" + cfg.master_pix_fmt,
-              "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709",
-              "fps=%d" % OUTPUT_FPS,
-              "format=" + cfg.master_pix_fmt]
-    args = [cfg.ffmpeg, "-y", "-loglevel", "error", "-xerror", "-f", "concat", "-safe", "0", "-i", list_path,
-            "-vf", ",".join(chain), "-an", "-sn", "-map_metadata", "-1",
-            "-c:v", cfg.master_codec, "-preset", str(cfg.master_preset), "-crf", str(cfg.master_crf)]
-    if cfg.master_codec == "libx265":
-        args += ["-x265-params", "log-level=error", "-tag:v", "hvc1"]   # hvc1: QuickTime plays it
-    args += ["-use_editlist", "0", "-movflags", "+faststart",
-             "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv",
-             "-f", "mp4", out]
-    try:
-        run_tool(args)
-    finally:
-        os.remove(list_path)
-    check_frame_count(cfg, out, len(frames))
-
-
-def encode_into(daily_dir, name, make):
-    """Run make(temporary path), then move the result to daily_dir/name. Nothing is left on failure."""
-    tmp = os.path.join(daily_dir, ".%s.tmp" % name)
-    try:
-        make(tmp)
-        os.replace(tmp, os.path.join(daily_dir, name))
-    finally:
-        if os.path.exists(tmp):
-            os.remove(tmp)
-
-
 def write_check_image(cfg, sunset_frame, crop, mask, out):
     """A small full frame with the crop and predicted sun drawn on it, to compare against
     the real sun. Any mask is applied here too, since this is the whole view."""
@@ -869,79 +733,6 @@ def finish_record(record):
     return record
 
 
-def make_sunset_cut(cfg, day, sunset, frames, crop, mask, encode, block):
-    """The sunset-only cut into `block`: the same checks, crop, blur and text as the daily video,
-    on the frames sunset_cut_frames picks. Too few frames or a long gap skips it, with the reason."""
-    listed, info = sunset_cut_frames(frames, sunset, cfg.cut_before_min, cfg.cut_end_elevation, cfg.cut_after_min)
-    cut, dropped = check_frames(listed)
-    start = sunset - timedelta(minutes=cfg.cut_before_min)
-    expected = int(round((info["end_utc"] - start).total_seconds() / 60.0 / cfg.cut_interval_min)) + 1
-    gaps = frame_gaps([f.time for f in cut], sunset, info["end_utc"])
-    limit = cfg.max_sunset_gap_min if cfg.cut_max_gap_min is None else cfg.cut_max_gap_min
-    block.update(status=None, frames=len(cut), expected_frames=expected, dropped_frames=len(dropped),
-                 dropped=dropped[:DROPPED_LIST_MAX], largest_gap_min=gaps["largest_gap_min"],
-                 largest_gap_at_utc=gaps["largest_gap_at_utc"])
-    block["window"] = {"before_min": cfg.cut_before_min, "end_elevation_deg": cfg.cut_end_elevation,
-                       "end_by": info["end_by"], "after_min_limit": cfg.cut_after_min,
-                       "first_utc": cut[0].time.strftime(TIME_FORMAT) if cut else None,
-                       "last_utc": cut[-1].time.strftime(TIME_FORMAT) if cut else None,
-                       "first_minutes": round(minutes_from(cut[0], sunset), 1) if cut else None,
-                       "last_minutes": round(minutes_from(cut[-1], sunset), 1) if cut else None}
-    reason = None
-    if len(cut) < expected * cfg.min_fraction:
-        reason = "only %d of %d expected frames (one every %g min)" % (len(cut), expected, cfg.cut_interval_min)
-    elif gaps["largest_gap_min"] > limit:
-        reason = "a %g-minute gap with no frames from %s (limit %g)" % (
-            gaps["largest_gap_min"], gaps["largest_gap_at_utc"], limit)
-    if reason:
-        block.update(status="skipped", reason=reason)
-        log("%s sunset cut skipped: %s" % (day, reason))
-        return
-    name = day.isoformat() + "_sunset.mp4"
-    encode_into(cfg.daily_dir, name, lambda tmp: encode(cfg, cut, crop, mask, tmp))
-    block.update(status="encoded", video=name)
-    log("%s sunset cut encoded: %d frames" % (day, len(cut)))
-
-
-def make_master(cfg, day, window, frame_w, frame_h, master_view, master_encode, block):
-    """The master into `block`: every frame of the daily video, no text, blur or mask."""
-    geometry = master_geometry(frame_w, frame_h, master_view, cfg.master_width)
-    block.update(status=None, frames=len(window), codec=cfg.master_codec, crf=cfg.master_crf,
-                 preset=cfg.master_preset, pix_fmt=cfg.master_pix_fmt,
-                 width=geometry["out_width"], height=geometry["out_height"],
-                 source={k: geometry[k] for k in ("x", "y", "width", "height", "from")},
-                 color="bt709 limited range, converted from the JPEGs' bt601 full range",
-                 overlay=False, blur=False, mask=False)
-    name = day.isoformat() + "_master.mp4"
-    began = time.monotonic()
-    try:
-        encode_into(cfg.daily_dir, name, lambda tmp: master_encode(cfg, window, geometry, tmp))
-    except EncoderMissing as e:
-        block.update(status="skipped", reason=str(e))
-        log("%s master skipped: %s" % (day, e))
-        return
-    block.update(status="encoded", video=name, encode_seconds=round(time.monotonic() - began, 1),
-                 size_bytes=os.path.getsize(os.path.join(cfg.daily_dir, name)))
-    log("%s master encoded: %dx%d, %d bytes" % (day, block["width"], block["height"], block["size_bytes"]))
-
-
-def make_extra(day, label, block, make):
-    """Run one extra output. Any error goes in its block, never in the day's status: the daily
-    video is already made. True if it didn't fail."""
-    try:
-        make(block)
-        return True
-    except Exception as e:
-        log("%s WARN %s failed: %s\n%s" % (day, label, e, traceback.format_exc()))
-        error = str(e) if isinstance(e, EncodeError) else "%s: %s" % (type(e).__name__, e)
-        block.update(status="failed", error=error)
-        return False
-
-
-def enabled_outputs(cfg):
-    return [name for name, on in (("sunset_cut", cfg.sunset_cut), ("master", cfg.master)) if on]
-
-
 def version_key(text):
     """A SCRIPT_VERSION ("2026-11-15.2") as something to compare. Missing or unreadable is oldest."""
     match = re.fullmatch(r"(\d{4}-\d{2}-\d{2})\.(\d+)", text or "")
@@ -955,13 +746,6 @@ def redo_reason(cfg, record):
     version = (record.get("provenance") or {}).get("script_version")
     if cfg.redo_older_than and version_key(version) < version_key(cfg.redo_older_than):
         return "made by script version %s, older than %s" % (version, cfg.redo_older_than)
-    if cfg.redo_missing_outputs and record.get("status") == "encoded":
-        for name in enabled_outputs(cfg):
-            block = record.get(name)
-            if not isinstance(block, dict):
-                return "no %s" % name
-            if block.get("status") == "failed":
-                return "%s failed" % name
     return None
 
 
@@ -970,10 +754,10 @@ def in_redo_range(cfg, day):
 
 
 def process_sunset(cfg, sunset, frames, crop_config, encode, get_size, check_image, record=None, context=None,
-                   master_encode=encode_master, carry=None):
-    """Make one day's video and any extra outputs, and write its record. `record` is filled in as
-    the work goes, so a failed record can say how far it got. `carry` is put into the record last
-    (a redo's note and the posting state). False if an extra output failed."""
+                   carry=None):
+    """Make one day's video and write its record. `record` is filled in as the work goes, so a
+    failed record can say how far it got. `carry` is put into the record last (a redo's note and
+    the posting state)."""
     record = {} if record is None else record
     context = context or {}
     carry = carry or {}
@@ -1018,12 +802,10 @@ def process_sunset(cfg, sunset, frames, crop_config, encode, get_size, check_ima
             gaps["largest_sunset_gap_min"], cfg.max_sunset_gap_min)
     if reason:
         record.update(status="skipped", reason=reason)
-        for name in enabled_outputs(cfg):   # no gaps hidden in a master or a cut either
-            record[name] = {"status": "skipped", "reason": "the day was skipped: " + reason}
         record.update(carry)
         write_atomic(json_path, json.dumps(finish_record(record), indent=2) + "\n")
         log("%s skipped: %s" % (day, reason))
-        return True
+        return
 
     previous_crop = previous.get("crop") or {}
     azimuth, method = sunset_azimuth(frames, sunset)
@@ -1076,21 +858,9 @@ def process_sunset(cfg, sunset, frames, crop_config, encode, get_size, check_ima
         record["sky_note"] = "no sky score: %d readable frame(s) from %d min before to %d min after sunset, need %d" % (
             len(scored), SKY_BEFORE_MIN, SKY_AFTER_MIN, settings["sky_min_frames"])
 
-    # Extra outputs. A setup mismatch still gets them: the cut is flagged like the daily video
-    # (post_ok covers the day), and the master has no blur boxes to misplace.
-    ok = True
-    if cfg.sunset_cut:
-        record["sunset_cut"] = {}
-        ok &= make_extra(day, "sunset cut", record["sunset_cut"], lambda block: make_sunset_cut(
-            cfg, day, sunset, frames, video_crop, mask, encode, block))
-    if cfg.master:
-        record["master"] = {}
-        ok &= make_extra(day, "master", record["master"], lambda block: make_master(
-            cfg, day, window, frame_w, frame_h, settings["master_view"], master_encode, block))
     record.update(carry)
     write_atomic(json_path, json.dumps(finish_record(record), indent=2) + "\n")   # last: this marks the day done
     log("%s encoded: %d frames, crop x=%d (%s)" % (day, len(window), crop["x"], crop["source"]))
-    return ok
 
 
 def write_failed(cfg, sunset, record, error, previous, carry=None):
@@ -1102,7 +872,7 @@ def write_failed(cfg, sunset, record, error, previous, carry=None):
     record.setdefault("schema_version", RECORD_SCHEMA_VERSION)
     record.update(status="failed", error=error, failed_utc=datetime.now(UTC).strftime(TIME_FORMAT),
                   attempts=int((previous or {}).get("attempts", 0)) + 1, posted=False)
-    for key in ("video", "caption", "sky", "sky_note", "reason", "sunset_cut", "master"):
+    for key in ("video", "caption", "sky", "sky_note", "reason"):
         record.pop(key, None)
     record.update(carry or {})
     try:
@@ -1126,11 +896,11 @@ def acquire_lock(path):
         return False
 
 
-def run(cfg, now, encode=encode_video, frame_size=None, check_image=write_check_image, master_encode=encode_master):
+def run(cfg, now, encode=encode_video, frame_size=None, check_image=write_check_image):
     """Process every due sunset without a finished record (a failed one is tried again while it
     is within LOOKBACK_DAYS). A finished record is made again only under the REDO_* settings
     (redo_reason), within LOOKBACK_DAYS or the REDO_FROM/REDO_TO range. Returns the process exit
-    code: 1 if any day or extra output failed."""
+    code: 1 if any day failed."""
     get_size = frame_size or (lambda path: probe_frame_size(cfg, path))
     os.makedirs(cfg.daily_dir, exist_ok=True)
     lock = os.path.join(cfg.daily_dir, ".lock")
@@ -1172,9 +942,7 @@ def run(cfg, now, encode=encode_video, frame_size=None, check_image=write_check_
                 context["ffmpeg"] = ffmpeg_version(cfg)
             record = {}
             try:
-                if not process_sunset(cfg, sunset, frames, crop_config, encode, get_size, check_image, record, context,
-                                      master_encode, carry):
-                    rc = 1
+                process_sunset(cfg, sunset, frames, crop_config, encode, get_size, check_image, record, context, carry)
             except EncodeError as e:
                 log("%s FAILED: %s" % (day, e))
                 write_failed(cfg, sunset, record, str(e), existing, carry)
@@ -1188,10 +956,6 @@ def run(cfg, now, encode=encode_video, frame_size=None, check_image=write_check_
         os.remove(lock)
 
 
-def env_on(env, name):
-    return env.get(name, "").strip() not in ("", "0")
-
-
 def env_date(env, name):
     return date.fromisoformat(env[name]) if env.get(name) else None
 
@@ -1201,7 +965,6 @@ def config_from_env(env):
     from zoneinfo import ZoneInfo
     daily_dir = env["DAILY_DIR"]
     center = env.get("CROP_CENTER_X")
-    cut_gap = env.get("SUNSET_CUT_MAX_GAP_MIN")
     return Config(frames_dir=env["FRAMES_DIR"], daily_dir=daily_dir,
                   crop_file=env.get("CROP_FILE", os.path.join(daily_dir, "crop.json")),
                   tz=ZoneInfo(env.get("SITE_TZ", "America/Vancouver")),
@@ -1218,19 +981,7 @@ def config_from_env(env):
                   fused_dir=env.get("FUSED_DIR") or None,
                   max_gap_min=float(env.get("MAX_GAP_MIN", str(MAX_GAP_MIN))),
                   max_sunset_gap_min=float(env.get("MAX_SUNSET_GAP_MIN", str(MAX_SUNSET_GAP_MIN))),
-                  sunset_cut=env_on(env, "SUNSET_CUT"),
-                  cut_before_min=float(env.get("SUNSET_CUT_BEFORE_MIN", str(SUNSET_CUT_BEFORE_MIN))),
-                  cut_end_elevation=float(env.get("SUNSET_CUT_END_ELEVATION", str(DARK_ELEVATION_DEG))),
-                  cut_after_min=float(env.get("SUNSET_CUT_AFTER_MIN", str(SUNSET_CUT_AFTER_MIN))),
-                  cut_max_gap_min=float(cut_gap) if cut_gap else None,
-                  master=env_on(env, "MASTER"),
-                  master_codec=env.get("MASTER_CODEC") or MASTER_CODEC,
-                  master_crf=int(env.get("MASTER_CRF", str(MASTER_CRF))),
-                  master_preset=env.get("MASTER_PRESET") or MASTER_PRESET,
-                  master_width=int(env.get("MASTER_WIDTH", str(MASTER_WIDTH))),
-                  master_pix_fmt=env.get("MASTER_PIX_FMT") or MASTER_PIX_FMT,
                   redo_older_than=env.get("REDO_OLDER_THAN_VERSION") or None,
-                  redo_missing_outputs=env_on(env, "REDO_MISSING_OUTPUTS"),
                   redo_from=env_date(env, "REDO_FROM"), redo_to=env_date(env, "REDO_TO"))
 
 

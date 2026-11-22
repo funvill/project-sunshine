@@ -1,3 +1,4 @@
+# needs: 80_frame_age
 # The NAS jobs for monitoring (issues #13 and #22): nas/sunset-verify.py and nas/sunset-health.py,
 # their Python tests, and one end to end run: the jobs write their results, and the Home Assistant
 # script reads them, under sh and busybox sh.

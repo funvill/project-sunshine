@@ -1,3 +1,4 @@
+# needs: 80_frame_age
 # The daily video record and the NAS job results, as Home Assistant reads them:
 # homeassistant/sunset_daily_status.sh and homeassistant/sunset_result.sh, under sh and busybox sh.
 fresh_ha() { W="$(mktemp -d)"; export FRAME_BASE="$W" SUNSET_NOW="$(date -u -d '2026-11-15 12:00:00' +%s)"; mkdir -p "$W/daily" "$W/health/wide" "$W/health/cm4wide"; }

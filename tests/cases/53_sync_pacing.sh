@@ -1,3 +1,4 @@
+# needs: 51_sync_hardening
 # Sync pacing on a slow link (CM4 on 2.4 Mbit/s Wi-Fi, 2026-11-17): the evening bracket left a
 # backlog that each run spent its 30 minutes uploading, killed by systemd before any read-back,
 # so nothing was confirmed or deleted for hours. Batches are now capped by size as well as by
