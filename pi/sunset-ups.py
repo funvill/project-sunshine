@@ -18,7 +18,8 @@ Keeps SD-card writes to a minimum (decided 2026-11-16, issue #29):
   - ups.log is rotated by this script: a new file each UTC day or at UPS_LOG_MAX_BYTES,
     keeping UPS_LOG_KEEP files.
 
-Low battery (on battery and a cell below UPS_LOW_CELL_V or charge at or below UPS_LOW_PCT):
+Low battery (on battery and a cell below UPS_LOW_CELL_V; the board's charge % stays at 100 on
+battery, so it is not used):
 stops the capture, dense and sync timers of both cameras (stop, not disable; only those that
 were running) and flushes the disks, then starts the same ones again if mains comes back. If it doesn't, the UPS cuts its own output and the
 Pi boots when mains returns, with the timers still enabled. UPS_PAUSE=0 only logs.
@@ -88,7 +89,6 @@ class Settings:
         # 3.3 V, was 3.45 V: with R20 unchanged the cells rest at the ~3.5-3.6 V charge stop, and 3.45 V
         # would have paused capture early in a short cut (review, 2026-11-21).
         self.low_cell_v = env("UPS_LOW_CELL_V", 3.3, float)
-        self.low_pct = env("UPS_LOW_PCT", 10, int)
         self.warn_temp = env("UPS_WARN_TEMP_C", 40, int)
         self.pause = env("UPS_PAUSE", 1, int) == 1
         self.pause_units = env("UPS_PAUSE_UNITS", PAUSE_UNITS).split()
@@ -217,7 +217,7 @@ def low_battery(s, cfg):
     if s["source"] != "battery":
         return False
     live = [v for v, p in zip(s["cells"], s["present"]) if p]
-    return (bool(live) and min(live) < cfg.low_cell_v) or s["pct"] <= cfg.low_pct
+    return bool(live) and min(live) < cfg.low_cell_v
 
 
 def unit_active(unit):

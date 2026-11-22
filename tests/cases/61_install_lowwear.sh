@@ -89,53 +89,31 @@ check "unknown option exits 2" test "$rc" = 2
 fix_root_; unset INSTALL_USER; inst; rc=$?
 check "ROOT without INSTALL_USER refuses" test "$rc" != 0
 
-section "install.sh --uc517: plain overlay"
-fix_root_; inst --uc517; rc=$?
-check "exits 0" test "$rc" = 0
-check "camera_auto_detect=0" grep -qx 'camera_auto_detect=0' "$R/$cfg"
-check "plain dtoverlay=imx477, once" test "$(n_overlay)" = 1
-check "it is the plain one" grep -qx 'dtoverlay=imx477' "$R/$cfg"
-check "no cam0" bash -c "! grep -q cam0 '$R/$cfg'"
-check "added under [all]" bash -c "awk '/^\\[all\\]/{f=1;next} f&&/^dtoverlay=imx477/{ok=1} END{exit !ok}' '$R/$cfg'"
-check "other lines kept" grep -qx 'dtoverlay=vc4-kms-v3d' "$R/$cfg"
-check "backup of the original" grep -qx 'camera_auto_detect=1' "$R/$cfg.sunset-backup"
-first="$(cksum < "$R/$cfg")"
-inst --uc517
-check "second run: no change" test "$(cksum < "$R/$cfg")" = "$first"
-check "second run: still one overlay line" test "$(n_overlay)" = 1
-check "second run keeps the first backup" grep -qx 'camera_auto_detect=1' "$R/$cfg.sunset-backup"
-
-section "install.sh --uc517-cam0: CM4 overlay"
-fix_root_; inst --uc517-cam0; rc=$?
-check "exits 0" test "$rc" = 0
-check "dtoverlay=imx477,cam0" grep -qx 'dtoverlay=imx477,cam0' "$R/$cfg"
-check "exactly one imx477 line" test "$(n_overlay)" = 1
-check "camera_auto_detect=0" grep -qx 'camera_auto_detect=0' "$R/$cfg"
-first="$(cksum < "$R/$cfg")"
-inst --uc517-cam0
-check "second run: no change" test "$(cksum < "$R/$cfg")" = "$first"
-fix_root_; inst --uc517; inst --uc517-cam0
-check "plain overlay upgraded to cam0, not duplicated" test "$(grep -c '^dtoverlay=imx477,cam0$' "$R/$cfg")$(n_overlay)" = 11
-fix_root_; inst --uc517-cam0; inst --uc517
-check "--uc517 leaves an existing cam0 line alone" grep -qx 'dtoverlay=imx477,cam0' "$R/$cfg"
-fix_root_; sed -i '/^\[all\]/,$d' "$R/$cfg"
-inst --uc517-cam0
-check "no [all] section: overlay appended" grep -qx 'dtoverlay=imx477,cam0' "$R/$cfg"
-
 section "install.sh --cm4-two: both CM4 camera ports (2026-11-17)"
 fix_root_; inst --cm4-two; rc=$?
 check "exits 0" test "$rc" = 0
+check "camera_auto_detect=0" grep -qx 'camera_auto_detect=0' "$R/$cfg"
 check "cam0 line" grep -qx 'dtoverlay=imx477,cam0' "$R/$cfg"
 check "cam1 line" grep -qx 'dtoverlay=imx477,cam1' "$R/$cfg"
 check "exactly two imx477 lines" test "$(n_overlay)" = 2
+check "added under [all]" bash -c "awk '/^\[all\]/{f=1;next} f&&/^dtoverlay=imx477,cam0/{ok=1} END{exit !ok}' '$R/$cfg'"
+check "cam1 right after cam0" bash -c "grep -A1 -x 'dtoverlay=imx477,cam0' '$R/$cfg' | grep -qx 'dtoverlay=imx477,cam1'"
+check "other lines kept" grep -qx 'dtoverlay=vc4-kms-v3d' "$R/$cfg"
+check "backup of the original" grep -qx 'camera_auto_detect=1' "$R/$cfg.sunset-backup"
 first="$(cksum < "$R/$cfg")"
 inst --cm4-two
 check "second run: no change" test "$(cksum < "$R/$cfg")" = "$first"
-inst --uc517-cam0
-check "--uc517-cam0 afterwards keeps the cam1 line" grep -qx 'dtoverlay=imx477,cam1' "$R/$cfg"
-check "--uc517-cam0 afterwards: still two lines" test "$(n_overlay)" = 2
-fix_root_; inst --uc517-cam0; inst --cm4-two
-check "cam0 setup gains cam1" test "$(grep -c '^dtoverlay=imx477,cam0$' "$R/$cfg")$(grep -c '^dtoverlay=imx477,cam1$' "$R/$cfg")" = 11
+check "second run keeps the first backup" grep -qx 'camera_auto_detect=1' "$R/$cfg.sunset-backup"
+fix_root_; sed -i 's/^\[all\]$/[all]\ndtoverlay=imx477/' "$R/$cfg"
+inst --cm4-two
+check "a plain overlay becomes cam0, not duplicated" test "$(grep -c '^dtoverlay=imx477,cam0$' "$R/$cfg")$(n_overlay)" = 12
+check "no plain line left" bash -c "! grep -qx 'dtoverlay=imx477' '$R/$cfg'"
+fix_root_; sed -i 's/^\[all\]$/[all]\ndtoverlay=imx477,cam1/' "$R/$cfg"
+inst --cm4-two
+check "an existing cam1 line is kept, not doubled" test "$(grep -c '^dtoverlay=imx477,cam1$' "$R/$cfg")$(n_overlay)" = 12
+fix_root_; sed -i '/^\[all\]/,$d' "$R/$cfg"
+inst --cm4-two
+check "no [all] section: both lines appended" test "$(n_overlay)" = 2
 
 section "sunset-lowwear.sh: fstab, cmdline and files"
 fix_root_

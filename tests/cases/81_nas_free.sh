@@ -1,3 +1,4 @@
+# needs: 80_frame_age
 # Free space on the NAS share (issue #7): homeassistant/sunset_nas_free.sh, under sh and busybox sh.
 section "nas free space: whole GB from df -Pk"
 W="$(mktemp -d)"; mkdir -p "$W/project_sunshine"

@@ -24,7 +24,6 @@ Config = namedtuple("Config", "out_root capture_log sync_log nas_target sun_scri
                     defaults=(None,))
 
 # Estimates, to tune from pilot data.
-SLOT_S = 300                   # regular capture spacing; must match pi/systemd/sunset-capture.timer
 STALE_CAPTURE_S = 10 * 60      # one missed 5-minute slot, plus some slack
 STUCK_FRAMES_S = 60 * 60       # the sync normally clears a frame within about 7 minutes
 DISK_WARN_PCT = 85             # the capture script starts dropping DNGs here
@@ -351,21 +350,11 @@ def stream_command(view, width, height, camera=None, rotation=None):
     return cmd + ["--mode", "2028:1520", "--width", str(width), "--height", str(height)]
 
 
-def parse_next_capture(text, now, every_s=SLOT_S):
-    """Next capture from `systemctl list-timers --output=json`. If the timer has none, assume the
-    5-minute schedule, so the camera is still released for a capture started some other way."""
-    try:
-        value = json.loads(text)[0]["next"] / 1000000
-        if value > now:
-            return value
-    except (TypeError, ValueError, LookupError):
-        pass
-    return (int(now) // every_s + 1) * every_s
-
-
 class CaptureLock:
     """Production's camera lock (sunset-capture.sh flocks the same file), held while rpicam-vid has
-    the camera. Never waits: a regular capture waits up to 90 s for it, a dense frame skips."""
+    the camera. Never waits: a regular capture waits up to 90 s for it, a dense frame skips.
+    sunset-diag.service stops the capture timers while the page runs, but not a capture already
+    running, nor one started by hand, so the stream still takes the lock."""
 
     def __init__(self, path):
         self.path = path
@@ -403,25 +392,6 @@ class CaptureLock:
                 os.close(fd)
 
 
-class HandoverPolicy:
-    """Decides when the stream must leave the camera free. A capture does not retry, so a busy
-    camera would be a lost frame."""
-
-    def __init__(self, margin_s=20, settle_s=5):
-        self._margin = margin_s
-        self._settle = settle_s
-        self._hold_until = None
-
-    def should_pause(self, now, next_capture, capture_active):
-        if next_capture - now <= self._margin:
-            # The timer moves on to the next slot the moment it fires, slightly before the
-            # service shows as active, so hold on past the slot itself.
-            self._hold_until = next_capture + self._settle
-        if capture_active:
-            return True
-        return self._hold_until is not None and now < self._hold_until
-
-
 class Camera:
     """Owns the rpicam-vid process and keeps only the newest frame, in memory."""
 
@@ -429,14 +399,12 @@ class Camera:
         self._build = build_command
         self._lock = lock
         self._locked_out = False
-        self._pause_reason = None
         self._retry_s = retry_s
         self._kill_after = kill_after_s
         self._proc = None
         self._view = "full"
         self._camera = None           # rpicam camera number; None = what build_command picks
         self._proc_view = None
-        self._paused = False
         self._started_at = 0
         self._got_frame = False
         self._stderr = deque(maxlen=3)
@@ -474,18 +442,14 @@ class Camera:
         return None
 
     def state(self):
-        if self._paused:
-            return self._pause_reason or "paused for capture"
         if self._locked_out:
             return "waiting: a capture has the camera"
         if self.running():
             return "streaming" if self._got_frame else "starting"
         return "camera error" if self._proc is not None else "idle"
 
-    def tick(self, now, wanted, paused, reason=None):
-        self._paused = paused
-        self._pause_reason = reason
-        if paused or not wanted:
+    def tick(self, now, wanted):
+        if not wanted:
             self._locked_out = False
             self.stop()
             return
@@ -563,26 +527,19 @@ class _NeverStarted:
         return 1
 
 
-CAPTURE_BUSY = ("active", "activating", "deactivating", "reloading")
 VIEWER_GRACE_S = 5             # so reloading the page does not restart the camera
-SECONDS_BETWEEN_STEPS = 2      # well inside the 20-second margin
-DENSE_CHECK_S = 30             # how often to ask whether a dense window is open (a Python start)
-PAUSE_REGULAR = "paused for capture"
-PAUSE_DENSE = "paused for the 1-a-minute frame"
+SECONDS_BETWEEN_STEPS = 2      # how soon the camera starts for a new viewer, or retries the lock
 
 
 class Service:
-    def __init__(self, cfg, camera, deadline, run=run_command, policy=None):
+    def __init__(self, cfg, camera, deadline, run=run_command):
         self.cfg = cfg
         self.camera = camera
         self.deadline = deadline
         self.run = run
-        self.policy = policy or HandoverPolicy()
         self._viewers = 0
         self._last_left = None
         self._lock = threading.Lock()
-        self._dense = None            # "sunrise" / "sunset" while sunset-dense takes a frame a minute
-        self._dense_checked = None
 
     def viewers(self):
         return self._viewers
@@ -596,40 +553,12 @@ class Service:
             self._viewers -= 1
             self._last_left = now
 
-    def _is_active(self, unit):
-        return (self.run(["systemctl", "is-active", unit]) or "").strip()
-
-    def dense_window(self, now):
-        """"sunrise" or "sunset" while sunset-dense.timer is on and its window is open, else None.
-        Asked every DENSE_CHECK_S; `sunset-sun.py dense` prints the window, or "none"."""
-        if self._dense_checked is None or not 0 <= now - self._dense_checked < DENSE_CHECK_S:
-            self._dense_checked = now
-            self._dense = None
-            if self._is_active("sunset-dense.timer") == "active":
-                out = _stripped(self.run([sys.executable or "python3", self.cfg.sun_script, "dense"]))
-                self._dense = out if out in ("sunrise", "sunset") else None
-        return self._dense
-
     def step(self, now):
         """One pass of the control loop. Returns False when it is time to shut down."""
         if now >= self.deadline:
             return False
-        next_capture = parse_next_capture(self.run(["systemctl", "list-timers", "sunset-capture.timer", "--all",
-                                                    "--no-legend", "--output=json"]), now)
-        regular_busy = self._is_active("sunset-capture.service") in CAPTURE_BUSY
-        dense_busy = self._is_active("sunset-dense.service") in CAPTURE_BUSY
-        reason = PAUSE_REGULAR
-        if self.dense_window(now):
-            # Every minute in the window: yield before it, like before a regular slot.
-            next_dense = parse_next_capture(self.run(["systemctl", "list-timers", "sunset-dense.timer", "--all",
-                                                      "--no-legend", "--output=json"]), now, 60)
-            if next_dense < next_capture:
-                next_capture, reason = next_dense, PAUSE_DENSE
-        if dense_busy and not regular_busy:
-            reason = PAUSE_DENSE
         recent = self._last_left is not None and now - self._last_left < VIEWER_GRACE_S
-        paused = self.policy.should_pause(now, next_capture, regular_busy or dense_busy)
-        self.camera.tick(now, wanted=self._viewers > 0 or recent, paused=paused, reason=reason)
+        self.camera.tick(now, wanted=self._viewers > 0 or recent)
         return True
 
     def camera_status(self, now):
@@ -637,8 +566,7 @@ class Service:
         return {"seconds_left": int(self.deadline - now), "camera": self.camera.state(),
                 "camera_error": self.camera.error(), "view": self.camera.view(), "viewers": self._viewers,
                 "cameras": [{"index": i, "label": l} for i, l in getattr(self, "cameras", [])],
-                "camera_index": self.camera.camera(),
-                "dense_window": self._dense}
+                "camera_index": self.camera.camera()}
 
     def status(self, now):
         status = collect_status(self.cfg, self.run, now)
@@ -733,7 +661,7 @@ class Handler(BaseHTTPRequestHandler):
             while True:
                 new_seq, frame = svc.camera.wait_frame(seq, 1.0)
                 if new_seq == seq or frame is None:
-                    continue          # paused or starting; the browser keeps the last frame
+                    continue          # waiting or starting; the browser keeps the last frame
                 seq = new_seq
                 self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(frame))
                 self.wfile.write(frame + b"\r\n")
@@ -882,7 +810,6 @@ pre { margin: 8px 0 0; font-size: 12px; line-height: 1.4; white-space: pre-wrap;
   <button id="centre" type="button" aria-pressed="false">Centre lines</button>
   <span class="muted" id="pickHint">In full frame, click the image to focus there instead.</span>
 </div>
-<p class="muted" id="denseNote" hidden></p>
 <div class="controls">
   <button id="peaking" type="button" aria-pressed="false">Focus peaking</button>
   <label>Sensitivity <select id="peakLevel">
@@ -936,9 +863,6 @@ function showCamera(d) {
   $("left").textContent = "Stops by itself in " + mins + " min";
   $("state").textContent = d.camera_error ? d.camera + ": " + d.camera_error : d.camera;
   showCameras(d);
-  $("denseNote").hidden = !d.dense_window;
-  $("denseNote").textContent = d.dense_window ? "In the " + d.dense_window + " window the Pi takes a frame every "
-    + "minute, so the view pauses for about 25 seconds before each minute and comes back after it." : "";
   view = d.view;
   $("full").setAttribute("aria-pressed", d.view === "full");
   $("focus").setAttribute("aria-pressed", d.view.indexOf("focus") === 0);

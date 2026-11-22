@@ -104,7 +104,7 @@ def prepare_fused(fuse, run_dir, frames_dir, fused_dir, redo=False, blend=True, 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--camera", default="wide", help="folder under the NAS root: wide or cm4wide")
+    ap.add_argument("--camera", default="cm4wide", help="folder under the NAS root: cm4wide or cm4city")
     ap.add_argument("--date", required=True, help="the local date of the sunset, YYYY-MM-DD")
     ap.add_argument("--nas", default=NAS, help="project_sunshine folder on the share, e.g. //<nas-host>/camera/project_sunshine (default: $SUNSET_NAS)")
     ap.add_argument("--out", help="output folder (default ~/Documents/sunset-daily-out/<camera>)")

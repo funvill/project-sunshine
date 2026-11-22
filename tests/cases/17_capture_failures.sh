@@ -1,11 +1,10 @@
+# needs: 15_dense
 # Capture failure handling (issues #15 and #14): a stuck camera is killed, aborts are logged,
 # finished frames left in .partial are rescued, repeated failures escalate, a quick failure is
-# retried once. CAPTURE_FAIL_REBOOT is off by default; the tests that turn it on rely on the
-# systemctl and sudo stubs, so nothing here can reboot the machine.
+# retried once. Repeated failures only warn: rebooting is sunset-camwatch.sh's job.
 fail_env() {
   fresh_env
-  unset CAPTURE_KILL_S CAPTURE_RETRY_WAIT_S CAPTURE_RETRY_UNDER_S CAPTURE_FAIL_REBOOT
-  unset CAPTURE_FAIL_REBOOT_N CAPTURE_FAIL_REBOOT_GAP_H
+  unset CAPTURE_KILL_S CAPTURE_RETRY_WAIT_S CAPTURE_RETRY_UNDER_S CAPTURE_FAIL_WARN_N
   unset STUB_DF LOCK_WAIT_S STUB_ORPHAN_S
   export CAPTURE_RETRY_WAIT_S=0
 }
@@ -127,29 +126,21 @@ check "warning logged" grep -q 'WARN disk usage unknown' "$LOG_FILE"
 check "no abort" bash -c "! grep -q ABORTED '$LOG_FILE'"
 unset STUB_DF
 
-section "capture: repeated failures warn, reboot only when enabled"
-fail_env; export STUB_RPICAM=fail CAPTURE_FAIL_REBOOT_N=3
-capture; capture; capture
-check "warns at the threshold" grep -q 'WARN 3 capture failures in a row' "$LOG_FILE"
-check "no reboot by default" bash -c "! grep -q reboot '$STUB_CALLS'"
-fail_env; export STUB_RPICAM=fail CAPTURE_FAIL_REBOOT=1 CAPTURE_FAIL_REBOOT_N=3
+section "capture: repeated failures warn, never reboot"
+fail_env; export STUB_RPICAM=fail CAPTURE_FAIL_WARN_N=3
 capture; capture
-check "no reboot before the threshold" bash -c "! grep -q reboot '$STUB_CALLS'"
+check "no warning before the threshold" bash -c "! grep -q 'capture failures in a row' '$LOG_FILE'"
 capture
-check "reboots at the threshold" grep -q 'systemctl reboot' "$STUB_CALLS"
-check "logs why" grep -q 'rebooting: 3 capture failures in a row' "$LOG_FILE"
-check "remembers the reboot on the SD" test -e "$W/.capture-reboot"
-: > "$STUB_CALLS"; rm -f "$W/sunset-capture-failures"
-capture; capture; capture
-check "no second reboot within 6 hours" bash -c "! grep -q 'systemctl reboot' '$STUB_CALLS'"
-touch -d '7 hours ago' "$W/.capture-reboot"; capture
-check "reboots again after 6 hours" grep -q 'systemctl reboot' "$STUB_CALLS"
-fail_env; export STUB_RPICAM=fail CAPTURE_FAIL_REBOOT=1 CAPTURE_FAIL_REBOOT_N=3
+check "warns at the threshold" grep -q 'WARN 3 capture failures in a row' "$LOG_FILE"
+capture
+check "warns once, not every slot" test "$(grep -c 'capture failures in a row' "$LOG_FILE")" = 1
+check "no reboot" bash -c "! grep -q reboot '$STUB_CALLS'"
+fail_env; export STUB_RPICAM=fail CAPTURE_FAIL_WARN_N=3
 capture; capture; export STUB_RPICAM=ok; capture; export STUB_RPICAM=fail; capture
-check "a good frame resets the count" bash -c "! grep -q reboot '$STUB_CALLS'"
-fail_env; export STUB_NTP=no CAPTURE_FAIL_REBOOT=1 CAPTURE_FAIL_REBOOT_N=2
+check "a good frame resets the count" bash -c "! grep -q 'capture failures in a row' '$LOG_FILE'"
+fail_env; export STUB_NTP=no CAPTURE_FAIL_WARN_N=2
 capture; capture; capture
-check "clock skips do not count (a reboot cannot fix them)" bash -c "! grep -q reboot '$STUB_CALLS'"
+check "clock skips do not count" bash -c "! grep -q 'capture failures in a row' '$LOG_FILE'"
 
 section "lock: children do not inherit it"
 if command -v flock >/dev/null 2>&1; then
@@ -159,12 +150,12 @@ if command -v flock >/dev/null 2>&1; then
   check "a leftover child does not hold the lock" test "$rc" = 0 -a "$(count 'wide_*Z.jpg')" = 2
   check "no busy skip" bash -c "! grep -q 'still running' '$LOG_FILE'"
   sleep 5
-  fail_env; export CAPTURE_FAIL_REBOOT=1 CAPTURE_FAIL_REBOOT_N=2 LOCK_WAIT_S=1
+  fail_env; export CAPTURE_FAIL_WARN_N=2 LOCK_WAIT_S=1
   ( exec 8>"$LOCK_FILE"; flock 8; sleep 6 ) & holder=$!; sleep 0.5
   capture; capture
-  check "a stuck lock counts as a failure" grep -q 'systemctl reboot' "$STUB_CALLS"
+  check "a stuck lock counts as a failure" grep -q 'WARN 2 capture failures in a row' "$LOG_FILE"
   wait "$holder"
 else
   echo "  (flock not installed here: lock tests skipped)"
 fi
-unset CAPTURE_KILL_S CAPTURE_RETRY_WAIT_S CAPTURE_FAIL_REBOOT CAPTURE_FAIL_REBOOT_N LOCK_WAIT_S STUB_ORPHAN_S
+unset CAPTURE_KILL_S CAPTURE_RETRY_WAIT_S CAPTURE_FAIL_WARN_N LOCK_WAIT_S STUB_ORPHAN_S

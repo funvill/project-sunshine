@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Project Sunset - single capture for Pi Zero W + IMX477 (Pi HQ / Arducam UC-517)
+# Project Sunset - single capture for an IMX477 camera (Arducam B0240E or UC-517) on the CM4
 # Captures locally first; sunset-sync.sh moves frames to the NAS.
 #   sunset-capture.sh           the regular 5-minute frame (+ night frame when dark)
-#   sunset-capture.sh --dense   an extra 1-a-minute frame around sunset (and sunrise if DENSE_WINDOWS has it):
+#   sunset-capture.sh --dense   an extra 1-a-minute frame around sunset:
 #                               JPEG + JSON only, same auto exposure as the regular frame
 # With BRACKET=1, any frame near sunset is followed by an ev+0 and an ev-2 shot (<name>_ev0,
 # <name>_ev-2): the sunset bracket that tools/fuse_sunset.py merges (#10, option E).
@@ -39,7 +39,6 @@ DISK_MIN_FREE_MB="${DISK_MIN_FREE_MB:-100}"       # below this, skip everything 
 SLOT_EVERY_MIN="${SLOT_EVERY_MIN:-5}"             # regular slot spacing; dense mode leaves these minutes alone
 LOCK_WAIT_S="${LOCK_WAIT_S:-90}"                  # a regular capture waits this long for a dense one to finish
 DENSE_TIMEOUT_S="${DENSE_TIMEOUT_S:-30}"          # per rpicam-still call in dense mode, so a hang ends early
-DENSE_WINDOWS="${DENSE_WINDOWS:-sunset}"          # which dense windows shoot: "sunset" (decided 2026-11-16), "sunrise sunset" for both
 SUN_PY="${SUN_PY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sunset-sun.py}"
 ROTATION="${ROTATION:-0}"                         # 180 = camera mounted upside down (only 0 or 180)
 CAMERA="${CAMERA:-}"                              # which camera, when there are two: its ID (e.g. i2c@0) or number
@@ -50,12 +49,9 @@ BRACKET_RAW_MIN="${BRACKET_RAW_MIN:-30}"          # DNG on the ev-2 frame within
 BRACKET_SETTLE_MS="${BRACKET_SETTLE_MS:-1000}"    # settle time of each bracket shot, as in the experiment pair
 CAPTURE_RETRY_UNDER_S="${CAPTURE_RETRY_UNDER_S:-15}"   # a regular day shot that fails faster than this is tried once more
 CAPTURE_RETRY_WAIT_S="${CAPTURE_RETRY_WAIT_S:-5}"      # pause before that retry
-CAPTURE_FAIL_REBOOT="${CAPTURE_FAIL_REBOOT:-0}"        # 1 = reboot after CAPTURE_FAIL_REBOOT_N regular failures in a row
-CAPTURE_FAIL_REBOOT_N="${CAPTURE_FAIL_REBOOT_N:-6}"    # 6 = 30 minutes of 5-minute slots
-CAPTURE_FAIL_REBOOT_GAP_H="${CAPTURE_FAIL_REBOOT_GAP_H:-6}"   # at most one such reboot this often
+CAPTURE_FAIL_WARN_N="${CAPTURE_FAIL_WARN_N:-6}"        # warn after this many regular failures in a row (6 = 30 minutes)
 RUN_DIR="$(dirname "$CLOCK_OK_FILE")"                  # tmpfs: counters that should reset on boot
 CAPTURE_FAIL_FILE="$RUN_DIR/sunset-capture-failures"
-CAPTURE_REBOOT_MARK="$(dirname "$OUT_ROOT")/.capture-reboot"   # on the SD: survives the reboot
 CAPTURE_LOG_MAX_BYTES="${CAPTURE_LOG_MAX_BYTES:-10485760}"   # then capture.log moves to capture.log.1 (logrotate is masked)
 ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sunset.env"   # what the systemd units load
 if [[ -n "$OUT_ROOT_GIVEN" ]]; then ENV_DEFAULT=0; else ENV_DEFAULT=1; fi
@@ -113,7 +109,7 @@ if [[ "$REQUIRE_ENV_FILE" == "1" && ! -s "$ENV_FILE" ]]; then
   exit 1
 fi
 
-# Clock. The Zero has no RTC: after a power cut it boots with the time fake-hwclock
+# Clock. With no RTC coin cell, after a power cut the Pi boots with the time fake-hwclock
 # last saved, which is hours or days wrong until NTP answers. UTC filenames from a
 # wrong clock are worse than a gap, so wait for the first sync of this boot. After
 # that, later NTP outages are fine (the kernel flags "unsynced" within hours, but a
@@ -161,7 +157,7 @@ dense_warn() {
 
 # Dense mode runs every minute, so everything that rules it out exits quietly: an
 # unsynced clock (the regular capture already logs that), a regular slot minute, and
-# any minute outside the sunrise and sunset windows. A fault is logged instead
+# any minute outside the sunset window. A fault is logged instead
 # (rate-limited): no site, or a sun script that fails, would otherwise stop every
 # dense frame while the 5-minute frames, and so the Home Assistant alert, carry on.
 if [[ "$SCHEDULE" == dense ]]; then
@@ -175,30 +171,26 @@ if [[ "$SCHEDULE" == dense ]]; then
     fi
     exit 0
   fi
-  # sunset-sun.py dense prints the window and exits 0, or prints "none" and exits 1 outside
-  # the windows. Anything else (exit 2, a Python traceback) is a fault.
+  # sunset-sun.py dense prints "sunset" and exits 0 inside the window, or prints "none" and
+  # exits 1 outside it. Anything else (exit 2, a Python traceback) is a fault.
   SUN_RC=0
   SUN_OUT="$(python3 "$SUN_PY" dense 2>&1)" || SUN_RC=$?
   SUN_OUT="${SUN_OUT//$'\r'/}"
   WINDOW="${SUN_OUT##*$'\n'}"
   if [[ "$SUN_RC" == 1 && "$WINDOW" == none ]]; then
     exit 0
-  elif [[ "$SUN_RC" != 0 || ! "$WINDOW" =~ ^(sunrise|sunset)$ ]]; then
+  elif [[ "$SUN_RC" != 0 || "$WINDOW" != sunset ]]; then
     [[ -n "$WINDOW" ]] || WINDOW="no output"
     dense_warn "sun script failed rc=$SUN_RC: $WINDOW"
     exit 0
   fi
-  # A window left out of DENSE_WINDOWS is the same as being outside the windows: quiet.
-  [[ " $DENSE_WINDOWS " == *" $WINDOW "* ]] || exit 0
   TAG="dense window=$WINDOW "
   CAPTURE_TIMEOUT_S="$DENSE_TIMEOUT_S"
   SAVE_RAW=0
 fi
 
-# Repeated regular failures. A count in tmpfs (so a reboot clears it), a warning at the
-# threshold, and, if CAPTURE_FAIL_REBOOT=1, a reboot at most once every
-# CAPTURE_FAIL_REBOOT_GAP_H hours (the marker is on the SD so it survives the reboot).
-# On 2026-11-05 a reboot did not bring the camera back (a reseat did), so it is off by default.
+# Repeated regular failures: a count in tmpfs (so a reboot clears it) and a warning at the
+# threshold. Rebooting on camera failures is sunset-camwatch.sh's job (CAMWATCH=1).
 count_failure() {
   [[ "$SCHEDULE" == regular ]] || return 0
   local n=0
@@ -206,18 +198,8 @@ count_failure() {
   [[ "$n" =~ ^[0-9]+$ ]] || n=0
   n=$(( n + 1 ))
   echo "$n" > "$CAPTURE_FAIL_FILE" 2>/dev/null || true
-  (( n >= CAPTURE_FAIL_REBOOT_N )) || return 0
-  (( n == CAPTURE_FAIL_REBOOT_N )) && log "WARN $n capture failures in a row"
-  [[ "$CAPTURE_FAIL_REBOOT" == 1 ]] || return 0
-  [[ -n "$(find "$CAPTURE_REBOOT_MARK" -mmin -$(( CAPTURE_FAIL_REBOOT_GAP_H * 60 )) 2>/dev/null)" ]] && return 0
-  log "rebooting: $n capture failures in a row"
-  touch "$CAPTURE_REBOOT_MARK" 2>/dev/null || true
-  sync 9>&- || true
-  if (( EUID == 0 )); then
-    systemctl reboot 9>&- || log "WARN reboot failed"
-  else
-    sudo -n systemctl reboot 9>&- || log "WARN reboot failed (needs passwordless sudo for systemctl reboot)"
-  fi
+  (( n == CAPTURE_FAIL_WARN_N )) && log "WARN $n capture failures in a row"
+  return 0
 }
 
 # Never run two captures at once (the camera is exclusive). The regular frame always
@@ -426,7 +408,7 @@ bracket_pair() { # bracket_pair <published json of the frame>
 }
 bracket_note() { [[ "$BRACKET" == 1 ]] && echo " bracket=$BRACKET_N" || true; }
 
-# 1) Auto-exposure shot; -t gives AE/AWB time to settle on the slow Zero.
+# 1) Auto-exposure shot; -t gives AE/AWB time to settle.
 #    A regular shot that fails quickly (another program holding the camera, say) is
 #    tried once more; a timeout is not, since a second one wouldn't fit the slot.
 day_shot() {

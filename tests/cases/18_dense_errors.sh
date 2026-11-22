@@ -1,3 +1,4 @@
+# needs: 15_dense
 # Dense frames must not stop silently when the sun script breaks (issue #16).
 # sunset-sun.py dense exits 1 with "none" outside the windows; anything else is a fault.
 broken_sun() { # broken_sun <rc> <stderr line>: a sun script that fails the way a real fault would

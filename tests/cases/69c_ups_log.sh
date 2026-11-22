@@ -1,3 +1,4 @@
+# needs: 69_sync_readback
 # The UPS log (issue #29) copied to the share by sunset-sync.sh, next to the config backup.
 # Uses rb_env, rb_file and cfg_dir from 69_sync_readback.sh.
 ups_line() { # ups_line <utc> <tag>

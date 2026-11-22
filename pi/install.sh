@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Run ON THE PI with sudo, from the directory holding the scripts:
-#   sudo ./install.sh [--uc517 | --uc517-cam0 | --cm4-two] [--enable] [--ups]
+#   sudo ./install.sh [--cm4-two] [--enable] [--ups]
 # Installs the systemd units for the user who invoked sudo (not hard-coded to "pi"),
-# optionally sets the camera overlay for the Arducam UC-517 (--uc517: dtoverlay=imx477;
-# --uc517-cam0: dtoverlay=imx477,cam0, for a camera on the CM4's CAM0 port; --cm4-two: both
-# CM4 ports, cam0 and cam1), and does NOT enable the timers (and so does not start capturing)
+# optionally sets the camera overlays for both CM4 ports (--cm4-two: dtoverlay=imx477,cam0 and
+# dtoverlay=imx477,cam1), and does NOT enable the timers (and so does not start capturing)
 # unless --enable is given. With --enable, the second camera's timers start too if
 # ~/sunset/sunset2.env exists (copy it from sunset2.env.example). --ups enables and starts the
 # OpenUPS2 monitor (sunset-ups.service, issue #29), for the Pi the UPS is plugged into by USB;
@@ -24,31 +23,28 @@ else
   HOME_DIR="${INSTALL_HOME:?ROOT is set (a test run): set INSTALL_HOME}"
 fi
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OVERLAY=""; ENABLE=0; UPS=0
+CM4_TWO=0; ENABLE=0; UPS=0
 for a in "$@"; do case "$a" in
-  --uc517) OVERLAY=imx477 ;;
-  --uc517-cam0) OVERLAY=imx477,cam0 ;;
-  --cm4-two) OVERLAY=imx477,cam0+cam1 ;;
+  --cm4-two) CM4_TWO=1 ;;
   --enable) ENABLE=1 ;;
   --ups) UPS=1 ;;
   *) echo "unknown option $a" >&2; exit 2 ;; esac; done
 
-if [[ -n "$OVERLAY" ]]; then
+if (( CM4_TWO )); then
   CFG="$ROOT/boot/firmware/config.txt"
   cp -n "$CFG" "$CFG.sunset-backup"
   sed -i 's/^camera_auto_detect=.*/camera_auto_detect=0/' "$CFG"
-  # --uc517 leaves an overlay line that is already there; --uc517-cam0 rewrites a plain one
-  # (and changes nothing the second time). Only the plain line is rewritten, never a cam1 line:
+  # A plain imx477 line (a one-camera setup) becomes the cam0 one. A cam1 line is never rewritten:
   # rewriting every imx477 line once turned a CM4's second camera off.
-  FIRST="${OVERLAY%+cam1}"
-  [[ "$FIRST" == *cam0 ]] && sed -i "s/^dtoverlay=imx477$/dtoverlay=$FIRST/" "$CFG"
-  grep -q '^dtoverlay=imx477' "$CFG" || sed -i "0,/^\[all\]/s//[all]\ndtoverlay=$FIRST/" "$CFG"
-  grep -q '^dtoverlay=imx477' "$CFG" || echo "dtoverlay=$FIRST" >> "$CFG"
-  # --cm4-two: the cam1 line goes right after the cam0 one.
-  if [[ "$OVERLAY" == *+cam1 ]] && ! grep -qx 'dtoverlay=imx477,cam1' "$CFG"; then
-    sed -i '0,/^dtoverlay=imx477,cam0$/s//dtoverlay=imx477,cam0\ndtoverlay=imx477,cam1/' "$CFG"
+  sed -i 's/^dtoverlay=imx477$/dtoverlay=imx477,cam0/' "$CFG"
+  if ! grep -qx 'dtoverlay=imx477,cam0' "$CFG"; then
+    sed -i '0,/^\[all\]/s//[all]\ndtoverlay=imx477,cam0/' "$CFG"
+    grep -qx 'dtoverlay=imx477,cam0' "$CFG" || echo "dtoverlay=imx477,cam0" >> "$CFG"
   fi
-  echo "camera: set camera_auto_detect=0 and dtoverlay=$OVERLAY (backup: $CFG.sunset-backup). Reboot to apply."
+  # The cam1 line goes right after the cam0 one.
+  grep -qx 'dtoverlay=imx477,cam1' "$CFG" ||
+    sed -i '0,/^dtoverlay=imx477,cam0$/s//dtoverlay=imx477,cam0\ndtoverlay=imx477,cam1/' "$CFG"
+  echo "camera: set camera_auto_detect=0 and dtoverlay=imx477,cam0 and cam1 (backup: $CFG.sunset-backup). Reboot to apply."
 fi
 
 mkdir -p "$ROOT/etc/systemd/system" "$ROOT/usr/local/bin" "$ROOT/etc/udev/rules.d"

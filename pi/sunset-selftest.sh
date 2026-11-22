@@ -64,10 +64,6 @@ head_ "System"
 MODEL="$(tr -d '\0' < /proc/device-tree/model 2>/dev/null || true)"
 info "model: ${MODEL:-unknown}  arch: $(uname -m)  kernel: $(uname -r)"
 [[ -r /etc/os-release ]] && info "os: $(. /etc/os-release; echo "$PRETTY_NAME")"
-case "$(uname -m)" in
-  armv6l|armv7l) pass "32-bit userland ($(uname -m))" ;;
-  *) warn "arch is $(uname -m); the Zero path is 32-bit armv6l" ;;
-esac
 for t in rpicam-still rsync ssh python3 timeout awk; do
   if have "$t"; then pass "found $t"; else fail "missing $t"; fi
 done

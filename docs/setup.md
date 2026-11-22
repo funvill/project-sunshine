@@ -1,29 +1,24 @@
 # Project Sunset — Pi setup
 
-> **Two Pis run this project:** `timelaps` (Pi 3 B+) and `sunshine` (CM4). Neither is a Zero. See
-> `../CLAUDE.md`. Use your own user name where this guide shows one; `install.sh` handles that for
+> **One Pi runs this project:** `sunshine` (CM4, two cameras). The Pi 3 `timelaps` was retired on
+> 2026-11-17. See `../CLAUDE.md`. Use your own user name where this guide shows one; `install.sh` handles that for
 > the systemd units. Files named here are in the repo's `pi/` folder unless a path says otherwise.
 > To rebuild a Pi that has died, go to "Rebuild a Pi" below.
 
-One IMX477 camera (Pi HQ or Arducam) on each Raspberry Pi.
-Captures every 5 minutes to the SD card, then syncs to the NAS every 5 minutes. Around sunrise
-and sunset it adds a frame every minute (see "Dense frames" below).
+Two IMX477 cameras on the CM4.
+Captures every 5 minutes to local storage, then syncs to the NAS every 5 minutes. Around sunset
+it adds a frame every minute (see "Dense frames" below).
 Local-first, so a NAS or Wi-Fi outage never loses frames.
 
 ## 1. Hardware
-- `timelaps`: Pi 3 B+ Rev 1.3, Arducam UC-517 in the CAMERA port, microSD card, 5 V supply. Hostname
-  `timelaps`, user `funvill`.
 - `sunshine`: Raspberry Pi CM4 (32 GB eMMC, 8 GB RAM, no Wi-Fi) on an Embedded Micro Technology MyPi
   Industrial IoT Integrator Board XT, USB Wi-Fi dongle. Hostname `sunshine`, user `sunshine`.
   Two cameras from 2026-11-17: Arducam IMX477 (B0240E) with the 3.2 mm lens on CAM0 (`cm4wide`,
   upright, `ROTATION=0`), and the UC-517 with the 6 mm lens on CAM1 (`cm4city`). `timelaps` is retired.
-- Both: lens focus locked at infinity, iris taped. UC-517: keep the IR-cut filter in day mode.
-- The Pi Zero W is not the target. The scripts have no Zero-specific code, but the camera has not
-  been shown working on one. See `hardware/README.md`.
+- Both cameras: lens focus locked at infinity, iris taped. UC-517: keep the IR-cut filter in day mode.
 
 ## 2. OS
-- Flash Raspberry Pi OS Lite Bookworm (32-bit). In Imager set the hostname (`timelaps` or
-  `sunshine`), the user (see section 1), Wi-Fi if the Pi has it, and SSH (key).
+- Flash Raspberry Pi OS Lite Bookworm (32-bit). In Imager set the hostname (`sunshine`), the user (see section 1), Wi-Fi if the Pi has it, and SSH (key).
   Then `ssh <user>@<hostname>.local`.
 - `sudo apt update && sudo apt install -y rpicam-apps-lite rsync python3`
 - `/boot/firmware/config.txt`:
@@ -62,7 +57,7 @@ mkdir -p ~/sunset && cd ~/sunset
 # copy everything in the repo's pi/ folder here, keeping it flat (systemd/ stays a subfolder)
 chmod +x *.sh
 cp sunset.env.example sunset.env      # edit NAS_TARGET, CAM_NAME, SITE_LAT, SITE_LON
-sudo ./install.sh --uc517    # installs units for your user; --uc517 sets the camera overlay
+sudo ./install.sh --cm4-two  # installs units for your user; --cm4-two sets both camera overlays
 sudo reboot                  # only needed if the camera config changed
 sudo systemctl enable --now sunset-capture.timer sunset-sync.timer sunset-dense.timer
 ```
@@ -218,7 +213,7 @@ sync ignores dot-directories, so it can never ship a half-written frame.
 or `FAILED ...` / `SKIPPED ...` / `DISK ...` lines explaining what was dropped and why.
 
 ### Safeguards
-- **Clock:** the Zero has no RTC, so after a power cut it boots with a stale clock.
+- **Clock:** the CM4's RTC has no coin cell (as of 2026-11-12), so after a power cut it boots with a stale clock.
   Capture refuses to run (`SKIPPED: clock not synced`) until NTP has synced once this
   boot; later NTP outages do not stop it. `REQUIRE_TIME_SYNC=0` disables this.
 - **Disk:** at 85% full or more the DNG is dropped, at 95% or more the night frame is
@@ -248,8 +243,8 @@ How it reaches the NAS, without extra writes to the eMMC:
   when its size on the share differs.
 
 On battery with a cell under `UPS_LOW_CELL_V` (3.3 V; 3.45 V until 2026-11-21, which sat just
-under where the cells rest with R20 unchanged) or charge at or under `UPS_LOW_PCT` (10%; the board
-keeps saying 100% on battery, so in practice the cell voltage decides), it stops whichever of the
+under where the cells rest with R20 unchanged; the board keeps saying 100% charge on battery, so
+the cell voltage is the only test), it stops whichever of the
 capture, dense (both cameras) and sync timers are running, flushes the disks and logs
 `capture_paused units=...`; when mains returns it starts the same ones again. It never halts the
 Pi. If the diag page ends during a pause, it adds its camera timers to the pause
@@ -384,10 +379,7 @@ The package alerts on:
 Anything unknown counts as bad. Python 3 is needed in HA's container. An alert you acknowledge is
 re-armed after 12 hours.
 
-For a check that Home Assistant itself is alive, choose a hosted heartbeat service, put its ping
-URL in `secrets.yaml` as `sunset_heartbeat_url`, then copy `sunset_heartbeat.yaml` into
-`/config/packages/`. Don't copy that file before the secret exists: it stops HA loading its
-packages.
+There is no outside heartbeat for Home Assistant itself (decided on #22).
 
 ## Rebuild a Pi
 For a dead SD card or eMMC, or a Pi that has to be reflashed. Each list goes from blank storage to a
@@ -401,69 +393,15 @@ Before you start:
   `/boot/firmware/config.txt`, `/etc/sunset-nas.cred` (keep this one off any shared drive), and the
   list of transient timers from `systemctl list-timers 'exp-*'`. How those timers were started is
   not recorded here, so note their command lines before the Pi is wiped.
-- The repo holds per-host reference copies of the settings in `pi/hosts/timelaps.env` and
-  `pi/hosts/cm4.env`. They leave out the site coordinates and anything secret, so they are a start,
-  not a full `sunset.env`. If the files are not there yet, use the old Pi's `sunset.env`, or
+- The repo holds a reference copy of the CM4's settings in `pi/hosts/cm4.env`. It leaves out the
+  site coordinates and anything secret, so it is a start, not a full `sunset.env`. If it is not
+  there, use the old Pi's `sunset.env`, or
   `sunset.env.example` and the values in `../CLAUDE.md` and `../changelog.md`.
-
-### `timelaps` (Pi 3 B+, SD card)
-1. **Flash.** Raspberry Pi Imager, Raspberry Pi OS Lite Bookworm 32-bit, onto a card of at least 32 GB
-   (High Endurance for the real run; frames are nearly all of the card's writes). In the Imager
-   settings: hostname `timelaps`, user `funvill`, SSH with a key, Ethernet (and Wi-Fi if wanted).
-   Time zone America/Vancouver.
-2. **First boot.** `ssh funvill@timelaps.local`, then `sudo apt update && sudo apt full-upgrade`.
-   The pilot ran kernel 6.12.109, rpicam-apps 1.9.0 and libcamera 0.5 (changelog, 2026-11-03).
-3. **Camera overlay.** In `/boot/firmware/config.txt` set `camera_auto_detect=0` and add
-   `dtoverlay=imx477`. The UC-517 is not found by auto-detect. Reboot.
-4. **Camera check.** `rpicam-still -n -t 3000 -o test.jpg`. If it fails, reseat the ribbon at both
-   ends before anything else: that fixed the outage of 2026-11-05.
-5. **Packages.** `sudo apt install -y rpicam-apps-lite rsync python3 cifs-utils`. If the image was
-   not Lite, trim it with the keep list (section 5).
-6. **Copy `pi/` to `~/sunset`**, flat, with `systemd/` as a subfolder: from the PC,
-   `scp -r pi/* funvill@timelaps.local:sunset/` (make the folder first). Then `chmod +x ~/sunset/*.sh`.
-7. **Restore `sunset.env`.** Copy `pi/hosts/timelaps.env` to `~/sunset/sunset.env` and add
-   `SITE_LAT` and `SITE_LON` (the real ones; they are never in the repo). Keep `CAM_NAME` as the
-   host file has it. Set `SETUP_ID` to a new value if the camera, lens, focus or mount changed.
-8. **NAS login and mount.** Create `/etc/sunset-nas.cred` (root-only, section 3) and add the
-   `/etc/fstab` line from section 3. Then `sudo mkdir -p /mnt/nas-camera`, run
-   `sudo systemctl daemon-reload`, and check `ls /mnt/nas-camera/project_sunshine`. `NAS_TARGET` in
-   `sunset.env` must be `/mnt/nas-camera/project_sunshine/`.
-9. **Install.** `cd ~/sunset && sudo ./install.sh`. It installs the units, the LED rules, the
-   watchdog and the kernel log, and does not enable the capture timers yet. Do not pass `--enable`.
-   Step 3 set the camera overlay by hand, so `--uc517` is not needed; if you use it, check
-   `config.txt` afterwards.
-10. **Low wear.** `sudo ./sunset-lowwear.sh`, then `sudo reboot`.
-11. **Experiments.** `mkdir -p ~/sunset/experiments` and copy the repo's `experiments/` into it
-    (the unit runs `~/sunset/experiments/sunset-weather.py`). For the weather log, copy
-    `~/sunset/experiments/systemd/exp-weather.service` and `exp-weather.timer` to
-    `/etc/systemd/system/`, change `User=` and the `/home/pi/` path in the service to your user and
-    home, then `sudo systemctl daemon-reload` and `sudo systemctl enable --now exp-weather.timer`.
-    Until production shoots the sunset bracket (#10), do the same for `exp-sunset.service` (replace
-    `USER` and `HOME`) and `exp-sunset.timer`: it runs `sunset-nightly.sh` at 23:00 UTC, which waits
-    for tonight's sunset window and survives a reboot. Once `BRACKET=1` is set in `sunset.env`
-    (the production bracket, see `sunset.env.example`), disable it:
-    `sudo systemctl disable --now exp-sunset.timer`, so the two don't fight over the camera.
-    Re-create any other `exp-*` timers from the notes you made before the wipe. They are transient,
-    so a reboot clears them, and they are not part of the production capture.
-12. **Self-test.** `./sunset-selftest.sh`. It checks the camera, clock, disk, memory, capture time,
-    IR-cut and NAS. Fix any FAIL before going on.
-13. **Check `CAM_NAME` before the timers start.**
-    `grep -E '^(CAM_NAME|ROTATION|SETUP_ID)' ~/sunset/sunset.env` must show `CAM_NAME=wide` and no
-    `ROTATION` for this host. The units read `sunset.env` with `EnvironmentFile=-`, so a missing
-    file is not an error: the script falls back to `wide` and its defaults.
-14. **First frame.** `sudo systemctl start sunset-capture.service`, then `ls -R ~/sunset/outbox` and
-    `tail ~/sunset/capture.log`. The log line should say `cam=wide` and end in `ok`. Run
-    `sudo systemctl start sunset-sync.service` and confirm the frame appears under
-    `project_sunshine/wide/` on the NAS.
-15. **Start.** `sudo systemctl enable --now sunset-capture.timer sunset-sync.timer sunset-dense.timer`.
-    Check `systemctl list-timers 'sunset*'`. The Home Assistant alert should stay quiet, or clear
-    within about 75 minutes.
-16. **Record it.** Add a `changelog.md` entry: date, what was restored, the new `SETUP_ID` if it
-    changed, and the gap in frames.
 
 ### `sunshine` (CM4 on the MyPi board, eMMC)
 The CM4's storage is on the module, so a blank eMMC cannot be flashed like a card. It has to be
-exposed to the PC as a disk first. That step is the only part that differs.
+exposed to the PC as a disk first. (The retired Pi 3 `timelaps` had its own list; it is in git
+history before 2026-11-21.)
 1. **Expose the eMMC.** On the PC, install `rpiboot` (the Raspberry Pi `usbboot` tool). On the
    board, set the boot jumper or switch that stops the CM4 from booting from its own eMMC, and
    connect the board's USB port for this to the PC. Which jumper, which port and whether the board
@@ -472,8 +410,7 @@ exposed to the PC as a disk first. That step is the only part that differs.
    disk (`lsblk` on Linux; 29.1 GB on this module).
 2. **Flash.** Raspberry Pi Imager: choose that disk, Raspberry Pi OS Lite Bookworm 32-bit, hostname
    `sunshine`, user `sunshine`, SSH with a key. This module has no Wi-Fi, so use Ethernet first.
-   The 32-bit userland boots the 64-bit kernel (6.12.109-v8 was used), so the self-test warns
-   about the Zero path. That warning is expected.
+   The 32-bit userland boots the 64-bit kernel (6.12.109-v8 was used).
 3. **Boot normally.** Unplug the USB cable, put the boot jumper back (check the board manual), power
    the board. `ssh sunshine@sunshine.local`, then `sudo apt update && sudo apt full-upgrade`.
 4. **Overlays.** In `/boot/firmware/config.txt`:
@@ -491,8 +428,9 @@ exposed to the PC as a disk first. That step is the only part that differs.
 6. **Packages.** `sudo apt install -y rpicam-apps-lite rsync python3 cifs-utils`, and the CM4 notes
    in section 5 (`linux-image-rpi-v8`, USB Wi-Fi firmware) before any trimming. The pilot CM4 went
    from 615 to 383 packages.
-7. **Copy `pi/` to `~/sunset`** as for `timelaps` (`scp -r pi/* sunshine@sunshine.local:sunset/`),
-   then restore `sunset.env` from `pi/hosts/cm4.env` plus the real `SITE_LAT` and `SITE_LON`.
+7. **Copy `pi/` to `~/sunset`**, flat, with `systemd/` as a subfolder: from the PC,
+   `scp -r pi/* sunshine@sunshine.local:sunset/` (make the folder first), then
+   `chmod +x ~/sunset/*.sh`. Restore `sunset.env` from `pi/hosts/cm4.env` plus the real `SITE_LAT` and `SITE_LON`.
    It must set `CAM_NAME=cm4wide`, `CAMERA=i2c@0` and `ROTATION=0`, and `NETWATCH=1` if the Pi is
    on the USB Wi-Fi dongle. For the second camera, `cp sunset2.env.example sunset2.env`
    (`CAM_NAME=cm4city`, `CAMERA=i2c@1`, its own `SETUP_ID` and night settings). The other values the CM4 has used (night shutter, white balance, `SETUP_ID`) are
@@ -500,54 +438,58 @@ exposed to the PC as a disk first. That step is the only part that differs.
 8. **Wi-Fi.** If the CM4 is on the dongle, join the network (`nmcli` or `raspi-config`). The dongle's
    firmware is in the kept packages. Dongle details beyond "old Buffalo 2.4 GHz USB": not recorded,
    check on the Pi.
-9. **NAS login and mount.** As for `timelaps`: `/etc/sunset-nas.cred`, the fstab line, the mount
-   point. The pilot copied the login file from `timelaps` Pi to Pi, without displaying it. Frames go
-   to `project_sunshine/cm4wide/`.
+9. **NAS login and mount.** Create `/etc/sunset-nas.cred` (root-only, section 3) and add the
+   `/etc/fstab` line from section 3. Then `sudo mkdir -p /mnt/nas-camera`, run
+   `sudo systemctl daemon-reload`, and check `ls /mnt/nas-camera/project_sunshine`. `NAS_TARGET` in
+   `sunset.env` must be `/mnt/nas-camera/project_sunshine/`. Frames go to
+   `project_sunshine/cm4wide/` and `project_sunshine/cm4city/`.
 10. **Install.** `cd ~/sunset && sudo ./install.sh --cm4-two --ups`, with no `--enable`
     (`--ups` starts the UPS monitor; see "UPS" above). It writes the
-    cam0 and cam1 overlays (and changes nothing if step 4 already did). Do not use plain `--uc517`
-    on this board: it writes `dtoverlay=imx477` without a port. It installs the second camera's
+    cam0 and cam1 overlays (and changes nothing if step 4 already did). It installs the second camera's
     units too (`sunset-capture2`, `sunset-dense2`); with `--enable` it starts them only if
     `sunset2.env` exists.
 11. **Low wear.** `sudo ./sunset-lowwear.sh`, then reboot.
-12. **Experiments and the weather units.** As in step 11 of the `timelaps` list, with this Pi's user
-    and home.
+12. **Experiments and the weather units.** `mkdir -p ~/sunset/experiments` and copy the repo's
+    `experiments/` into it (the unit runs `~/sunset/experiments/sunset-weather.py`). For the weather
+    log, copy `~/sunset/experiments/systemd/exp-weather.service` and `exp-weather.timer` to
+    `/etc/systemd/system/`, change `User=` and the `/home/pi/` path in the service to this Pi's user
+    and home, then `sudo systemctl daemon-reload` and `sudo systemctl enable --now exp-weather.timer`.
+    Re-create any `exp-*` timers from the notes you made before the wipe. They are transient, so a
+    reboot clears them, and they are not part of the production capture.
 13. **Self-test.** `./sunset-selftest.sh`.
 14. **Check `CAM_NAME` before the timers start.**
     `grep -E '^(CAM_NAME|CAMERA|ROTATION|SETUP_ID|NETWATCH)' ~/sunset/sunset.env` must show
     `CAM_NAME=cm4wide`, `CAMERA=i2c@0` and `ROTATION=0`, and `sunset2.env` must show
-    `CAM_NAME=cm4city` and `CAMERA=i2c@1`. A CM4 started from `sunset.env.example` has
-    `CAM_NAME=wide` and no rotation: its upside-down frames would land in the `wide/` folder, ruin
-    that series and keep the `wide` alert quiet while `timelaps` could be dead.
-15. **First frame.** As for step 14 of the `timelaps` list. The log line must say `cam=cm4wide`, the
+    `CAM_NAME=cm4city` and `CAMERA=i2c@1`. The units read `sunset.env` with `EnvironmentFile=-`,
+    so a missing file falls back to the script defaults (`CAM_NAME=wide`) and the frames would land
+    in the wrong folder.
+15. **First frame.** `sudo systemctl start sunset-capture.service`, then `ls -R ~/sunset/outbox`,
+    `tail ~/sunset/capture.log` and `sudo systemctl start sunset-sync.service`. The log line must
+    end in `ok` and say `cam=cm4wide`, the
     JPEG must be upright, and the JSON `Capture.settings` must say `camera: i2c@0`. Check that the
     frame is under `cm4wide/` on the NAS and not in `wide/`. Then `sudo systemctl start
     sunset-capture2.service`: `cam=cm4city`, `camera: i2c@1`, frames under `cm4city/`.
-16. **Start and record.** As for steps 15 and 16 of the `timelaps` list, plus
-    `sudo systemctl enable --now sunset-capture2.timer sunset-dense2.timer`. Each camera has its
-    own Home Assistant alerts (`cm4wide`, `cm4city`).
+16. **Start.** `sudo systemctl enable --now sunset-capture.timer sunset-sync.timer
+    sunset-dense.timer sunset-capture2.timer sunset-dense2.timer`, and check
+    `systemctl list-timers 'sunset*'`. Each camera has its own Home Assistant alerts (`cm4wide`,
+    `cm4city`); they should stay quiet, or clear within about 75 minutes.
+17. **Record it.** Add a `changelog.md` entry: date, what was restored, the new `SETUP_ID` if it
+    changed, and the gap in frames.
 
 ## Save and restore the frozen image
 Make an image after a week of clean running, and again after any change to the setup. Keep one copy
 somewhere other than the NAS that holds the frames.
 
-**SD card (`timelaps`).** With the Pi shut down (`sudo shutdown -h now`), put the card in a PC
-running Linux. `lsblk` shows the device. Check it twice: `dd` overwrites without asking.
-```
-sudo dd if=/dev/sdX of=timelaps-YYYYMMDD.img bs=4M status=progress conv=fsync
-sha256sum timelaps-YYYYMMDD.img > timelaps-YYYYMMDD.img.sha256
-xz -T0 timelaps-YYYYMMDD.img            # optional, saves space
-```
-Restore to a card of the same size or larger. If you compressed it:
-```
-xz -dc timelaps-YYYYMMDD.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
-```
-Then boot and run steps 12 to 16 of the `timelaps` list. The clock is stale from the image, so
-capture waits for NTP before it runs.
-
 **eMMC (`sunshine`).** Expose the eMMC with `rpiboot` as in step 1 of the `sunshine` list. Then use
-the same commands, with the disk `rpiboot` created as `/dev/sdX` and `sunshine-YYYYMMDD.img`. To
-restore, expose a blank or damaged eMMC the same way and `dd` the image onto it. The image is the
+these commands, with the disk `rpiboot` created as `/dev/sdX`. Check the device twice: `dd`
+overwrites without asking.
+```
+sudo dd if=/dev/sdX of=sunshine-YYYYMMDD.img bs=4M status=progress conv=fsync
+sha256sum sunshine-YYYYMMDD.img > sunshine-YYYYMMDD.img.sha256
+xz -T0 sunshine-YYYYMMDD.img            # optional, saves space
+``` To
+restore, expose a blank or damaged eMMC the same way and `dd` the image onto it
+(`xz -dc sunshine-YYYYMMDD.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync`). The image is the
 size of the whole eMMC (about 29 GB), so it needs a device at least that big. Then run steps 13 to
 16 of the `sunshine` list.
 
@@ -558,13 +500,4 @@ them with the live values you saved before the wipe.
 
 | Host | Date | Stored at | SHA-256 file | Notes |
 |---|---|---|---|---|
-| `timelaps` | none yet | not recorded | not recorded | |
 | `sunshine` | none yet | not recorded | not recorded | |
-
-## Zero-specific limits
-- 12 MP JPEG + DNG takes several seconds: fine at 5 min, too slow for bracketed
-  1-per-minute sunset bursts (move to a Pi 3 or newer for that).
-- Night: if reported lux < `NIGHT_LUX`, a second fixed long exposure is taken.
-  Tune `NIGHT_*` during the pilot.
-- Home Assistant alert on the newest NAS file's age catches a dead camera, dead
-  Wi-Fi or a stuck sync. `capture.log` shows whether capture itself is running.

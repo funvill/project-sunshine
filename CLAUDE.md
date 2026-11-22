@@ -88,7 +88,7 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
 - **Decisions of 2026-11-16 (Steven, walked through the open issues; details on each issue):**
   - **Storage (#5, #9), reversed the same day:** no DNGs. **`SAVE_RAW=0` on both Pis from 09:15 UTC
     2026-11-16, and all 6,325 DNGs on the NAS deleted (~157 GB; Steven, #38).** The test
-    (`experiments/raw_value.py`) found the DNG holds only 0.3-0.6 stops more highlight than the JPEG,
+    (`experiments/raw_value.py`, removed 2026-11-21, in git history) found the DNG holds only 0.3-0.6 stops more highlight than the JPEG,
     nothing in the shadows, and at sunset the ev-2 bracket JPEG keeps about twice as much sky. JPEG only
     is about 3.3 GB a day for both cameras. The script's default is still `SAVE_RAW=1`, so a rebuilt Pi
     needs `SAVE_RAW=0` in `sunset.env` (as in `sunset.env.example`). No second copy (#13). NAS space (#7):
@@ -103,13 +103,13 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
     within 45 min of sunset (`<frame>_ev0.*`, `_ev-2.*`, `Capture.kind` `bracket`), daylight WB to +10 min,
     a DNG on ev-2 within 30 min; merged by `fuse_sunset.py` (`build_video.py --fuse-production`).
     Tested offline, plus one real night capture per Pi (~20 s with the pair); not yet at a real sunset.
-  - **Series and setup (#12, #4):** the CM4 `cm4wide` is the official five-year series; `timelaps`
-    is the second, detailed view. Aim as in #4 (CM4 about 9.5° right, equinox sunset on the centre
-    line; #11 closed into #4). Wired Ethernet to the CM4 before Dec 21. The CM4 camera stays upside
-    down (`ROTATION=180`).
+  - **Series and setup (#12, #4):** the CM4 `cm4wide` is the official five-year series (the second,
+    detailed view is now `cm4city`; `timelaps` retired Nov 17). Aim as in #4 (CM4 about 9.5° right,
+    equinox sunset on the centre line; #11 closed into #4). Wired Ethernet to the CM4 before Dec 21.
+    (The camera was upside down, `ROTATION=180`, until the move of Nov 17; it is upright now.)
   - **Video (#21, #20):** the daily video stays the whole day (no sunset-only main cut), no master
-    render, and **the sunrise dense frames stop**: `DENSE_WINDOWS=sunset` (default), patched into
-    both Pis' running capture script at about 04:45 UTC Nov 16. How the long film handles gaps is decided when it is edited.
+    render, and **the sunrise dense frames stop** (patched into both Pis' running capture script at
+    about 04:45 UTC Nov 16; the `DENSE_WINDOWS` setting was removed on 2026-11-21). How the long film handles gaps is decided when it is edited.
   - **Instagram (#2):** public posts are fine with the towers blurred and no location tag; captions
     name the city only; posting starts only once the sky score gates it, at a threshold of **60**
     (**kept at 60, Steven 2026-11-20**). **Steven uploads by hand to his personal account (2026-11-20)**, so
@@ -118,14 +118,13 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   - **Monitoring (#22):** no outside heartbeat.
   - **UPS cells (#29):** Li-ion on firmware 1.6. **R20 stays as fitted (Steven, 2026-11-16: the boards won't be modified)**, so the board stops charging at about 3.5-3.6 V per cell.
 - Capture every **5 min, 24/7**, day and night (changed from 15 min on 2026-11-07 at Steven's
-  request). Every frame keeps its DNG, and dark slots still add the night frame, so this is
-  about 3x the data: an estimated 8-15 GB a day on the NAS, and a full SD card now holds about
-  2-3 days if the NAS is down, not 10. `SLOT_S` in the experiment runner and the diag page must
-  match the timer (a test checks it).
-- **Dense frames around sunrise and sunset (decided 2026-11-07, starts 02:30 UTC 2026-11-09;
-  sunrise dropped 2026-11-16, `DENSE_WINDOWS`):**
-  Steven chose 1 a minute after comparing daily videos at 15, 5, 3 and 1 min. Windows: sun at -9°
-  to 60 min after sunrise, and 60 min before sunset to -9°. On top of the 5-min frames, in the same
+  request). Dark slots still add the night frame. JPEG only since 2026-11-16 (`SAVE_RAW=0`), about
+  3.3 GB a day for both cameras. `SLOT_S` in the experiment runner must match the timer (a test
+  checks it).
+- **Dense frames around sunset (decided 2026-11-07, starts 02:30 UTC 2026-11-09; the sunrise
+  window was dropped 2026-11-16):**
+  Steven chose 1 a minute after comparing daily videos at 15, 5, 3 and 1 min. Window: 60 min
+  before sunset to the sun at -9°. On top of the 5-min frames, in the same
   folder and names, JPEG + JSON only, same auto exposure, `Capture.schedule: "dense"`. The regular
   slot always wins the camera. `sunset-dense.timer`; details in `docs/setup.md`. About 230 extra
   frames a day in November, roughly 1 GB a day more on the NAS. The ×3 bracket is not done.
@@ -146,14 +145,15 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   gaps, plus the bracket's exposure hunting; both fixed. What is left is real cloud flicker. **Raw frames:** looked at and not adopted for now. The DNG
   clips where the JPEG does (0.2% either way at sunset), so the sunset fix is exposure (the ev-2
   merge, experiment 19), not raw; dense frames have no DNG; a raw pipeline needs `rawpy` and a grade.
-  Revisit for a master copy once issue #5 (keep the DNGs) is decided.
-- **Two cameras eventually**: one wide (all sunsets), one tight (downtown or another subject).
+  #5 is decided: no DNGs (`SAVE_RAW=0`, 2026-11-16).
+- **Two cameras** (both live since 2026-11-17): one wide (all sunsets), one tight (downtown).
 - Hidden, compact setup. DSLR/mirrorless considered and set aside for size/visibility,
   though a used Sony a6300/a6400 tethered via gphoto2 remains the image-quality upgrade path.
-- Save **RAW (DNG) + JPEG + per-frame metadata**. Filenames in **UTC**. Layout unchanged:
-  `outbox/<cam>/YYYY/MM/DD/<cam>_<UTC>.{jpg,dng,json}` (+ `_night.*`). Frames are staged in
+- Save **JPEG + per-frame metadata** (the DNG was dropped 2026-11-16). Filenames in **UTC**. Layout
+  unchanged: `outbox/<cam>/YYYY/MM/DD/<cam>_<UTC>.{jpg,json}` (+ `_night.*`). Frames are staged in
   `outbox/.partial/` and moved into place when complete; the sync ignores dot-directories.
-- **Clock policy (decided in review, change if you disagree):** the Zero has no RTC. Capture
+- **Clock policy (decided in review, change if you disagree):** the CM4's RTC has no coin cell, so
+  it does not keep time through a power cut. Capture
   refuses to run until NTP has synced once since boot (`SKIPPED` in `capture.log`, exit 1), then
   keeps going through later NTP outages. A gap is preferred to frames with a wrong UTC name.
   `REQUIRE_TIME_SYNC=0` turns it off. A DS3231 RTC would remove the gap after power cuts
@@ -202,7 +202,7 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   `tzdata` 2026c gives UTC-7 all year, shown as `MST`); filenames are UTC and nothing depends on the zone.
 - **Camera: Arducam UC-517** in the CAMERA port, `camera_auto_detect=0` + `dtoverlay=imx477`
   (auto-detect does not find it). Manually focused on the distant view.
-- 5-min captures, plus 1-a-minute dense frames around sunrise and sunset from the sunset of
+- 5-min captures, plus 1-a-minute dense frames around sunset (sunrise too until Nov 16) from the sunset of
   2026-11-09 (the scheduled 02:32 UTC start failed: a transient unit run as the normal user can't
   enable a timer; run such jobs as root).
 - The Zero W path is no longer the target. The scripts have no Zero-specific code, but this camera
@@ -246,9 +246,8 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   first 7 minutes after the reboot. Not ruled out: a kernel or camera-stack bug.
 - **Timers on (2026-11-04), before the new supply:** Steven's other tools read the frames on the NAS,
   so sync and capture are enabled despite the undervoltage. Expect possible gaps until it's fixed.
-- **NAS space:** the share had 311 GB free of 11 TB on 2026-11-04 and 126 GB on 2026-11-16. With two
-  cameras saving DNGs it fills at about 25 GB a day, so it is days from full until Steven clears space
-  (#7). Over five years two cameras with DNGs need about 44 TB (#9), so space now limits the plan.
+- **NAS space:** the share had 126 GB free on 2026-11-16, and 387 GB after the DNGs were deleted the
+  same day. JPEG only, both cameras use about 3.3 GB a day (#7, #9).
 - **Experiments (#3):** `experiments/sunset-experiment.py`, copied to `~/sunset/experiments/`, shoots
   between the real captures. Results go to `project_sunshine_experiments/` on the NAS, never the outbox
   or the production folder. Scheduled by transient systemd timers (`exp-*`), which a reboot clears.
@@ -333,8 +332,6 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   relights its own LEDs, but they don't show in the glass. The room-light glow needs the hood.
 - **Camera position (decided 2026-11-05):** it sits loose on a shelf and can't be put back exactly, so
   testing continues from the new position until the new supply arrives.
-- **Camera will move again** when the bracket and supply arrive: redo anything tied to framing, and
-  change `SETUP_ID`.
 - **Home Assistant alert (2026-11-05):** installed from `homeassistant/`. HA reads the NAS share
   directly at `/share/camera`, with its own copy of the `camera` login, and alerts about 70 to 75
   minutes after the last frame. **Reconfigured 2026-11-20:** the `timelaps` checks removed, and frame
@@ -380,7 +377,7 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   pilot to it is Steven's call.
   **Set up 2026-11-11 (on a desk, not at the window):** hostname `sunshine`, user `sunshine`, 8 GB
   RAM. Reflashed with Raspberry Pi OS Lite Bookworm 32-bit (armhf userland), which boots the 64-bit
-  kernel 6.12.109-v8, so the self-test warns about the Zero path. rpicam-apps 1.9.0, libcamera 0.5.
+  kernel 6.12.109-v8. rpicam-apps 1.9.0, libcamera 0.5.
   **No Wi-Fi: this CM4 is a model without wireless** (no antenna or U.FL socket on the module; LK2
   is open; the kernel reports `mmc1: Failed to initialize`). Ethernet only, unless a USB Wi-Fi
   adapter is added (a buying decision). `~/sunset` installed with `CAM_NAME=cm4wide` and `SETUP_ID=cm4-desk-1`, so its
@@ -413,7 +410,7 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   suspected). **Network watchdog added the same night** (`sunset-netwatch.sh`, `NETWATCH=1` on the CM4 only):
   resets the dongle after 10 min without the gateway, reboots after 30 min (at most every 6 h). Tested live:
   the dongle rejoined in 6 s. Wired Ethernet would still be better.
-  **The camera is mounted upside down.** `ROTATION=180` in its `sunset.env` (new setting, 2026-11-12)
+  **Until 2026-11-17 the camera was mounted upside down** (upright since the move). `ROTATION=180` in its `sunset.env` (new setting, 2026-11-12)
   makes rpicam flip the readout, so frames from **01:08 UTC** on are upright, DNG included, and say
   `rotation: 180` in `Capture.settings`. Frames from 00:35 to 01:07 UTC are upside down. `timelaps`
   runs the same script with the setting left at its default of 0 (both Pis on the same code since 2026-11-13). It points down more than `timelaps`: the horizon is about 44% from the top, with the
@@ -460,10 +457,9 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   tested on the bench before it goes on `sunshine`; on low battery pause the capture/dense/sync timers rather than halt
   (a halted Pi stays off if mains returns before the UPS cuts out); HA "on battery" alert installed 2026-11-20; `ups_source` and
   `ups_charge_pct` in each frame's `System` block after the pending `sunset-meta.py` work merges. The flasher (`HIDBootLoader.exe`) comes from
-  Mini-Box's OpenUPS (v1) firmware pack; never flash that pack's hex files. **Reader built 2026-11-16; installed on `sunshine` 2026-11-20 07:24 UTC (`install.sh --ups`), its status on the NAS in every frame's `System.ups`/`ups_source`/`ups_charge_pct` and as `project_sunshine_config/sunshine/ups/*.log`:** `pi/sunset-ups.py` (`--once`, `--raw`, `--run`), `pi/systemd/sunset-ups.service` (root, not yet in `install.sh`), `tests/test_ups.py`. Bench-tested on the PC in WSL (USB passed through with usbipd-win, busid 1-14) against the real board: steady values wrote only keyframes, and an unplug wrote one lost and one found line. Settings are `UPS_*` in `sunset.env` (defaults in the script). Deadbands to tune once the cells are in. Bench runs: `tools/ups_bench.py` (WSL as root; summarises the log, warns on cells under 2.5 V).
+  Mini-Box's OpenUPS (v1) firmware pack; never flash that pack's hex files. **Reader built 2026-11-16; installed on `sunshine` 2026-11-20 07:24 UTC (`install.sh --ups`), its status on the NAS in every frame's `System.ups`/`ups_source`/`ups_charge_pct` and as `project_sunshine_config/sunshine/ups/*.log`:** `pi/sunset-ups.py` (`--once`, `--raw`, `--run`), `pi/systemd/sunset-ups.service` (root, installed by `install.sh`), `tests/test_ups.py`. Bench-tested on the PC in WSL (USB passed through with usbipd-win, busid 1-14) against the real board: steady values wrote only keyframes, and an unplug wrote one lost and one found line. Settings are `UPS_*` in `sunset.env` (defaults in the script). Bench runs: `tools/ups_bench.py` (WSL as root; summarises the log, warns on cells under 2.5 V).
   **Cells fitted 2026-11-16 (5:46 pm, 00:46 UTC Nov 17):** three charged Li-ion 18650s (4.17 V, matched; rated 2,500 mAh each, model not recorded; `CAPACITY` set to 2500, 03:57 UTC Nov 17), so the Li-ion route stands (firmware 1.6). **R20 stays unchanged (decided 2026-11-16)**: the cells start full and settle at the board's ~3.5-3.6 V charge stop, trading runtime for cell life. The board wakes from ship mode on P10 or input power; a 12 V supply is too low to count as mains, so it runs from the cells. Reader bench-tested on battery (values match the tool, `low_battery` fires). **15 V supply from 2026-11-20 06:20 UTC** (Steven), replacing the 24 V 1 A one that read just over the 24 V input limit (board 24.24 V); the board counts 15 V as mains. Mains lost/back by hand: the output goes 24.2 V on mains, 12.4 V on cells (both inside the MyPi XT's 9-28 V). The reader logged each switch once (`mains_lost`/`mains_back`, no flapping; bench run 03:48-03:56 UTC Nov 17).
-  **No cells (2026-11-16):** the three 34Ts read 1.14-1.18 V (over-discharged) and were recycled with Steven's other 18650s. New cells are Steven's to buy. **Decided 2026-11-16: name-brand Li-ion** (e.g. Samsung 35E or LG MJ1, matched set of three), so firmware 1.6 stays, R20 goes to 576k and `CAPACITY` is set to the cells' rating. The options were: **LiFePO4** (e.g. Lithium Werks APR18650M1B, ~1.1 Ah, ~1.5-2 h on the CM4): no R20 change, but reflash Mini-Box's LiFePO4 firmware 1.5 and set CAPACITY again; safer and longer-lived at a sunny window. Name-brand Li-ion keeps firmware 1.6 and needs the R20 change (~6 h). Cheap or salvaged Li-ion is fine for the bench only (it charges to ~3.6 V/cell until R20 is changed). Measure every cell first: matched within 0.05 V, none under 2.5 V.
-  **Next, in order:** check the P2-to-MyPi cable polarity; once the cells settle at the charge stop, check the board's charge % and set `UPS_LOW_CELL_V`/`UPS_LOW_PCT` and the deadbands to suit (lowered from 3.45 V to 3.3 V on 2026-11-21, after the code review), measure the runtime and check `RTE` units; add the unit to `install.sh` and a `docs/setup.md` section; install on `sunshine` with Steven's OK; then `ups_source`/`ups_charge_pct` in `sunset-meta.py` and the HA alert. Steps and status in issue #29.
+  **Runtime test 2026-11-20:** 2 h 27 min on the cells (21:33 to 00:00 UTC) without reaching the low-battery limit; lowest cell 4.081 to 3.851 V. The board's charge % stays at 100 on battery, so only `UPS_LOW_CELL_V` (3.3 V since 2026-11-21) decides. Installed, in the frame `System` block, and alerted in HA. **Still open (#29):** the P2-to-MyPi cable polarity check and the deadband tuning. (The 34T cells were over-discharged and recycled on 2026-11-16; the R20 change was decided against the same day.)
 - **Wyze Cam v2** ×several — not for this project (no RAW/manual control). Possible Home Assistant
   cameras via Thingino firmware.
 - Sony NEX-5 and Samsung NX200: rejected (no USB remote control, mechanical shutter only).
@@ -472,13 +468,11 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
 Pi 5 prices are ~$250 due to the RAM shortage, so the plan shifted to reusing Pi 3/Zero:
 - **Two-camera plan (decided 2026-11-09):** both cameras on the CM4 + MyPi XT board, both IMX477 so
   they share one set of settings. **Wide (sunset):** the new Arducam B0240E + 3.2 mm lens.
-  **Tight (downtown):** the current camera + the 16 mm lens. Both 6 mm lenses become spares.
-  Moving the pilot to the CM4 board, and when, is still Steven's call; it means a new `SETUP_ID`.
+  **Tight (downtown):** the UC-517, planned with the 16 mm lens but fitted with the 6 mm (the 16 mm
+  could not reach infinity). Both live on the CM4 since 2026-11-17.
 - **Sunset (wide) camera, earlier options:** IMX477 + ~3–4 mm lens on the **Pi 3**, or Camera Module 3 Wide (~102°).
   Upgrade path: used **Sony a6300** (has true silent/electronic shutter; must verify silent works
   over USB PC Remote with gphoto2) + wide lens (e.g. Sony 10–18 mm).
-- **Tight (downtown) camera:** IMX477 + 16 mm lens on a **Pi Zero W** (~180 px/degree — best
-  distant detail of any option considered).
 - Sensors (SHT4x, TSL2591, dew heater): **dropped, Steven 2026-11-20** (#34 closed). Condensation is
   watched from the frames only (`tools/fog_scan.py`, #33).
 - 64 GB High Endurance SD cards, small UPS, spare camera of each type, ND filter for the 16 mm lens.

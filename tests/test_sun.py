@@ -92,33 +92,15 @@ class SunMath(unittest.TestCase):
             sun.parse_time("tomorrow")
 
 
-class Sunrise(unittest.TestCase):
-    def test_sunrise_matches_the_frames_on_6_november(self):
-        # The frames' Sun blocks put the crossing at about 15:08Z (daily-video session, checked on the Pi).
-        r = sun.next_sunrise(utc(2026, 11, 6, 12, 0), LAT, LON)
-        self.assertLess(abs((r - utc(2026, 11, 6, 15, 8, 20)).total_seconds()), 90, r)
-
-    def test_sunrise_and_sunset_use_the_same_sun_height(self):
-        r = sun.next_sunrise(utc(2026, 11, 6, 12, 0), LAT, LON)
-        s = sun.next_sunset(utc(2026, 11, 6, 12, 0), LAT, LON)
-        self.assertAlmostEqual(sun.sun_position(r, LAT, LON)[1], sun.sun_position(s, LAT, LON)[1], delta=0.05)
-
-    def test_winter_solstice_sunrise(self):
-        # ~08:05 PST = 16:05 UTC
-        r = sun.next_sunrise(utc(2026, 12, 21, 12, 0), LAT, LON)
-        self.assertLess(abs((r - utc(2026, 12, 21, 16, 5)).total_seconds()), 3 * 60, r)
-
-
 class DenseWindow(unittest.TestCase):
-    """1-a-minute frames: sun at -9 deg to sunrise + 60 min, and sunset - 60 min to -9 deg."""
+    """1-a-minute frames: sunset - 60 min to the sun at -9 deg. No sunrise window (dropped 2026-11-16)."""
     def window(self, *t):
         return sun.dense_window(utc(*t), LAT, LON)
 
-    def test_around_sunrise(self):
-        rise = sun.next_sunrise(utc(2026, 11, 6, 12, 0), LAT, LON)
-        self.assertEqual(sun.dense_window(rise, LAT, LON), "sunrise")
-        self.assertEqual(sun.dense_window(rise + timedelta(minutes=59), LAT, LON), "sunrise")
-        self.assertIsNone(sun.dense_window(rise + timedelta(minutes=61), LAT, LON))
+    def test_no_sunrise_window(self):
+        # Sunrise on 6 November is about 15:08Z; the old window ran from -9 deg to 60 min after.
+        for m in range(-60, 61, 5):
+            self.assertIsNone(sun.dense_window(utc(2026, 11, 6, 15, 8) + timedelta(minutes=m), LAT, LON), m)
 
     def test_around_sunset(self):
         sset = sun.next_sunset(utc(2026, 11, 6, 12, 0), LAT, LON)
@@ -135,25 +117,15 @@ class DenseWindow(unittest.TestCase):
         self.assertIsNone(sun.dense_window(t, LAT, LON))
         self.assertLess((t - sset).total_seconds(), 90 * 60)   # about an hour at this latitude
 
-    def test_dawn_starts_at_minus_9_degrees(self):
-        rise = sun.next_sunrise(utc(2026, 11, 6, 12, 0), LAT, LON)
-        t = rise
-        while sun.sun_position(t, LAT, LON)[1] >= -9:
-            self.assertEqual(sun.dense_window(t, LAT, LON), "sunrise")
-            t -= timedelta(minutes=1)
-        self.assertIsNone(sun.dense_window(t, LAT, LON))
-
     def test_midday_and_midnight_are_not_dense(self):
         self.assertIsNone(self.window(2026, 11, 6, 20, 0))     # noon local
         self.assertIsNone(self.window(2026, 11, 6, 9, 0))      # 1 am local
         self.assertIsNone(self.window(2027, 6, 21, 20, 0))     # summer noon
         self.assertIsNone(self.window(2027, 6, 22, 9, 0))      # summer 2 am, sun about -17
 
-    def test_summer_windows_exist(self):
+    def test_summer_window_exists(self):
         sset = sun.next_sunset(utc(2027, 6, 21, 12, 0), LAT, LON)
-        rise = sun.next_sunrise(utc(2027, 6, 22, 6, 0), LAT, LON)
         self.assertEqual(sun.dense_window(sset + timedelta(minutes=30), LAT, LON), "sunset")
-        self.assertEqual(sun.dense_window(rise + timedelta(minutes=30), LAT, LON), "sunrise")
 
 
 class SunBlockVersion(unittest.TestCase):
@@ -184,15 +156,13 @@ class MultiYearSweep(unittest.TestCase):
             prev, t = s, s + timedelta(minutes=1)
         self.assertGreater(len(days), 5 * 365)
 
-    def test_dense_windows_cover_every_sunrise_and_sunset(self):
+    def test_dense_window_covers_every_sunset(self):
         day = self.START
         while day < self.END:
             noon = day + timedelta(hours=20)                 # about local noon
-            sset, rise = sun.next_sunset(noon, LAT, LON), sun.next_sunrise(day + timedelta(hours=8), LAT, LON)
+            sset = sun.next_sunset(noon, LAT, LON)
             self.assertEqual(sun.dense_window(sset, LAT, LON), "sunset", sset)
             self.assertEqual(sun.dense_window(sset - timedelta(minutes=59), LAT, LON), "sunset", sset)
-            self.assertEqual(sun.dense_window(rise, LAT, LON), "sunrise", rise)
-            self.assertEqual(sun.dense_window(rise + timedelta(minutes=59), LAT, LON), "sunrise", rise)
             day += timedelta(days=1)
 
     def test_no_gap_in_a_window_at_utc_midnight(self):
@@ -213,7 +183,7 @@ class MultiYearSweep(unittest.TestCase):
             else:
                 runs.append([w, 1])
         windows = [(w, n) for w, n in runs if w]
-        self.assertEqual([w for w, _ in windows], ["sunrise", "sunset"] * 3)
+        self.assertEqual([w for w, _ in windows], ["sunset"] * 3)
         for w, minutes in windows:
             self.assertTrue(90 <= minutes <= 150, (w, minutes))
 
@@ -310,7 +280,7 @@ class Cli(unittest.TestCase):
         r = self.run_cli("dense", "--time", "20261107T003000Z", env=env)
         self.assertEqual((r.returncode, r.stdout.strip()), (0, "sunset"))
         r = self.run_cli("dense", "--time", "20261106T153000Z", env=env)
-        self.assertEqual((r.returncode, r.stdout.strip()), (0, "sunrise"))
+        self.assertEqual((r.returncode, r.stdout.strip()), (1, "none"))   # sunrise: no window
         r = self.run_cli("dense", "--time", "20261106T200000Z", env=env)
         self.assertEqual((r.returncode, r.stdout.strip()), (1, "none"))
         self.assertEqual(self.run_cli("dense").returncode, 2)   # no site

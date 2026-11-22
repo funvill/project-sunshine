@@ -1,3 +1,4 @@
+# needs: 80_frame_age
 # The UPS state for Home Assistant (issue #29): homeassistant/sunset_ups.sh, under sh and busybox sh.
 # It reads System.ups_source and System.ups_charge_pct from the newest frame's JSON, which
 # pi/sunset-meta.py copies from the UPS monitor's status (null when that status is stale or missing).

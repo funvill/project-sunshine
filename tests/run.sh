@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
 # Offline tests for the capture/sync scripts, using stub rpicam-still/rsync/df/etc.
 # Runs anywhere with bash + coreutils + python3 (no Pi needed):  bash tests/run.sh
+# Give names to run only some: each is a substring or glob of a file name in cases/ or of a
+# tests/test_*.py, e.g.  bash tests/run.sh 17_ dense test_ups
 set -u
+FILTERS=("$@"); set --   # the cases are sourced, so clear the arguments they would see
+selected() { # selected <file name>: true with no filters, or when one matches
+  (( ${#FILTERS[@]} == 0 )) && return 0
+  local f
+  for f in "${FILTERS[@]}"; do [[ "$1" == $f || "$1" == *"$f"* ]] && return 0; done
+  return 1
+}
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="${SRC:-$(dirname "$HERE")/pi}"
+HA="$(dirname "$SRC")/homeassistant"   # the Home Assistant files (cases 80-85)
 export PATH="$HERE/stubs:$PATH"
 PASS=0; FAIL=0
 
@@ -26,7 +36,7 @@ fresh_env() {
   export SYNC_CONFIG_ROOT="$W/sysroot"; mkdir -p "$W/sysroot"
   unset STUB_SAME_FS STUB_RPICAM STUB_LUX STUB_NTP STUB_DF_PCT STUB_DF_FREE_MB STUB_RSYNC
   unset SAVE_RAW SITE_LAT SITE_LON NAS_TARGET NIGHT_LUX CAPTURE_TIMEOUT_S REQUIRE_TIME_SYNC
-  unset SUN_PY SLOT_EVERY_MIN STUB_DENSE STUB_UTC_MINUTE DENSE_TIMEOUT_S DENSE_WINDOWS ROTATION CAMERA STUB_CAMERA_LIST
+  unset SUN_PY SLOT_EVERY_MIN STUB_DENSE STUB_UTC_MINUTE DENSE_TIMEOUT_S ROTATION CAMERA STUB_CAMERA_LIST
   unset NIGHTLY_ENV_FILE NIGHTLY_RUNNER NIGHTLY_SLEEP NIGHTLY_NOW FAKE_SUNSET
   unset BRACKET BRACKET_WINDOW_MIN BRACKET_AWB_HANDOVER_MIN BRACKET_RAW_MIN STUB_MINUTES PROFILE_ID
   mkdir -p "$W/nas"
@@ -36,8 +46,16 @@ sync_()   { bash "$SRC/sunset-sync.sh"; }
 frames()  { find "$OUT_ROOT" -type f -not -path '*/.partial/*' | sort; }
 count()   { find "$OUT_ROOT" -type f -not -path '*/.partial/*' -name "$1" | wc -l | tr -d ' '; }
 
+# A case that uses another's helpers names it on a "# needs: <case>" line; picked by name, it
+# brings those cases with it.
+NEEDED=" "
+for t in "$HERE"/cases/*.sh; do
+  [[ -e "$t" ]] && selected "$(basename "$t")" || continue
+  for n in $(sed -n 's/^# needs: *//p' "$t"); do NEEDED+="$n.sh "; done
+done
 for t in "$HERE"/cases/*.sh; do
   [[ -e "$t" ]] || continue
+  selected "$(basename "$t")" || [[ "$NEEDED" == *" $(basename "$t") "* ]] || continue
   # shellcheck disable=SC1090
   source "$t"
 done
@@ -51,9 +69,11 @@ command -v ffmpeg >/dev/null 2>&1 || echo "  note: ffmpeg not found; encoding te
 for t in "$HERE"/test_*.py; do
   [[ -e "$t" ]] || continue
   name="$(basename "$t")"
-  grep -qs "HERE/$name" "$HERE"/cases/*.sh && continue
+  selected "$name" || continue
+  # In a full run, a test that a case already runs is not run twice. Picked by name, it runs here.
+  if (( ${#FILTERS[@]} == 0 )) && grep -qs "HERE/$name" "$HERE"/cases/*.sh; then continue; fi
   case "$name" in
-    test_fuse_sunset.py|test_issue_blur.py|test_fog_scan.py|test_raw_value.py)
+    test_fuse_sunset.py|test_issue_blur.py|test_fog_scan.py)
       if ! have_py_mods cv2 || ! have_py_mods numpy; then
         echo "  SKIP: tests/$name (needs OpenCV and numpy: pip install numpy opencv-python-headless)"
         continue
