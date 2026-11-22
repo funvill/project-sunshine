@@ -9,13 +9,11 @@ camera lock (~/sunset/.sunset-capture.lock, the file sunset-capture.sh flocks), 
 waiting, so a shot that overruns makes a regular capture wait for it instead of failing, and a
 dense frame skips with "camera busy". A shot is killed SHOT_TIMEOUT_MARGIN_S after its estimate.
 
-    sunset-experiment.py night --run night-1
-    sunset-experiment.py settle --run settle-night
-    sunset-experiment.py day --run day-1 --sunset <epoch> --until <epoch> [--sunrise <epoch>] [--settle-at <epoch>]
-    sunset-experiment.py rate-night --run rate-night-1 --until <epoch>
-    sunset-experiment.py night-sweep --run sweep-1 --until <epoch>
+The programs left are the questions still open. The night, settle, day, rate-night, night-sweep
+and sunset programs were removed on 2026-11-22 once answered (night settings chosen, the sunset
+bracket in production); git history has them.
+
     sunset-experiment.py moon --run moon-1 --until <epoch>
-    sunset-experiment.py sunset --run sunset-1 --sunset <epoch> --until <epoch>
 
 Before the mount is glued (#12), each needs someone at the camera:
     sunset-experiment.py dark --run calib-dark-1 [--count 5]      lens capped, room dark: 4 s and 8 s
@@ -55,16 +53,8 @@ SLOT_S = 300  # must match OnCalendar in pi/systemd/sunset-capture.timer
 AFTER_SLOT_S = 72  # the real capture took 17 s with a night frame, and on the CM4 the second camera's
 # starts 30 s after the slot and takes about 20 s more (review 2026-11-21; was 45)
 BEFORE_SLOT_S = 5
-SUNSET_WINDOW_S = 45 * 60
-SUN_LADDER_BEFORE_S = 5 * 3600
-DUSK_FROM_S = 600
-DUSK_EVERY_S = 300
-DUSK_POINTS = 9  # +10 to +50 minutes after sunset
-DUSK_MS = (250, 500, 1000, 2000, 4000)
-DAY_SWEEP_MINUTE = 21  # past each hour, clear of the real captures
-NIGHT_SWEEP_EVERY_S = 2 * 3600
 NIGHT_AWB = "2.25,2.40"
-MAX_SD_USED_PCT = 70  # no shots above this; production drops DNGs at 85% (DISK_DROP_RAW_PCT)
+MAX_SD_USED_PCT = 70  # no shots above this, well before production's own disk guard
 MIN_SD_FREE_GB = 5  # and never below this much free, whatever the card size
 SHOT_TIMEOUT_MARGIN_S = 15  # a shot is killed this long after its estimate (plus settle time)
 UPLOAD_JOIN_S = 1800  # longest wait for a copy at the end of a run; the rsync itself allows 3600
@@ -187,11 +177,7 @@ class Shot:
     gain: float = None
     raw: bool = False
     awbgains: str = None
-    ev: int = None
-    metering: str = None
-    denoise: str = None
     settle_ms: int = 1000
-    immediate: bool = False
     extra: tuple = ()  # any other rpicam-still options, such as ("--awb", "tungsten")
 
     def command(self, base):
@@ -200,104 +186,16 @@ class Shot:
             cmd += ["--camera", os.environ["CAM_INDEX"].strip()]
         if os.environ.get("ROTATION", "").strip() == "180":  # camera mounted upside down
             cmd += ["--rotation", "180"]
-        if self.immediate:
-            cmd += ["--immediate"]
         if self.shutter_us:
             cmd += ["--shutter", str(self.shutter_us)]
         if self.gain:
             cmd += ["--gain", str(self.gain)]
         if self.awbgains:
             cmd += ["--awbgains", self.awbgains]
-        if self.ev is not None:
-            cmd += ["--ev", str(self.ev)]
-        if self.metering:
-            cmd += ["--metering", self.metering]
-        if self.denoise:
-            cmd += ["--denoise", self.denoise]
         if self.raw:
             cmd += ["--raw"]
         cmd += list(self.extra)
         return cmd + ["--metadata", base + ".json", "--metadata-format", "json", "-o", base + ".jpg"]
-
-
-def night_shots():
-    """How to expose the dark: ladder, colour gains, stack versus one long frame, denoise, EV."""
-    shots = []
-    for shutter_ms in (500, 1000, 2000, 4000, 8000):
-        for gain in (1, 2, 4):
-            shots.append(Shot(f"ladder-{shutter_ms}ms-g{gain}", shutter_us=shutter_ms * 1000,
-                              gain=gain, raw=True, awbgains="2.07,2.28"))
-    for gains in ("1.6,1.8", "2.07,2.28"):
-        shots.append(Shot("colour-" + gains.replace(",", "-"), shutter_us=2_000_000, gain=2,
-                          awbgains=gains))
-    shots.append(Shot("colour-auto", shutter_us=2_000_000, gain=2))
-    for i in range(8):
-        shots.append(Shot(f"stack-{i}", shutter_us=1_000_000, gain=2, awbgains="2.07,2.28"))
-    for mode in ("cdn_off", "cdn_hq"):
-        shots.append(Shot("denoise-" + mode, shutter_us=2_000_000, gain=2, awbgains="2.07,2.28",
-                          denoise=mode))
-    for ev in (1, 2):
-        shots.append(Shot(f"auto-ev+{ev}", ev=ev))
-    return shots
-
-
-def tuning_shots(prefix="", **fixed):
-    """Contrast, saturation and sharpness above and below normal."""
-    shots = []
-    for option, values in (("contrast", ("0.8", "1.2")), ("saturation", ("0.8", "1.2")),
-                           ("sharpness", ("0.5", "2"))):
-        for value in values:
-            shots.append(Shot(f"{prefix}{option}-{value}", extra=(f"--{option}", value), **fixed))
-    return shots
-
-
-NIGHT_SHUTTERS_MS = (100, 250, 500, 1000, 2000, 4000, 6000, 8000, 10000, 15000, 20000, 30000)
-NIGHT_GAINS = (1, 1.5, 2, 3, 4, 6, 8)
-NIGHT_RED_GAINS = ("1.6", "1.8", "2.0", "2.2", "2.4", "2.6")
-NIGHT_BLUE_GAINS = ("1.6", "1.9", "2.2", "2.5", "2.8")
-NIGHT_TUNING = (("contrast", ("0.6", "0.8", "1.0", "1.2", "1.4")),
-                ("saturation", ("0.6", "0.8", "1.0", "1.2", "1.4")),
-                ("sharpness", ("0", "0.5", "1.0", "1.5", "2.0")))
-
-
-def night_sweep_shots():
-    """Experiment 14: every setting across a range, so one night covers all of it."""
-    shots = []
-    for shutter_ms in NIGHT_SHUTTERS_MS:
-        for gain in NIGHT_GAINS:
-            raw = gain == 1 and shutter_ms in (4000, 8000)
-            shots.append(Shot(f"ladder-{shutter_ms}ms-g{gain:g}", shutter_us=shutter_ms * 1000,
-                              gain=gain, raw=raw, awbgains=NIGHT_AWB))
-    base = {"shutter_us": 4_000_000, "gain": 1}
-    for red in NIGHT_RED_GAINS:
-        for blue in NIGHT_BLUE_GAINS:
-            shots.append(Shot(f"gains-{red}-{blue}", awbgains=f"{red},{blue}", **base))
-    shots.append(Shot("gains-" + NIGHT_AWB.replace(",", "-"), awbgains=NIGHT_AWB, **base))
-    for mode in ("auto", "incandescent", "tungsten", "fluorescent", "indoor", "daylight", "cloudy"):
-        shots.append(Shot(f"awb-{mode}", extra=("--awb", mode), **base))
-    for mode in ("auto", "off", "cdn_off", "cdn_fast", "cdn_hq"):
-        for seconds in (2, 4, 8):
-            shots.append(Shot(f"denoise-{mode}-{seconds}s", shutter_us=seconds * 1_000_000, gain=1,
-                              awbgains=NIGHT_AWB, denoise=mode))
-    for option, values in NIGHT_TUNING:
-        for value in values:
-            shots.append(Shot(f"{option}-{value}", awbgains=NIGHT_AWB, extra=(f"--{option}", value),
-                              **base))
-    return shots
-
-
-def sweep_due(now, last, every):
-    return last is None or now - last >= every
-
-
-def day_sweep_shots():
-    """Experiment 15: one set of daylight settings, all on auto exposure."""
-    shots = [Shot("sweep-ev-1", ev=-1), Shot("sweep-ev-0.5", ev=-0.5), Shot("sweep-ev+0.5", ev=0.5),
-             Shot("sweep-meter-average", metering="average"), Shot("sweep-meter-spot", metering="spot"),
-             Shot("sweep-awb-daylight", extra=("--awb", "daylight")),
-             Shot("sweep-awb-cloudy", extra=("--awb", "cloudy")),
-             Shot("sweep-denoise-off", denoise="off"), Shot("sweep-denoise-cdn_hq", denoise="cdn_hq")]
-    return shots + tuning_shots(prefix="sweep-")
 
 
 CALIB_DARK_MS = (4000, 8000)   # the night exposures in use (timelaps 4 s, the CM4 8 s)
@@ -325,100 +223,6 @@ def flat_shots(count=9):
 def checker_shots(count=30):
     """A printed checkerboard moved through the view (#12): the lens's distortion."""
     return [Shot(f"checker-{i:02d}") for i in range(count)]
-
-
-def settle_shots():
-    """How steady is auto exposure, and how long must it settle? Five of each, same light."""
-    shots = []
-    for name, ms, immediate in (("immediate", 0, True), ("300", 300, False),
-                                ("1000", 1000, False), ("3000", 3000, False)):
-        for i in range(5):
-            shots.append(Shot(f"settle-{name}-{i}", settle_ms=ms, immediate=immediate))
-    return shots
-
-
-def ladder_due(minute, moments):
-    """True if this minute is the one a twilight ladder moment lands on."""
-    for moment in moments:
-        due = moment + (-moment % 60)
-        if due % SLOT_S < 60:
-            due += 60  # the real capture has this minute
-        if due == minute:
-            return True
-    return False
-
-
-def dusk_shots(minute, sunset):
-    """Experiment 13: fixed exposures through the gap between auto's limit and the night frame."""
-    moments = [sunset + DUSK_FROM_S + point * DUSK_EVERY_S for point in range(DUSK_POINTS)]
-    if ladder_due(minute, moments):
-        return [Shot(f"dusk-{ms}ms", shutter_us=ms * 1000, gain=1) for ms in DUSK_MS]
-    return []
-
-
-def dawn_shots(minute, sunrise):
-    """Experiment 16: the same ladder through the gap before sunrise."""
-    if sunrise is None:
-        return []
-    moments = [sunrise - DUSK_FROM_S - point * DUSK_EVERY_S for point in range(DUSK_POINTS)]
-    if ladder_due(minute, moments):
-        return [Shot(f"dawn-{ms}ms", shutter_us=ms * 1000, gain=1) for ms in DUSK_MS]
-    return []
-
-
-def day_shots(minute, sunset, sunrise=None):
-    """What to take in one minute of the day program."""
-    if minute % SLOT_S < 60:
-        return []  # the real capture is this minute's frame
-    twilight = dusk_shots(minute, sunset) + dawn_shots(minute, sunrise)
-    near_sunrise = sunrise is not None and abs(minute - sunrise) <= SUNSET_WINDOW_S
-    if abs(minute - sunset) <= SUNSET_WINDOW_S or near_sunrise:
-        five = (minute - 60) % 300 < 60   # the minute after each regular capture
-        shots = [Shot("ev-2", ev=-2), Shot("ev+0", ev=0, raw=five), Shot("ev+2", ev=2)]
-        if five:
-            shots += [Shot("meter-average", metering="average"),
-                      Shot("meter-spot", metering="spot"),
-                      Shot("ev-1", ev=-1),
-                      Shot("awb-daylight", extra=("--awb", "daylight")),
-                      Shot("awb-cloudy", extra=("--awb", "cloudy"))]
-            if minute < sunset:
-                # Experiment 7: at the pilot-3 framing the sun only enters the frame in the last
-                # ~30 minutes, so the fixed short exposures carry on until it sets.
-                shots += [Shot("sun-100us", shutter_us=100, gain=1),
-                          Shot("sun-500us", shutter_us=500, gain=1)]
-        return shots + twilight
-    shots = [Shot("rate")]
-    if sunset - SUN_LADDER_BEFORE_S <= minute < sunset - SUNSET_WINDOW_S and (minute - 60) % 600 < 60:
-        half = minute % 1800 < 60
-        shots += [Shot("sun-100us", shutter_us=100, gain=1),
-                  Shot("sun-500us", shutter_us=500, gain=1),
-                  Shot("sun-2ms", shutter_us=2000, gain=1, raw=half)]
-    if minute % 3600 == DAY_SWEEP_MINUTE * 60:
-        shots += day_sweep_shots()
-    return shots + twilight
-
-
-def night_rate_shots(minute):
-    """One fixed frame a minute at night, at the night frame's setting."""
-    if minute % SLOT_S < 60:
-        return []
-    return [Shot("rate-night", shutter_us=4_000_000, gain=1, awbgains=NIGHT_AWB)]
-
-
-def sunset_shots(minute, sunset):
-    """Experiment 19: the real inputs for the options Steven ranked best on Nov 8: E (ev+0 and
-    ev-2 with daylight white balance, merged later), B (ev-2, auto) and D (merged, auto). A is
-    production's own frame. Every minute in the window, plus ev-3 and the sun shots every 5."""
-    if minute % SLOT_S < 60 or abs(minute - sunset) > SUNSET_WINDOW_S:
-        return []
-    daylight = ("--awb", "daylight")
-    shots = [Shot("ev-2-daylight", ev=-2, extra=daylight), Shot("ev+0-daylight", ev=0, extra=daylight),
-             Shot("ev-2", ev=-2)]
-    if (minute - 60) % SLOT_S < 60:
-        shots.append(Shot("ev-3-daylight", ev=-3, extra=daylight))
-        if minute < sunset:
-            shots += [Shot("sun-100us", shutter_us=100, gain=1), Shot("sun-500us", shutter_us=500, gain=1)]
-    return shots
 
 
 MOON_LADDER_US = (50, 100, 250, 500, 1000, 2000, 4000)
@@ -460,11 +264,6 @@ def camera_index(camera, listing):
     return re.match(r"^\s*(\d+) : ", lines[0]).group(1)
 
 
-def second_camera_on():
-    """The second camera's dense frames run at :30 each minute while this timer is active."""
-    return read_text(["systemctl", "is-active", "sunset-dense2.timer"]) == "active"
-
-
 def camera_busy():
     for name in ("rpicam-vid", "rpicam-still"):
         if subprocess.run(["pgrep", "-x", name], capture_output=True).returncode == 0:
@@ -472,8 +271,7 @@ def camera_busy():
     if read_text(["systemctl", "is-active", "sunset-diag.service"]) == "active":
         return True  # someone may be looking at the page; the stream comes first
     return any(read_text(["systemctl", "is-active", unit]) in ("active", "activating")
-               for unit in ("sunset-capture.service", "sunset-dense.service",
-                            "sunset-capture2.service", "sunset-dense2.service"))
+               for unit in ("sunset-capture.service", "sunset-dense.service"))
 
 
 def load_site_env():
@@ -537,7 +335,9 @@ class Run:
             self.record(utc=stamp, label=shot.label, status=f"skipped: SD low ({low})")
             return
         est = estimate_s(shot.shutter_us)
-        period = 30 if second_camera_on() else 60
+        # Both cameras' dense frames start at :00 from one service, one after the other;
+        # camera_busy() sees that service while either is shooting.
+        period = 60
         waited = time.time()
         while True:
             if not clear_to_start(time.time(), est, period) or camera_busy():
@@ -648,16 +448,6 @@ class Run:
                     pass
 
 
-def run_rate_night(run, until):
-    while time.time() < until:
-        minute = int(time.time()) // 60 * 60
-        for shot in night_rate_shots(minute):
-            run.take(shot, max_wait_s=30)
-        if time.time() - run.last_upload > UPLOAD_EVERY_S:
-            run.upload()
-        time.sleep(max(0, minute + 60 - time.time()))
-
-
 def run_moon(run, until):
     while time.time() < until:
         minute = int(time.time()) // 60 * 60
@@ -670,83 +460,23 @@ def run_moon(run, until):
         time.sleep(max(0, min(until, minute + 60) - time.time()))
 
 
-def run_sunset(run, sunset, until):
-    while time.time() < until:
-        minute = int(time.time()) // 60 * 60
-        for shot in sunset_shots(minute, sunset):
-            if time.time() >= until:
-                break
-            run.take(shot, max_wait_s=30)
-        if time.time() - run.last_upload > UPLOAD_EVERY_S:
-            run.upload()
-        time.sleep(max(0, min(until, minute + 60) - time.time()))
-
-
-def run_night_sweep(run, until):
-    last = None
-    while time.time() < until:
-        if sweep_due(time.time(), last, NIGHT_SWEEP_EVERY_S):
-            last = time.time()
-            for shot in night_sweep_shots():
-                if time.time() >= until:
-                    break
-                run.take(shot, max_wait_s=900)
-            run.upload()
-        minute = int(time.time()) // 60 * 60
-        for shot in night_rate_shots(minute):
-            run.take(shot, max_wait_s=30)
-        if time.time() - run.last_upload > UPLOAD_EVERY_S:
-            run.upload()
-        time.sleep(max(0, minute + 60 - time.time()))
-
-
-def run_day(run, sunset, until, settle_at, sunrise=None):
-    while time.time() < until:
-        minute = int(time.time()) // 60 * 60
-        if settle_at and time.time() >= settle_at:
-            settle_at = None
-            for shot in settle_shots():
-                run.take(shot, max_wait_s=120)
-        else:
-            for shot in day_shots(minute, sunset, sunrise):
-                run.take(shot, max_wait_s=30)
-        if time.time() - run.last_upload > UPLOAD_EVERY_S:
-            run.upload()
-        time.sleep(max(0, minute + 60 - time.time()))
-
-
 def run_program(run, args):
-    if args.program == "day":
-        run_day(run, args.sunset, args.until, args.settle_at, args.sunrise)
-    elif args.program == "rate-night":
-        run_rate_night(run, args.until)
-    elif args.program == "night-sweep":
-        run_night_sweep(run, args.until)
-    elif args.program == "moon":
+    if args.program == "moon":
         run_moon(run, args.until)
-    elif args.program == "sunset":
-        run_sunset(run, args.sunset, args.until)
-    elif args.program in ("dark", "flat", "checker"):
+    else:
         make = {"dark": dark_shots, "flat": flat_shots, "checker": checker_shots}[args.program]
         shots = make(args.count) if args.count else make()
         for i, shot in enumerate(shots):
             if args.program == "checker" and i:
                 time.sleep(args.every)          # time to move the board
             run.take(shot, max_wait_s=900)
-    else:
-        for shot in night_shots() if args.program == "night" else settle_shots():
-            run.take(shot, max_wait_s=900)
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("program", choices=["night", "settle", "day", "rate-night", "night-sweep", "moon", "sunset",
-                                            "dark", "flat", "checker"])
+    parser.add_argument("program", choices=["moon", "dark", "flat", "checker"])
     parser.add_argument("--run", required=True)
-    parser.add_argument("--sunset", type=int)
-    parser.add_argument("--sunrise", type=int)
-    parser.add_argument("--until", type=int)
-    parser.add_argument("--settle-at", type=int)
+    parser.add_argument("--until", type=int, help="moon: when to stop (epoch seconds)")
     parser.add_argument("--count", type=int, help="dark, flat, checker: frames (dark: of each kind)")
     parser.add_argument("--every", type=float, default=CHECKER_EVERY_S, help="checker: seconds between frames")
     return parser.parse_args(argv)

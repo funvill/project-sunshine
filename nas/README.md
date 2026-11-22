@@ -1,10 +1,11 @@
 # Daily sunset video
 
-`sunset-daily.py` runs on the NAS and turns each day's frames into a vertical video. Every frame is
-on screen for 1/12 s, sunset included, so the 1-minute frames at sunrise and sunset slow the video
-down there. A full day of 5-minute frames plus the 1-minute frames is roughly 288 + 230 frames, about
-40 to 45 seconds (estimated, not yet measured on a full day). It only reads frames and writes to its
-own folder.
+`sunset-daily.py` turns each day's frames into a vertical video. It runs on a PC, from
+`tools/build_video.py` (see Running it). It was written as a Docker job for the NAS, but that was never
+scheduled, and the Docker image was removed on 2026-11-22. Every frame is on screen for 1/12 s, sunset
+included, so the 1-minute frames at sunrise and sunset slow the video down there. A full day of
+5-minute frames plus the 1-minute frames is roughly 288 + 230 frames, about 40 to 45 seconds
+(estimated, not yet measured on a full day). It only reads frames and writes to its own folder.
 
 Each video runs from dark to dark. It ends on the first frame after sunset where the sun is at least
 9° below the horizon, and the next video starts on the frame after that, so every frame appears once.
@@ -27,40 +28,32 @@ video; a day with no score shows none, and `OVERLAY_SKY=0` drops it.
 day of the sunset instead of after the previous video, and the day before is ignored. A frame can then
 be in two videos. Without it the videos run dark to dark as above.
 
-**Building one by hand, with no AI:** `python tools/build_video.py --camera cm4wide --date 2026-11-12
---start 07:30 --redo --crop nas/crop.cm4wide.json`. It runs this same job on a PC for a chosen
-day, reads the NAS share and writes to `~/Documents/sunset-daily-out/<camera>`.
-
 **It posts nothing.** Publishing to Instagram is a later step. See
 [issue #2](https://github.com/funvill/project-sunshine/issues/2) for the plan and decisions.
 
 ## Running it
 
-Build the image once and keep using that tag. The base image is pinned by digest and the packages by
-version (see the comments in `Dockerfile`), so a later rebuild either gives the same image or fails. Save
-the built image beside the Pi's SD images:
+With no AI, on a PC with ffmpeg and Python 3.9 or later, for a chosen day:
 
 ```bash
-docker build -t sunset-daily:1 nas/
-docker save sunset-daily:1 | gzip > sunset-daily-1.tar.gz
+python tools/build_video.py --camera cm4wide --date 2026-11-17 --start 07:30 --redo \
+    --crop nas/crop.cm4wide.json --fuse-production
 ```
 
-The image has ffmpeg 6.1.2 (Alpine 3.21). Every video so far was made with ffmpeg 7.1.1 on a PC, and the
-image has not yet been built and run on real frames.
+It reads the NAS share (`SUNSET_NAS`, or `--nas`, set to the `project_sunshine` folder) and writes to
+`~/Documents/sunset-daily-out/<camera>` (`--out`). `tools/build_reports.py` uses the same job for the sky
+score in `reports/`.
 
-Schedule this every 30 minutes through the afternoon and evening. Dusk moves through the year, and
-each run does nothing until a frame shows the sky has gone dark after sunset:
-
-```bash
-docker run --rm -v /path/to/project_sunshine:/data -e FRAMES_DIR=/data/wide -e DAILY_DIR=/data/daily sunset-daily:1
-```
-
-The exit code is 0 when there was nothing to do or the work succeeded, 1 when a day failed, and 2 when
-a required setting is missing. A failed day gets a record with `"status": "failed"` and the error, and
-every run within `LOOKBACK_DAYS` tries it again (`attempts` counts the tries); a success replaces the
-record. An error in one day, of any kind, doesn't stop the other days.
+`build_video.py` sets the settings below from its own options and runs the job as if it were the evening
+after that sunset. The job returns 0 when there was nothing to do or the work succeeded, 1 when a day
+failed, and 2 when a required setting is missing. A failed day gets a record with `"status": "failed"` and
+the error, and a later run within `LOOKBACK_DAYS` tries it again (`attempts` counts the tries); a success
+replaces the record. An error in one day, of any kind, doesn't stop the other days.
 
 ## Settings
+
+These are environment variables when the script is run on its own (`python3 nas/sunset-daily.py`);
+`tools/build_video.py` sets the same values from its options.
 
 | Variable | Default | What it does |
 |---|---|---|
@@ -80,7 +73,7 @@ record. An error in one day, of any kind, doesn't stop the other days.
 | `FUSED_DIR` | unset | A folder of fused frames (from `tools/fuse_sunset.py`). A file with the same name as a frame replaces its picture; the frame's time and Sun data stay |
 | `OVERLAY_LOCATION` | `Burnaby, BC, Canada` | Small text under the date. Empty for none |
 | `OVERLAY_SKY` | `1` | `0` leaves the day's sky score off the video (it stays in the record) |
-| `FONT_FILE` | `/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf` | Font for the text on the video. The image installs this one |
+| `FONT_FILE` | `/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf` | Font for the text on the video. `build_video.py` picks a bold system font instead (`--font`) |
 | `REDO_OLDER_THAN_VERSION` | unset | Make finished days again if their record was made by an older `SCRIPT_VERSION` (see Redoing days) |
 | `REDO_FROM`, `REDO_TO` | unset | Local dates (`YYYY-MM-DD`): redo within these instead of `LOOKBACK_DAYS`. Days in the range with no record are made too |
 
@@ -97,28 +90,7 @@ A redo makes the whole day again, daily video included, and replaces the record.
 `redo` block (`reason`, `previous_status`, `previous_script_version`), and keeps `posted` and any other
 `posted...` field from the old record, so a redone day never looks unposted. If the redo fails, the day
 gets a failed record like any other. With a range, frames are read from `REDO_FROM`, which takes a while
-over months of frames on the share. Run it once by hand with the setting, not on the schedule.
-
-## Archive checks
-
-`sunset-verify.py` re-reads each camera's JPEG and DNG files and compares them with the SHA-256 in
-their JSON. It never changes a frame. Run it once a day per camera, for example
-`python3 sunset-verify.py /data/wide`. It reads new days and problem days first, then a rolling
-slice of older days (`--cycle-days`, default 60), so the whole archive is re-read about every two
-months. It writes `../health/<camera>/verify.json` beside the camera folder and exits 1 if any file
-is missing, zero-length or does not match. Frames without a `Capture` block (early pilot frames)
-count as unverifiable, not as errors.
-
-`sunset-health.py` writes one record per camera and UTC day to `../health/<camera>/<day>.json`, and
-`latest.json` for the newest finished day. Run it daily at about 02:00 UTC, after the sync has
-caught up, for example `python3 sunset-health.py /data/wide`. It counts frames by type against what
-the day's own data says to expect (288 regular, dense windows, night frames where the lux was low,
-DNGs), the largest gap, frames missing metadata blocks, `SETUP_ID` changes, and the worst
-temperature, throttle flags, `outbox_pending`, disk use and smallest JPEG. Image measures
-(sharpness, skyline offset) are left to `tools/register_day.py`. Home Assistant reads `latest.json`
-and `verify.json`.
-
-Neither job is scheduled yet, and neither has run on the NAS.
+over months of frames on the share.
 
 ## Sky score
 
@@ -146,19 +118,20 @@ CM4 camera has 0.178). Posting only days above a threshold is not built yet: tha
 
 ## Sunset exposure (`tools/fuse_sunset.py`)
 
-The camera's auto exposure blows out the sunset. The `sunset` experiment shoots ev+0 and ev-2 pairs, both
-with daylight white balance, every minute around sunset. `tools/fuse_sunset.py` merges each pair
-(exposure fusion), blends it with the production frame, and writes it under the production frame's name
-into a folder, which `FUSED_DIR` points the job at. The blend fades in over the first 5 minutes of the
-run, is full to 5 minutes after sunset, and fades out by 12 minutes (daylight white balance turns the sky
-brown once the city lights the cloud). The runner skips the first minute of each 5-minute slot, and
-sometimes loses longer stretches (7 minutes at the Nov 12 sunset), so some frames have no pair. Such a
-frame keeps its own picture and takes the fusion's change in exposure and colour (a smooth gain) from the
-pairs within 8 minutes either side. Copying or blending the neighbours' pictures instead froze the video,
-then jumped. The bracket's auto exposure also hunted by several brightness levels a minute, so the
-brightness of the fused frames is steadied against the frames around it (3 either side, at most 25%).
-Flicker that is left comes from the sun going in and out of thin cloud. It needs numpy and OpenCV, so it runs on a PC, not in the
-NAS image, until a production bracket exists.
+The camera's auto exposure blows out the sunset. With `BRACKET=1` (#10) the capture saves an ev+0 and an
+ev-2 shot beside each frame within 45 minutes of sunset (`<frame>_ev0.jpg`, `_ev-2.jpg`), with daylight
+white balance to 10 minutes after sunset. `tools/fuse_sunset.py` merges each pair (exposure fusion),
+blends it with the production frame, and writes it under the production frame's name into a folder,
+which `FUSED_DIR` points the job at (`build_video.py --fuse-production` does all of this). The blend
+fades in over the first 5 minutes of the bracket, is full to 5 minutes after sunset, and fades out by 12
+minutes (daylight white balance turns the sky brown once the city lights the cloud). A frame whose pair
+is missing keeps its own picture and takes the fusion's change in exposure and colour (a smooth gain)
+from the pairs within 8 minutes either side. Copying or blending the neighbours' pictures instead froze
+the video, then jumped (seen with the experiment bracket, Nov 12). The bracket's auto exposure also
+hunted by several brightness levels a minute, so the brightness of the fused frames is steadied against
+the frames around it (3 either side, at most 25%). Then each sunset minute is blended 1:2:1 with the
+minutes either side (`--no-blend` skips it). Flicker that is left comes from the sun going in and out of
+thin cloud. It needs numpy and OpenCV.
 
 ## What it writes
 

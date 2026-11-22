@@ -1,7 +1,7 @@
 # needs: 15_dense
 # Capture failure handling (issues #15 and #14): a stuck camera is killed, aborts are logged,
 # finished frames left in .partial are rescued, repeated failures escalate, a quick failure is
-# retried once. Repeated failures only warn: rebooting is sunset-camwatch.sh's job.
+# retried once. Repeated failures only warn: rebooting is sunset-guard.sh's job.
 fail_env() {
   fresh_env
   unset CAPTURE_KILL_S CAPTURE_RETRY_WAIT_S CAPTURE_RETRY_UNDER_S CAPTURE_FAIL_WARN_N
@@ -52,16 +52,13 @@ check "jpg published" test "$(count 'wide_*Z.jpg')" = 1
 check "ok line with unknown lux" grep -q 'lux=9999 .* ok$' "$LOG_FILE"
 check "no abort" bash -c "! grep -q ABORTED '$LOG_FILE'"
 
-section "capture: missing DNG is logged"
-fail_env; export STUB_RPICAM=nodng
+section "capture: JPEG and JSON only, never a DNG"
+fail_env; export STUB_LUX=1
 capture; rc=$?
-check "exits 0 (the JPEG is still a frame)" test "$rc" = 0
-check "warning logged" grep -q 'WARN no DNG from the camera (raw=1)' "$LOG_FILE"
-check "ok line says raw=0" grep -q 'raw=0 .* ok$' "$LOG_FILE"
-check "frame says raw=0" grep -rq '"raw": 0\|raw=0' "$OUT_ROOT"/wide
-fail_env; export STUB_RPICAM=nodng SAVE_RAW=0
-capture
-check "no warning when DNG is off" bash -c "! grep -q 'no DNG' '$LOG_FILE'"
+check "exits 0" test "$rc" = 0
+check "--raw never passed to the camera" bash -c "! grep -q -- '--raw' '$STUB_CALLS'"
+check "no DNG written" test "$(count '*.dng')" = 0
+check "no raw setting in the frame" bash -c "! grep -rq '\"raw\"' '$OUT_ROOT'/wide"
 
 section "capture: healthy run logs no abort"
 fail_env; export STUB_LUX=1
@@ -85,7 +82,7 @@ rm -f "$OUT_ROOT/wide"; touch -d '5 minutes ago' "$OUT_ROOT/.partial"/wide_*
 sleep 1; capture; rc=$?    # a new second, so the new frame doesn't share the rescued one's name
 check "next run exits 0" test "$rc" = 0
 check "rescue logged" grep -q 'rescued wide_.*Z from .partial' "$LOG_FILE"
-check "both frames published" test "$(count 'wide_*Z.jpg')" = 2 -a "$(count 'wide_*Z.dng')" = 2
+check "both frames published" test "$(count 'wide_*Z.jpg')" = 2 -a "$(count 'wide_*Z.json')" = 2
 check ".partial empty" test -z "$(find "$OUT_ROOT/.partial" -type f ! -name .last-error)"
 
 section "capture: incomplete leftovers are not rescued"
@@ -121,7 +118,6 @@ section "capture: df gives nothing"
 fail_env; export STUB_DF=empty
 capture; rc=$?
 check "still takes the frame" test "$rc" = 0 -a "$(count 'wide_*Z.jpg')" = 1
-check "drops the DNG to be safe" test "$(count '*.dng')" = 0
 check "warning logged" grep -q 'WARN disk usage unknown' "$LOG_FILE"
 check "no abort" bash -c "! grep -q ABORTED '$LOG_FILE'"
 unset STUB_DF

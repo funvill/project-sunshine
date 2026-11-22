@@ -1,6 +1,6 @@
 # Production sunset bracket (#10, option E): with BRACKET=1, every frame within BRACKET_WINDOW_MIN
 # of sunset is followed by an ev+0 and an ev-2 shot, daylight white balance until
-# BRACKET_AWB_HANDOVER_MIN after sunset, a DNG on the ev-2 frame within BRACKET_RAW_MIN.
+# BRACKET_AWB_HANDOVER_MIN after sunset. JPEG and JSON only, like every frame.
 # The sun wrapper answers "dense" from STUB_DENSE and "annotate" with STUB_MINUTES from sunset,
 # so the tests don't depend on today's sun.
 bracket_env() {
@@ -52,14 +52,15 @@ check "ev+0: --ev 0" has_call 2 '--ev 0'
 check "ev+0: daylight white balance" has_call 2 '--awb daylight'
 check "ev-2: --ev -2" has_call 3 '--ev -2'
 check "ev-2: daylight white balance" has_call 3 '--awb daylight'
-check "DNG on the ev-2 frame only" test "$(count '*_ev-2.dng')" = 1 -a "$(count '*_ev0.dng')" = 0 -a "$(count 'wide_*Z.dng')" = 0
+check "no DNG anywhere" test "$(count '*.dng')" = 0
+check "--raw never passed" bash -c "! grep -q -- '--raw' '$STUB_CALLS'"
 j="$(one '*_ev-2.json')"
 check "Capture.kind is bracket" test "$(jget "$j" "d['Capture']['kind']")" = bracket
-check "settings: ev -2, daylight, raw 1" test "$(jget "$j" "(d['Capture']['settings']['ev'], d['Capture']['settings']['awb'], d['Capture']['settings']['raw'])")" = "(-2, 'daylight', 1)"
+check "settings: ev -2, daylight, no raw" test "$(jget "$j" "(d['Capture']['settings']['ev'], d['Capture']['settings']['awb'], 'raw' in d['Capture']['settings'])")" = "(-2, 'daylight', False)"
 check "bracket_of names the frame" test "$(jget "$j" "d['Capture']['settings']['bracket_of']")" = "$stem"
 check "schedule stays dense" test "$(jget "$j" "d['Capture']['schedule']")" = dense
 check "has the Sun block" test "$(jget "$j" "d['Sun']['minutes_from_sunset']")" = -20.0
-check "checksum of the DNG" test "$(jget "$j" "'sha256' in d['Capture']['files']['dng']")" = True
+check "checksum of the JPEG, nothing else in files" test "$(jget "$j" "(sorted(d['Capture']['files']), 'sha256' in d['Capture']['files']['jpg'])")" = "(['jpg'], True)"
 check "logged with bracket=2" grep -q 'dense window=sunset .*bracket=2.* ok$' "$LOG_FILE"
 
 section "bracket: auto white balance after the hand-over"
@@ -69,11 +70,10 @@ check "pair taken" test "$(count '*_ev-2.jpg')" = 1
 check "no daylight white balance" bash -c "! grep -q -- '--awb daylight' '$STUB_CALLS'"
 check "awb recorded as auto" test "$(jget "$(one '*_ev0.json')" "d['Capture']['settings']['awb']")" = auto
 
-section "bracket: no DNG outside BRACKET_RAW_MIN"
+section "bracket: the pair 40 min before sunset"
 bracket_env; export STUB_MINUTES=-40
 dense
 check "pair taken" test "$(count '*_ev-2.jpg')" = 1
-check "no DNG" test "$(count '*.dng')" = 0
 
 section "bracket: nothing outside BRACKET_WINDOW_MIN"
 bracket_env; export STUB_MINUTES=-50
@@ -84,7 +84,7 @@ section "bracket: the regular frame in the window gets the pair too"
 bracket_env; export STUB_LUX=1000
 capture; rc=$?
 check "exits 0" test "$rc" = 0
-check "frame, DNG and the pair" test "$(count 'wide_*Z.jpg')" = 1 -a "$(count 'wide_*Z.dng')" = 1 -a "$(count '*_ev0.jpg')" = 1 -a "$(count '*_ev-2.jpg')" = 1
+check "frame and the pair" test "$(count 'wide_*Z.jpg')" = 1 -a "$(count '*_ev0.jpg')" = 1 -a "$(count '*_ev-2.jpg')" = 1
 check "schedule regular on the pair" test "$(jget "$(one '*_ev0.json')" "d['Capture']['schedule']")" = regular
 
 section "bracket: after the night frame when dark"
@@ -102,12 +102,6 @@ check "frame kept" test "$(count 'wide_*Z.jpg')" = 1
 check "no pair files left" test "$(count '*_ev*')" = 0
 check "warning logged" grep -q 'WARN bracket ev0 failed' "$LOG_FILE"
 check "frame line still ok, bracket=0" grep -q 'bracket=0.* ok$' "$LOG_FILE"
-
-section "bracket: disk guard drops the ev-2 DNG"
-bracket_env; export STUB_DF_PCT=90
-dense
-check "pair taken" test "$(count '*_ev-2.jpg')" = 1
-check "no DNG" test "$(count '*.dng')" = 0
 
 section "bracket: rescue picks up a pair left in .partial"
 bracket_env

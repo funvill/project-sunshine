@@ -71,8 +71,8 @@ Test immediately: `sudo systemctl start sunset-capture.service && ls -R outbox`
 sun at -9° until 60 minutes after sunrise, and from 60 minutes before sunset until the sun is at
 -9° (`sunset-sun.py dense` decides, from `SITE_LAT`/`SITE_LON`). Outside those windows, and on the
 regular slot minutes, it exits without touching the camera or the log.
-- Same name, folder and auto exposure as the regular frame: `wide_<UTC>.jpg` + `.json`. No DNG and
-  no night frame.
+- Same name, folder and auto exposure as the regular frame: `<cam>_<UTC>.jpg` + `.json`, no night
+  frame.
 - `Capture.schedule` in the JSON is `"dense"` for these and `"regular"` for the 5-minute frames.
 - The regular frame always wins: it waits up to `LOCK_WAIT_S` (90 s) for a dense frame to finish,
   a dense frame never waits, and a hung camera is given up after `DENSE_TIMEOUT_S` (30 s).
@@ -107,35 +107,28 @@ reboot it after a hard freeze. Kernel messages are kept in `~/sunset/kernel.log`
 log that survives a reboot, so look there first after a crash. The log may still be empty for a
 hard freeze, since it only holds what the kernel managed to write.
 
-**Wi-Fi dongle watchdog (`NETWATCH=1`).** For a Pi on a USB Wi-Fi dongle, such as the CM4. On
-2026-11-13 the CM4's dongle dropped off and didn't rejoin until a power-cycle. `install.sh` enables
-`sunset-netwatch.timer` on every Pi, but `sunset-netwatch.sh` does nothing unless `sunset.env` has
-`NETWATCH=1`. Every 2 minutes, as root, it pings the default gateway through `wlan0`:
+**Watchdog: `sunset-guard.sh` (`NETWATCH=1`, `CAMWATCH=1`).** `install.sh` enables
+`sunset-guard.timer` on every Pi. Every 2 minutes, as root, it runs two checks, each off unless
+`sunset.env` turns it on. Each keeps its state in RAM (`/run/sunset-netwatch`, `/run/sunset-camwatch`)
+and writes its log (`~/sunset/netwatch.log`, `camwatch.log`) only when it acts. At most one reboot
+happens per run, and each check reboots at most once every 6 hours (markers `~/sunset/.netwatch-reboot`,
+`.camwatch-reboot`), so neither a router outage nor a dead camera can cause a reboot loop. Before a
+reboot it leaves the trusted time for the capture after it. A reboot costs about one capture and
+clears transient experiment timers (`exp-*`).
 
-- After 10 minutes without an answer it unbinds and rebinds the dongle's USB device, once per
-  outage. This is a software replug: tested on the CM4, the dongle rejoined in 6 s.
-- After 30 minutes it reboots, at most once every 6 hours (marker `~/sunset/.netwatch-reboot`),
-  so a router outage can't cause a reboot loop. A reboot costs about one capture and clears
-  transient experiment timers (`exp-*`).
-- It keeps its state in RAM (`/run/sunset-netwatch`) and writes `~/sunset/netwatch.log` only when it acts.
-- Tune with `NETWATCH_IFACE`, `NETWATCH_RESET_MIN`, `NETWATCH_REBOOT_MIN`, `NETWATCH_REBOOT_GAP_H`.
-- It watches `wlan0` only: if the Wi-Fi is gone it reboots after 30 minutes even when wired Ethernet
-  is up (it did on 2026-11-20, while the new dongle had no driver).
-
-**Camera watchdog (`CAMWATCH=1`).** From 14:05 UTC 2026-11-19 both CM4 cameras failed captures on
-and off ("Failed to queue buffer for Unicam Image", "Device timeout") for 16 hours, until a reboot
-cleared it. `install.sh` enables `sunset-camwatch.timer` on every Pi, but `sunset-camwatch.sh` does
-nothing unless `sunset.env` has `CAMWATCH=1`. Every 5 minutes, as root, it reads `capture.log`:
-
-- Per camera, it counts failed captures (5-minute, dense and night; not "FAILED publish", skips or
-  retried warnings) since this boot within the last 60 minutes.
-- 3 or more: it reboots, at most once every 6 hours (marker `~/sunset/.camwatch-reboot`), so a dead
-  camera can't cause a reboot loop; after that it logs once that it is holding back. Like the network
-  watchdog, it leaves the trusted time for the capture after the reboot.
-- The failures came scattered, not in a row (`cm4wide` never failed twice running), which is why it
-  counts within a window. Replayed on that day's `capture.log`, it would have rebooted at 14:47 UTC.
-- It keeps its state in RAM (`/run/sunset-camwatch`) and writes `~/sunset/camwatch.log` only when it acts.
-- Tune with `CAMWATCH_FAILS`, `CAMWATCH_WINDOW_MIN`, `CAMWATCH_REBOOT_GAP_H`.
+- **Network (`NETWATCH=1`)**, for a Pi on a USB Wi-Fi dongle such as the CM4 (on 2026-11-13 its dongle
+  dropped off and didn't rejoin until a power-cycle). It pings the default gateway through `wlan0`.
+  After 10 minutes without an answer it unbinds and rebinds the dongle's USB device, once per outage (a
+  software replug: the dongle rejoined in 6 s). After 30 minutes it reboots. It watches `wlan0` only:
+  if the Wi-Fi is gone it reboots even when wired Ethernet is up (it did on 2026-11-20, while the new
+  dongle had no driver). Tune with `NETWATCH_IFACE`, `NETWATCH_RESET_MIN`, `NETWATCH_REBOOT_MIN`,
+  `NETWATCH_REBOOT_GAP_H`.
+- **Cameras (`CAMWATCH=1`).** From 14:05 UTC 2026-11-19 both CM4 cameras failed captures on and off
+  ("Failed to queue buffer for Unicam Image", "Device timeout") for 16 hours, until a reboot cleared
+  it. It reads `capture.log` and counts, per camera, failed captures (5-minute, dense and night; not
+  "FAILED publish", skips or retried warnings) since this boot within the last 60 minutes; 3 or more
+  reboots. The failures came scattered, not in a row, which is why it counts within a window. Tune
+  with `CAMWATCH_FAILS`, `CAMWATCH_WINDOW_MIN`, `CAMWATCH_REBOOT_GAP_H`.
 
 **AIC8800 Wi-Fi dongle (CM4, from 2026-11-20).** The CM4's dongle is an AIC8800D80 (USB
 `a69c:5723` at power-up, a69c:8d81 once running), on 5 GHz. Its driver isn't in the kernel, and this
@@ -173,7 +166,6 @@ restore the frozen image" below.
 ## Output (layout unchanged)
 ```
 outbox/<cam>/YYYY/MM/DD/<cam>_YYYYMMDDTHHMMSSZ.jpg   # auto exposure
-                                              .dng   # RAW (SAVE_RAW=1)
                                               .json  # exposure, gain, lux, colour gains
                                          _night.*    # extra long exposure when dark
 outbox/<cam>/YYYY/MM/DD/system.json                  # what rarely changes, one per UTC day
@@ -192,7 +184,7 @@ Each frame's `.json` holds rpicam-still's own camera fields at the top level, un
 | Block | Written by | Contents |
 |---|---|---|
 | `Sun` | `sunset-sun.py` | True-north azimuth, elevation, nearest sunset and minutes from it, from `SITE_LAT`/`SITE_LON` |
-| `Capture` | `sunset-meta.py` | `schema_version`, camera, `kind` (`auto` or `night`), `setup_id`, `system_id`, slot and shot times, shot duration, settings asked for, the lux that triggered a night frame, size and SHA-256 of the JPEG and DNG |
+| `Capture` | `sunset-meta.py` | `schema_version`, camera, `kind` (`auto` or `night`), `setup_id`, `system_id`, slot and shot times, shot duration, settings asked for, the lux that triggered a night frame, size and SHA-256 of the JPEG |
 | `System` | `sunset-meta.py` | The machine at that moment: uptime, load, free memory, CPU temperature, core voltage, ARM clock, `throttled`, free disk space, frames waiting to sync, SD sectors read and written, network state and Wi-Fi signal, NTP state, NAS mount and last sync; on the CM4 also the UPS (`ups_source`, `ups_charge_pct` and an `ups` block, see "UPS" below) |
 
 `system.json` holds what rarely changes: hostname, Pi model, board revision, OS, kernel, firmware, Python, rpicam-apps and libcamera versions, camera overlay, time zone, total memory and disk, SD card identity, `setup_id`, `setup_note` and a hash identifying the capture script. It has a `records` list, normally with one entry. If something changes during the day, such as the setup at the bracket move, the file gains a record starting at that frame. A frame's `Capture.system_id` names the record that applied to it.
@@ -216,9 +208,8 @@ or `FAILED ...` / `SKIPPED ...` / `DISK ...` lines explaining what was dropped a
 - **Clock:** the CM4's RTC has no coin cell (as of 2026-11-12), so after a power cut it boots with a stale clock.
   Capture refuses to run (`SKIPPED: clock not synced`) until NTP has synced once this
   boot; later NTP outages do not stop it. `REQUIRE_TIME_SYNC=0` disables this.
-- **Disk:** at 85% full or more the DNG is dropped, at 95% or more the night frame is
-  skipped, and with under 100 MB free nothing is captured. Tune with `DISK_DROP_RAW_PCT`,
-  `DISK_SKIP_NIGHT_PCT`, `DISK_MIN_FREE_MB`.
+- **Disk:** at 95% full or more the night frame is skipped, and with under 100 MB free nothing
+  is captured. Tune with `DISK_SKIP_NIGHT_PCT`, `DISK_MIN_FREE_MB`.
 - **Camera hang:** each `rpicam-still` call is limited to `CAPTURE_TIMEOUT_S` (60 s).
 
 ### UPS (`sunshine` only, issue #29)
@@ -286,15 +277,14 @@ button for each (above "Full frame"); production's camera is shown with its `ROT
 as read. **Capture pauses while the page is on** (from 2026-11-17): starting it stops the capture
 and dense timers of both cameras, and they start again when it ends, by `diag stop`, the time limit
 or a crash. Each session is a gap in the series, and restarting the timers takes one extra frame
-straight away (systemd 252). The camera only runs while the page is open. Don't run `sunset-selftest.sh`, `sunset-focus.py` or a manual
+straight away (systemd 252). The camera only runs while the page is open. Don't run `sunset-selftest.sh` or a manual
 capture while the page is open, because only one program can use the camera at a time.
 
-The page has no password: while it's on, anyone on your LAN can see the camera, the logs and the
-Pi's status, and switch the view. Don't forward its port through the router.
+The page has no password: while it's on, anyone on your LAN can see the camera and the logs, and
+switch the view. It shows no Pi health (removed 2026-11-22); `tools/camera_check.py` does that. Don't forward its port through the router.
 
-Without the page: `python3 sunset-focus.py` prints a sharpness score per reading, or with a monitor
-on the Pi, `rpicam-hello -t 0 --roi 0.4,0.4,0.2,0.2` gives a live view zoomed 5x into the centre.
-Stop the capture timer first for either of these.
+Without the page, with a monitor on the Pi, `rpicam-hello -t 0 --roi 0.4,0.4,0.2,0.2` gives a live view zoomed 5x into the centre.
+Stop the capture timer first.
 
 ### Tests (no Pi needed)
 `bash tests/run.sh` runs the scripts against stub `rpicam-still`/`rsync`/`df`/`ssh`.
@@ -343,10 +333,8 @@ With the default settings, an alert comes 70 to 75 minutes after the last frame,
 
 ### Monitoring beyond frame age
 
-**Installed 2026-11-20, except the NAS-job blocks.** HA's copy (`/homeassistant/packages/sunset.yaml`,
-written with the File editor add-on; HA is on port 80) is `sunset.yaml` without the daily video,
-archive check and daily health blocks: those NAS jobs don't run yet, so their sensors would read
-"stale" and alert forever. Add those blocks once the jobs run. The scripts are in `/config/sunset/`:
+**Installed 2026-11-20.** HA's copy (`/homeassistant/packages/sunset.yaml`, written with the File
+editor add-on; HA is on port 80) is the repo's `sunset.yaml`. The scripts are in `/config/sunset/`:
 `sunset_frame_age.sh`, `sunset_nas_free.sh`, `sunset_camera_health.sh` and `sunset_ups.sh`. HA's copy
 adds the phone (`mobile_app_pixel_8`, from 2026-11-20) under every alert's `notifiers`; the repo keeps
 the placeholder. To update, copy the
@@ -373,8 +361,6 @@ The package alerts on:
   mains, 0 on the cells. The board reports no discharge current or run time, so there are no sensors
   for those. A value the frame lacks (stale UPS status) is a gap in the graph, never a 0. The same
   script also gives the CM4's CPU temperature from that frame (`sensor.sunset_cm4_cpu_temperature`);
-- in the repo only, until the NAS jobs run: the daily video job's status, and the results of
-  `nas/sunset-verify.py` and `nas/sunset-health.py` (see `nas/README.md`).
 
 Anything unknown counts as bad. Python 3 is needed in HA's container. An alert you acknowledge is
 re-armed after 12 hours.
@@ -445,9 +431,8 @@ history before 2026-11-21.)
    `project_sunshine/cm4wide/` and `project_sunshine/cm4city/`.
 10. **Install.** `cd ~/sunset && sudo ./install.sh --cm4-two --ups`, with no `--enable`
     (`--ups` starts the UPS monitor; see "UPS" above). It writes the
-    cam0 and cam1 overlays (and changes nothing if step 4 already did). It installs the second camera's
-    units too (`sunset-capture2`, `sunset-dense2`); with `--enable` it starts them only if
-    `sunset2.env` exists.
+    cam0 and cam1 overlays (and changes nothing if step 4 already did). The capture and dense services take the second
+    camera too, right after the first, when `sunset2.env` exists (`sunset-capture.sh --env`).
 11. **Low wear.** `sudo ./sunset-lowwear.sh`, then reboot.
 12. **Experiments and the weather units.** `mkdir -p ~/sunset/experiments` and copy the repo's
     `experiments/` into it (the unit runs `~/sunset/experiments/sunset-weather.py`). For the weather
@@ -467,10 +452,10 @@ history before 2026-11-21.)
     `tail ~/sunset/capture.log` and `sudo systemctl start sunset-sync.service`. The log line must
     end in `ok` and say `cam=cm4wide`, the
     JPEG must be upright, and the JSON `Capture.settings` must say `camera: i2c@0`. Check that the
-    frame is under `cm4wide/` on the NAS and not in `wide/`. Then `sudo systemctl start
-    sunset-capture2.service`: `cam=cm4city`, `camera: i2c@1`, frames under `cm4city/`.
+    frame is under `cm4wide/` on the NAS and not in `wide/`. The same run takes
+    the second camera right after: `cam=cm4city`, `camera: i2c@1`, frames under `cm4city/`.
 16. **Start.** `sudo systemctl enable --now sunset-capture.timer sunset-sync.timer
-    sunset-dense.timer sunset-capture2.timer sunset-dense2.timer`, and check
+    sunset-dense.timer sunset-guard.timer`, and check
     `systemctl list-timers 'sunset*'`. Each camera has its own Home Assistant alerts (`cm4wide`,
     `cm4city`); they should stay quiet, or clear within about 75 minutes.
 17. **Record it.** Add a `changelog.md` entry: date, what was restored, the new `SETUP_ID` if it

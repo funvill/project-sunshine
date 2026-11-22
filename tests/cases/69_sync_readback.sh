@@ -16,7 +16,7 @@ rsync_args() { grep '^rsync ' "$STUB_CALLS" 2>/dev/null; }
 
 section "read-back: a confirmed copy is removed locally"
 rb_env
-rb_file "$d/a.jpg"; rb_file "$d/a.json"; rb_file "$d/a.dng"
+rb_file "$d/a.jpg"; rb_file "$d/a.json"; rb_file "$d/a_night.jpg"
 sync_; rc=$?
 check "exits 0" test "$rc" = 0
 check "all three on the share" test "$(find "$NAS_TARGET" -type f | wc -l | tr -d ' ')" = 3
@@ -34,21 +34,21 @@ check "rsync given --remove-source-files" bash -c "grep '^rsync ' '$STUB_CALLS' 
 check "local copy removed" test -z "$(frames)"
 
 section "read-back: a short copy is kept, logged, and retried"
-rb_env; export STUB_RSYNC_TRUNCATE=a.dng
-rb_file "$d/a.jpg"; rb_file "$d/a.dng" "$(head -c 4000 /dev/zero | tr '\0' 'r')"
+rb_env; export STUB_RSYNC_TRUNCATE=a_night.jpg
+rb_file "$d/a.jpg"; rb_file "$d/a_night.jpg" "$(head -c 4000 /dev/zero | tr '\0' 'r')"
 sync_; rc=$?
 check "exits non-zero" test "$rc" != 0
-check "short file kept on the Pi" test -e "$d/a.dng"
+check "short file kept on the Pi" test -e "$d/a_night.jpg"
 check "good file still removed" test ! -e "$d/a.jpg"
-check "kept file logged with the reason" grep -q 'readback kept ./wide/2026/01/01/a.dng: size' "$SYNC_LOG_FILE"
+check "kept file logged with the reason" grep -q 'readback kept ./wide/2026/01/01/a_night.jpg: size' "$SYNC_LOG_FILE"
 check "summary logged as a sync failure" grep -q 'sync FAILED read-back kept=1 confirmed=1' "$SYNC_LOG_FILE"
 check "no ok line" bash -c "! grep -q 'sync ok' '$SYNC_LOG_FILE'"
-check "bad NAS copy removed, so the next run resends it" test ! -e "$n/a.dng"
+check "bad NAS copy removed, so the next run resends it" test ! -e "$n/a_night.jpg"
 unset STUB_RSYNC_TRUNCATE
 sync_; rc=$?
 check "next run exits 0" test "$rc" = 0
-check "next run: full copy on the share" cmp -s "$n/a.dng" <(head -c 4000 /dev/zero | tr '\0' 'r')
-check "next run: removed locally" test ! -e "$d/a.dng"
+check "next run: full copy on the share" cmp -s "$n/a_night.jpg" <(head -c 4000 /dev/zero | tr '\0' 'r')
+check "next run: removed locally" test ! -e "$d/a_night.jpg"
 
 section "read-back: same size, different bytes"
 rb_env; export STUB_RSYNC_FLIP=a.jpg
@@ -74,34 +74,35 @@ check "logged" grep -q 'readback kept ./wide/2026/01/01/a.jpg: not on the NAS' "
 check "other file removed" test ! -e "$d/b.jpg"
 unset STUB_RSYNC_DROP
 
-section "read-back: files above SYNC_VERIFY_HASH_MAX_MB: size and both ends, not the middle"
-big() { rb_file "$d/big.dng" "$(head -c 1200000 /dev/zero | tr '\0' 'q')"; }
-rb_env; export STUB_RSYNC_HOLE=big.dng SYNC_VERIFY_HASH_MAX_MB=1
+section "read-back: files above SYNC_VERIFY_HASH_MAX_MB get the size check only"
+big() { rb_file "$d/big.jpg" "$(head -c 1200000 /dev/zero | tr '\0' 'q')"; }
+rb_env; export STUB_RSYNC_HOLE=big.jpg SYNC_VERIFY_HASH_MAX_MB=1
 big; rb_file "$d/small.jpg" "abc"
 sync_; rc=$?
-check "exits 0: damage in the middle of a large file is not seen (the trade-off)" test "$rc" = 0
-check "large file removed after the size and ends check" test ! -e "$d/big.dng"
-rb_env; export STUB_RSYNC_FLIP=big.dng SYNC_VERIFY_HASH_MAX_MB=1
+check "exits 0: same-size damage in a large file is not seen (the trade-off)" test "$rc" = 0
+check "large file removed after the size check" test ! -e "$d/big.jpg"
+rb_env; export STUB_RSYNC_TRUNCATE=big.jpg SYNC_VERIFY_HASH_MAX_MB=1
 big
 sync_; rc=$?
-check "damaged ends of a large file are caught" test "$rc" != 0
-check "large file kept" test -e "$d/big.dng"
-check "logged" grep -q 'readback kept ./wide/2026/01/01/big.dng: ends differ' "$SYNC_LOG_FILE"
+check "a short copy of a large file is caught" test "$rc" != 0
+check "large file kept" test -e "$d/big.jpg"
+check "logged" grep -q 'readback kept ./wide/2026/01/01/big.jpg: size' "$SYNC_LOG_FILE"
+unset STUB_RSYNC_TRUNCATE
 rb_env; export STUB_RSYNC_FLIP=small.jpg SYNC_VERIFY_HASH_MAX_MB=1
 rb_file "$d/small.jpg" "abc"
 sync_; rc=$?
 check "small file is hashed: mismatch caught" test "$rc" != 0
 check "small file kept" test -e "$d/small.jpg"
-rb_env; export STUB_RSYNC_HOLE=big.dng SYNC_VERIFY_HASH_MAX_MB=0
+rb_env; export STUB_RSYNC_HOLE=big.jpg SYNC_VERIFY_HASH_MAX_MB=0
 big
 sync_; rc=$?
 check "SYNC_VERIFY_HASH_MAX_MB=0: no file is hashed in full" test "$rc" = 0
-rb_env; export STUB_RSYNC_HOLE=big.dng SYNC_VERIFY_HASH_MAX_MB=100
+rb_env; export STUB_RSYNC_HOLE=big.jpg SYNC_VERIFY_HASH_MAX_MB=100
 big
 sync_; rc=$?
-check "a high limit hashes the DNG in full: middle damage caught" test "$rc" != 0
-check "DNG kept" test -e "$d/big.dng"
-check "logged as a checksum mismatch" grep -q 'readback kept ./wide/2026/01/01/big.dng: sha256' "$SYNC_LOG_FILE"
+check "a high limit hashes the file in full: middle damage caught" test "$rc" != 0
+check "file kept" test -e "$d/big.jpg"
+check "logged as a checksum mismatch" grep -q 'readback kept ./wide/2026/01/01/big.jpg: sha256' "$SYNC_LOG_FILE"
 unset STUB_RSYNC_FLIP STUB_RSYNC_HOLE SYNC_VERIFY_HASH_MAX_MB
 
 section "read-back: SYNC_VERIFY=0 trusts rsync as before"

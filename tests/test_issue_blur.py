@@ -63,15 +63,25 @@ class IssueBlur(unittest.TestCase):
 
 @unittest.skipIf(np is None, "needs numpy, OpenCV and Pillow")
 class SetupChoice(unittest.TestCase):
-    """The outlines must belong to the camera position the frame was taken at (issue #19)."""
+    """The boxes must belong to the camera position the frame was taken at (issue #19): they come
+    from the calibration in the crop config whose setup_id is the frame's."""
+
+    CALIBRATIONS = [
+        {"start": "2026-11-11", "setup_id": "cm4-window-1", "blur": [[0, 0, 10, 10]], "blur_sigma": 5},
+        {"start": "2026-11-17", "setup_id": "cm4-window-3", "blur": [[100, 50, 100, 200], [300, 60, 50, 50]]},
+        {"start": "2026-11-20", "setup_id": "cm4-window-4", "blur": []},
+    ]
 
     def setUp(self):
         self.ib = load()
         self.dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.dir, True)
-        self.frame = os.path.join(self.dir, "wide_20261112T003000Z.jpg")
+        self.frame = os.path.join(self.dir, "cm4wide_20261118T003000Z.jpg")
         import cv2
         cv2.imwrite(self.frame, np.full((300, 400, 3), 128, np.uint8))
+        self.config = os.path.join(self.dir, "crop.json")
+        with open(self.config, "w") as f:
+            json.dump({"calibrations": self.CALIBRATIONS}, f)
 
     def write_json(self, setup_id, path=None):
         data = {"Sun": {}, "Capture": {"schedule": "regular"}}
@@ -81,50 +91,65 @@ class SetupChoice(unittest.TestCase):
             json.dump(data, f)
 
     def test_setup_comes_from_the_frames_json(self):
-        self.write_json("pilot-3")
-        self.assertEqual(self.ib.frame_setup(self.frame), "pilot-3")
-        self.assertIs(self.ib.choose_outlines(None, "pilot-3"), self.ib.BUILDINGS["pilot-3"])
+        self.write_json("cm4-window-3")
+        self.assertEqual(self.ib.frame_setup(self.frame), "cm4-window-3")
+        self.assertEqual(self.ib.choose_boxes(None, "cm4-window-3", self.CALIBRATIONS), self.CALIBRATIONS[1]["blur"])
 
-    def test_a_setup_with_no_outlines_is_refused(self):
+    def test_boxes_become_rectangles(self):
+        self.assertEqual(self.ib.box_outlines([[100, 50, 100, 200]]), [[(100, 50), (200, 50), (200, 250), (100, 250)]])
+
+    def test_a_setup_with_no_calibration_is_refused(self):
         with self.assertRaises(self.ib.SetupError) as e:
-            self.ib.choose_outlines(None, "pilot-4")
+            self.ib.choose_boxes(None, "pilot-4", self.CALIBRATIONS)
         self.assertIn("pilot-4", str(e.exception))
 
-    def test_no_setup_anywhere_is_refused_rather_than_assuming_pilot_3(self):
+    def test_a_calibration_with_no_blur_boxes_is_refused(self):
+        with self.assertRaises(self.ib.SetupError):
+            self.ib.choose_boxes(None, "cm4-window-4", self.CALIBRATIONS)
+
+    def test_no_setup_anywhere_is_refused(self):
         self.assertIsNone(self.ib.frame_setup(self.frame))
         with self.assertRaises(self.ib.SetupError):
-            self.ib.choose_outlines(None, None)
+            self.ib.choose_boxes(None, None, self.CALIBRATIONS)
 
     def test_a_setup_argument_that_disagrees_with_the_frame_is_refused(self):
         with self.assertRaises(self.ib.SetupError):
-            self.ib.choose_outlines("pilot-3", "cm4-window-1")
+            self.ib.choose_boxes("cm4-window-3", "cm4-window-1", self.CALIBRATIONS)
 
-    def test_explicit_outlines_need_no_setup(self):
-        self.assertEqual(self.ib.choose_outlines(None, "pilot-4", [[(0, 0), (1, 0), (1, 1)]]), [[(0, 0), (1, 0), (1, 1)]])
+    def test_the_default_config_is_the_cameras_in_nas(self):
+        self.assertEqual(os.path.basename(self.ib.default_config(self.frame)), "crop.cm4wide.json")
+        self.assertIsNone(self.ib.default_config(os.path.join(self.dir, "photo.jpg")))
+
+    def test_every_calibration_in_the_checked_in_config_has_boxes(self):
+        # the issue images and the video blur the same boxes, so a camera position with none is a gap in both
+        calibrations = self.ib.read_config(os.path.join(os.path.dirname(HERE), "nas", "crop.cm4wide.json"))
+        for c in calibrations:
+            with self.subTest(setup=c.get("setup_id")):
+                self.assertTrue(self.ib.choose_boxes(None, c["setup_id"], calibrations))
 
     def run_cli(self, *args):
-        return subprocess.run([sys.executable, SCRIPT, self.frame, os.path.join(self.dir, "out.jpg")] + list(args),
-                              capture_output=True, text=True)
+        return subprocess.run([sys.executable, SCRIPT, self.frame, os.path.join(self.dir, "out.jpg"),
+                               "--config", self.config] + list(args), capture_output=True, text=True)
 
     def test_command_line_refuses_an_unknown_setup_with_a_clear_message(self):
         self.write_json("pilot-4")
         got = self.run_cli()
         self.assertNotEqual(got.returncode, 0)
-        self.assertIn("no building outlines for setup 'pilot-4'", got.stderr)
+        self.assertIn("no calibration for setup 'pilot-4'", got.stderr)
         self.assertFalse(os.path.exists(os.path.join(self.dir, "out.jpg")))
 
     def test_command_line_works_for_a_known_setup_from_the_json(self):
-        self.write_json("pilot-3")
+        self.write_json("cm4-window-3")
         got = self.run_cli("--width", "200")
         self.assertEqual(got.returncode, 0, got.stderr)
         self.assertTrue(os.path.exists(os.path.join(self.dir, "out.jpg")))
 
     def test_command_line_reads_a_json_given_by_path(self):
         other = os.path.join(self.dir, "other.json")
-        self.write_json("cm4-window-1", other)
+        self.write_json("cm4-window-4", other)
         got = self.run_cli("--json", other)
         self.assertNotEqual(got.returncode, 0)
-        self.assertIn("cm4-window-1", got.stderr)
+        self.assertIn("cm4-window-4", got.stderr)
 
 
 def cv2_resize(img, width):

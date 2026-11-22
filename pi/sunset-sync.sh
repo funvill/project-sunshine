@@ -19,9 +19,8 @@ MAX_S="${SYNC_MAX_S:-1200}"
 # its NAS copy has been read back and matches; 0: trust rsync's exit code, as before.
 VERIFY="${SYNC_VERIFY:-1}"
 # Files up to this size are re-read from the NAS in full and compared by SHA-256 (JPEG, JSON).
-# Larger ones (the DNG) get the size and their first and last 64 KiB. 0: no full re-reads.
+# Larger ones get the size check only. 0: no full re-reads.
 HASH_MAX_MB="${SYNC_VERIFY_HASH_MAX_MB:-8}"
-ENDS_BYTES=65536
 # Config backup (issue #23), mounted share only: sunset.env, fstab and the boot config.txt
 # go to a per-host folder next to the frames' folder, when they change and once a UTC day.
 CONFIG_BACKUP="${SYNC_CONFIG_BACKUP:-1}"
@@ -155,7 +154,7 @@ ZERO_SEEN="$LOG_FILE.zero"
 PENDING=0
 while IFS= read -r -d '' rec; do
   rest="${rec#* }"; size="${rest%% *}"; path="${rest#* }"
-  if [[ "$size" == 0 ]] && [[ "$path" == *.[jJ][pP][gG] || "$path" == *.[dD][nN][gG] ]]; then
+  if [[ "$size" == 0 && "$path" == *.[jJ][pP][gG] ]]; then
     if ! grep -qxF -- "$path" "$ZERO_SEEN" 2>/dev/null; then
       echo "$path" >> "$ZERO_SEEN" 2>/dev/null || true
       log "sync skipped zero-length image $path"
@@ -217,20 +216,15 @@ if [[ "$NAS_TARGET" != /* && "$NAS_TARGET" == *:* ]]; then
 fi
 
 # Read back each file of the batch from the share and delete the local copy only if it matches:
-# same size; for files up to HASH_MAX_MB the same SHA-256 of the whole file; above that, the
-# same first and last 64 KiB. The NAS copy's pages are dropped from the Pi's cache first, so the
-# read goes to the NAS rather than to what this Pi just wrote. A file that fails stays on the
-# Pi, its bad NAS copy is removed (otherwise rsync would see the same size and time next run and
-# skip it), and the next run sends it again. $1 is rsync's exit code for the batch: a file that
+# same size, and for files up to HASH_MAX_MB the same SHA-256 of the whole file. The NAS copy's
+# pages are dropped from the Pi's cache first, so the read goes to the NAS rather than to what
+# this Pi just wrote. A file that fails stays on the Pi, its bad NAS copy is removed (otherwise
+# rsync would see the same size and time next run and skip it), and the next run sends it again. $1 is rsync's exit code for the batch: a file that
 # is simply absent after a partial failure (23/24) is already covered by the FAILED line.
 CONFIRMED=0
 KEPT=0
 drop_cache() { dd if="$1" iflag=nocache count=0 status=none 2>/dev/null || true; }
 sha_of() { local h; h="$(sha256sum < "$1" 2>/dev/null)" || h=unreadable; echo "${h%% *}"; }
-ends_match() {
-  cmp -s -n "$ENDS_BYTES" "$1" "$2" 2>/dev/null &&
-    cmp -s <(tail -c "$ENDS_BYTES" "$1" 2>/dev/null) <(tail -c "$ENDS_BYTES" "$2" 2>/dev/null)
-}
 readback_batch() {
   local p dst ls ns why
   while IFS= read -r -d '' p; do
@@ -249,8 +243,6 @@ readback_batch() {
       why="size $ls on the Pi, $ns on the NAS"
     elif (( HASH_MAX_MB > 0 && ls <= HASH_MAX_MB * 1048576 )); then
       [[ "$(sha_of "$p")" == "$(sha_of "$dst")" ]] || why="sha256 differs"
-    else
-      ends_match "$p" "$dst" || why="ends differ"
     fi
     if [[ -n "$why" ]]; then
       KEPT=$((KEPT + 1))

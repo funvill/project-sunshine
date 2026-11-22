@@ -37,16 +37,17 @@ fix_root_; inst; rc=$?
 check "exits 0" test "$rc" = 0
 U="$R/etc/systemd/system"
 check "capture service runs as the user" grep -qx 'User=tester' "$U/sunset-capture.service"
-check "capture service uses the user's home" grep -qx 'ExecStart=/home/tester/sunset/sunset-capture.sh' "$U/sunset-capture.service"
+check "capture service uses the user's home" grep -qx 'ExecStart=-/home/tester/sunset/sunset-capture.sh' "$U/sunset-capture.service"
+check "second camera's env file in the user's home" grep -qx 'ExecStart=-/home/tester/sunset/sunset-capture.sh --env /home/tester/sunset/sunset2.env' "$U/sunset-capture.service"
 check "env file path rewritten" grep -qx 'EnvironmentFile=-/home/tester/sunset/sunset.env' "$U/sunset-sync.service"
 check "no unit still says /home/pi" bash -c "! grep -l '/home/pi' '$U'/sunset-*.service '$U'/sunset-*.timer"
 check "no unit keeps User=pi" bash -c "! grep -l '^User=pi' '$U'/sunset-*.service"
-check "all seventeen units installed" test "$(ls "$U"/sunset-*.service "$U"/sunset-*.timer | wc -l | tr -d ' ')" = 17
+check "all eleven units installed" test "$(ls "$U"/sunset-*.service "$U"/sunset-*.timer | wc -l | tr -d ' ')" = 11
 check "ups unit installed for the user's home" grep -qx 'Environment=UPS_LOG_FILE=/home/tester/sunset/ups.log' "$U/sunset-ups.service"
 check "ups monitor runs as root (it reads /dev/hidraw)" bash -c "! grep -q '^User=' '$U/sunset-ups.service'"
 check "ups monitor not enabled without --ups" bash -c "! grep -q 'enable --now sunset-ups.service' '$STUB_CALLS'"
 check "a running ups monitor picks up the new script" grep -q 'systemctl try-restart sunset-ups.service' "$STUB_CALLS"
-check "second camera units installed for the user" grep -qx 'EnvironmentFile=/home/tester/sunset/sunset2.env' "$U/sunset-capture2.service"
+check "watchdogs enabled" grep -q 'systemctl enable --now sunset-guard.timer' "$STUB_CALLS"
 check "diag installed" test -x "$R/usr/local/bin/diag"
 check "LED rule installed" test -f "$R/etc/udev/rules.d/90-sunset-leds.rules"
 check "watchdog setting installed" test -f "$R/etc/systemd/system.conf.d/sunset-watchdog.conf"
@@ -64,9 +65,20 @@ check "try-restart comes after daemon-reload" test "${t:-0}" -gt "${r:-99}"
 section "install.sh --enable"
 fix_root_; inst --enable
 check "capture, sync and dense timers enabled" grep -q 'systemctl enable --now sunset-capture.timer sunset-sync.timer sunset-dense.timer' "$STUB_CALLS"
-check "no second camera without sunset2.env" bash -c "! grep -q 'sunset-capture2.timer' '$STUB_CALLS'"
-fix_root_; mkdir -p "$R/home/tester/sunset"; echo CAM_NAME=cm4city > "$R/home/tester/sunset/sunset2.env"; inst --enable
-check "second camera timers enabled with sunset2.env" grep -q 'systemctl enable --now sunset-capture2.timer sunset-dense2.timer' "$STUB_CALLS"
+check "no second-camera timers enabled" bash -c "! grep -q 'enable.*sunset-capture2.timer' '$STUB_CALLS'"
+
+section "install.sh: retires the units replaced in batch B"
+fix_root_; U="$R/etc/systemd/system"; mkdir -p "$U"
+for u in sunset-capture2.service sunset-capture2.timer sunset-dense2.service sunset-dense2.timer sunset-netwatch.service sunset-netwatch.timer sunset-camwatch.service sunset-camwatch.timer; do echo old > "$U/$u"; done
+inst; rc=$?
+check "exits 0" test "$rc" = 0
+for t in sunset-capture2 sunset-dense2 sunset-netwatch sunset-camwatch; do
+  check "$t.timer disabled and stopped" grep -qx "systemctl disable --now $t.timer" "$STUB_CALLS"
+  check "$t units removed" test ! -e "$U/$t.service" -a ! -e "$U/$t.timer"
+done
+check "removed before daemon-reload" test "$(grep -n 'disable --now sunset-camwatch.timer' "$STUB_CALLS" | cut -d: -f1)" -lt "$(grep -n 'daemon-reload' "$STUB_CALLS" | cut -d: -f1)"
+fix_root_; inst; rc=$?
+check "nothing to retire is fine" test "$rc" = 0
 
 section "install.sh --ups (issue #29)"
 fix_root_; inst --ups; rc=$?
@@ -75,11 +87,11 @@ check "ups monitor enabled and started" grep -q 'systemctl enable --now sunset-u
 check "--ups alone does not start capturing" bash -c "! grep -q 'enable --now sunset-capture.timer' '$STUB_CALLS'"
 
 section "install.sh: a missing unit file never empties the live one"
-fix_root_; inst; mkdir -p "$W/pi-copy"; cp -r "$SRC"/. "$W/pi-copy/"; rm "$W/pi-copy/systemd/sunset-capture2.service"
-live="$R/etc/systemd/system/sunset-capture2.service"; before="$(cat "$live")"
+fix_root_; inst; mkdir -p "$W/pi-copy"; cp -r "$SRC"/. "$W/pi-copy/"; rm "$W/pi-copy/systemd/sunset-dense.service"
+live="$R/etc/systemd/system/sunset-dense.service"; before="$(cat "$live")"
 ROOT="$R" bash "$W/pi-copy/install.sh" >"$W/install.out" 2>&1; rc=$?
 check "exits 1" test "$rc" = 1
-check "says which file is missing" grep -q 'missing .*sunset-capture2.service' "$W/install.out"
+check "says which file is missing" grep -q 'missing .*sunset-dense.service' "$W/install.out"
 check "live unit unchanged" test "$(cat "$live")" = "$before"
 check "no temp unit left" test -z "$(find "$R/etc/systemd/system" -name '.*.tmp')"
 

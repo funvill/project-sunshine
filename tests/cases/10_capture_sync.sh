@@ -2,7 +2,7 @@ section "capture: normal frame"
 fresh_env
 capture; rc=$?
 check "exits 0" test "$rc" = 0
-check "jpg+dng+json in UTC day dir" test "$(count 'wide_*Z.*')" = 3
+check "jpg+json in UTC day dir" test "$(count 'wide_*Z.*')" = 2
 check "path matches wide/YYYY/MM/DD/wide_TS" bash -c "find '$OUT_ROOT' -path '*/wide/20??/??/??/wide_20??????T??????Z.jpg' | grep -q ."
 check "no night frame in daylight" test "$(count '*_night.*')" = 0
 check "nothing left in .partial" test -z "$(find "$OUT_ROOT/.partial" -type f ! -name .last-error)"
@@ -11,7 +11,7 @@ check "log has ok line" grep -q ' ok$' "$LOG_FILE"
 section "capture: dark scene adds night frame"
 fresh_env; export STUB_LUX=1
 capture
-check "night jpg+dng+json" test "$(count '*_night.*')" = 3
+check "night jpg+json" test "$(count '*_night.*')" = 2
 check "night=1 logged" grep -q 'night=1' "$LOG_FILE"
 
 section "capture: camera missing"
@@ -47,11 +47,11 @@ old="$(frames | head -n1)"; touch -d '10 minutes ago' $(frames)
 mkdir -p "$OUT_ROOT/.partial"; echo x > "$OUT_ROOT/.partial/half.jpg"; touch -d '10 minutes ago' "$OUT_ROOT/.partial/half.jpg"
 sync_; rc=$?
 check "exits 0" test "$rc" = 0
-check "frames arrived on NAS" test "$(find "$W/nas" -type f | wc -l | tr -d ' ')" = 4
+check "frames arrived on NAS" test "$(find "$W/nas" -type f | wc -l | tr -d ' ')" = 3
 check "daily system.json arrived too" test -n "$(find "$W/nas" -name system.json)"
 check "local copies removed" test -z "$(frames)"
 check ".partial untouched" test -e "$OUT_ROOT/.partial/half.jpg"
-check "sync ok logged" grep -q 'sync ok files=4' "$SYNC_LOG_FILE"
+check "sync ok logged" grep -q 'sync ok files=3' "$SYNC_LOG_FILE"
 fresh_env; capture; sync_
 check "files under 2 min old are not synced" test "$(count '*.jpg')" = 1
 
@@ -59,10 +59,10 @@ section "sync: NAS down keeps everything"
 fresh_env; capture; touch -d '10 minutes ago' $(frames)
 export STUB_RSYNC=fail; sync_; rc=$?
 check "exits non-zero" test "$rc" != 0
-check "frames still local" test "$(count '*')" = 4
+check "frames still local" test "$(count '*')" = 3
 check "failure logged" grep -q 'sync FAILED' "$SYNC_LOG_FILE"
 export STUB_RSYNC=ok; sync_
-check "catches up when NAS returns" test "$(find "$W/nas" -type f | wc -l | tr -d ' ')" = 4
+check "catches up when NAS returns" test "$(find "$W/nas" -type f | wc -l | tr -d ' ')" = 3
 
 section "sync: first boot, no outbox yet"
 fresh_env

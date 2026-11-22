@@ -1,5 +1,5 @@
 [Unit]
-Description=Project Sunset network watchdog every 2 minutes
+Description=Project Sunset watchdogs every 2 minutes
 
 [Timer]
 OnBootSec=3min

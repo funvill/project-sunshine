@@ -72,14 +72,11 @@ result(cmd_ok, "every sensor command is 'sh /config/sunset/<script that exists>'
 result(all("command_timeout" in s and "scan_interval" in s for s in sensors.values()), "every sensor has a timeout and a scan interval")
 
 # Each camera has its own sensor of each kind. timelaps (wide) was retired on 2026-11-17 and its checks
-# removed. cm4city has frame age and health only: the NAS archive check and daily health jobs don't run
-# for it yet.
+# removed. The NAS archive check, daily health and daily video sensors were removed on 2026-11-22: those
+# jobs never ran, and Home Assistant's installed copy already left them out.
 for script in ("sunset_camera_health.sh", "sunset_frame_age.sh"):
     cams = [s["command"].split()[-1] for s in sensors.values() if script in s["command"]]
     result(sorted(cams) == ["cm4city", "cm4wide"], "%s has one sensor per camera (%s)" % (script, ",".join(cams)))
-for kind in ("verify", "health"):
-    cams = [s["command"].split()[3] for s in sensors.values() if "sunset_result.sh %s " % kind in s["command"]]
-    result(sorted(cams) == ["cm4wide"], "result %s has one sensor per camera" % kind)
 
 watched = set()
 for key, a in alerts.items():
@@ -121,6 +118,10 @@ result(auto["trigger"][0]["to"] == "idle" and auto["trigger"][0]["for"] == "12:0
 result(auto["action"][0]["service"] == "alert.turn_on", "re-arm calls alert.turn_on")
 
 result(main["input_number"]["sunset_min_free_gb"]["initial"] == 100, "free-space limit starts at 100 GB")
+result(sorted(sensors) == ["sensor.sunset_cm4_camera_health", "sensor.sunset_cm4_newest_frame_age",
+                           "sensor.sunset_cm4city_camera_health", "sensor.sunset_cm4city_newest_frame_age",
+                           "sensor.sunset_nas_free_space", "sensor.sunset_ups"],
+       "the command-line sensors are the installed set (frame age, health, NAS space, UPS)")
 
 # ---- Templates, if jinja2 is here ----
 try:
@@ -164,9 +165,7 @@ for value, want in (("100", True), ("349", True), ("350", False), ("5000", False
 result(truth(free, limit) is True, "NAS space low when the sensor does not exist yet")
 
 for entity, sensor in (("binary_sensor.sunset_cm4_camera_unhealthy", "sensor.sunset_cm4_camera_health"),
-                       ("binary_sensor.sunset_cm4city_camera_unhealthy", "sensor.sunset_cm4city_camera_health"),
-                       ("binary_sensor.sunset_cm4_archive_check_failed", "sensor.sunset_cm4_archive_check"),
-                       ("binary_sensor.sunset_cm4_daily_health_failed", "sensor.sunset_cm4_daily_health")):
+                       ("binary_sensor.sunset_cm4city_camera_unhealthy", "sensor.sunset_cm4city_camera_health")):
     for value, want in (("ok", False), ("undervoltage temp=80", True), ("stale", True), ("unreadable", True),
                         ("unknown", True), ("unavailable", True), ("OK", True), ("", True)):
         result(truth(entity, with_state(sensor, value)) is want, "%s with %r is %s" % (entity, value, want))
@@ -178,12 +177,6 @@ for value, want in (("mains 100", False), ("mains", False), ("battery 87", True)
 for value in ("battery 87", "battery", "unknown stale", "unknown"):
     text = render(alerts["sunset_ups_on_battery"]["message"], with_state("sensor.sunset_ups", value))
     result(("87%" in text) if value == "battery 87" else len(text) > 20, "UPS alert message for %r" % value)
-
-daily = "binary_sensor.sunset_daily_video_failed"
-for value, want in (("ok 2026-11-14 1d", False), ("skipped 2026-11-14 1d", True), ("failed 2026-11-14 1d", True),
-                    ("stale 2026-11-12 3d", True), ("unknown_status_published 2026-11-14 1d", True),
-                    ("unreadable 2026-11-14 1d", True), ("unknown", True), ("unavailable", True), ("", True)):
-    result(truth(daily, with_state("sensor.sunset_daily_video", value)) is want, "daily video with %r is %s" % (value, want))
 
 for entity, sensor in (("binary_sensor.sunset_cm4_frames_stale", "sensor.sunset_cm4_newest_frame_age"),
                        ("binary_sensor.sunset_cm4city_frames_stale", "sensor.sunset_cm4city_newest_frame_age")):

@@ -13,7 +13,7 @@ check "night kind" test "$(field "$night" "d['Capture']['kind']")" = night
 check "night records its settings" test "$(field "$night" "d['Capture']['settings']['shutter_us']")" = 4000000
 check "night records the lux that triggered it" test "$(field "$night" "d['Capture']['decision_lux']")" = 1
 check "image checksums" grep -Eq '"sha256": "[0-9a-f]{64}"' "$json"
-check "dng recorded" test "$(field "$json" "d['Capture']['files']['dng']['bytes']")" = 7
+check "only the JPEG in files" test "$(field "$json" "sorted(d['Capture']['files'])")" = "['jpg']"
 check "setup id" test "$(field "$json" "d['Capture']['setup_id']")" = pilot-1
 check "no site coordinates" bash -c "! grep -qF '49.25' '$json'"
 daily="$(dirname "$json")/system.json"

@@ -396,7 +396,6 @@ class CaptureBlock(Tree):
         super().setUp()
         self.d = os.path.join(self.root, "stage")
         write(self.d, "f.jpg", "jpegdata")
-        write(self.d, "f.dng", "dngdata")
         self.json_path = os.path.join(self.d, "f.json")
         write(self.d, "f.json", json.dumps({"ExposureTime": 1000, "Lux": 2.5,
                                             "FrameWallClock": 1793818803664766720,
@@ -405,7 +404,7 @@ class CaptureBlock(Tree):
     def args(self, **over):
         values = dict(kind="night", camera="wide", slot="20261104T190000Z", started=1793818800.25,
                       finished=1793818812.75, setup_id="pilot-1", system_id="abc123",
-                      settings=["shutter_us=8000000", "gain=4", "awbgains=1.6,1.8", "raw=1"],
+                      settings=["shutter_us=8000000", "gain=4", "awbgains=1.6,1.8"],
                       decision_lux="2.5", checksums=True)
         values.update(over)
         return values
@@ -427,21 +426,21 @@ class CaptureBlock(Tree):
         self.assertEqual(c["camera"], "wide")
         self.assertEqual(c["setup_id"], "pilot-1")
         self.assertEqual(c["system_id"], "abc123")
-        self.assertEqual(c["settings"], {"shutter_us": 8000000, "gain": 4, "awbgains": "1.6,1.8", "raw": 1})
+        self.assertEqual(c["settings"], {"shutter_us": 8000000, "gain": 4, "awbgains": "1.6,1.8"})
         self.assertEqual(c["decision_lux"], 2.5)
         self.assertIsInstance(c["schema_version"], int)
 
     def test_file_sizes_and_checksums_for_later_integrity_checks(self):
         files = self.block()["files"]
         self.assertEqual(files["jpg"], {"bytes": 8, "sha256": hashlib.sha256(b"jpegdata").hexdigest()})
-        self.assertEqual(files["dng"], {"bytes": 7, "sha256": hashlib.sha256(b"dngdata").hexdigest()})
 
     def test_checksums_can_be_turned_off_for_bursts(self):
         self.assertEqual(self.block(checksums=False)["files"]["jpg"], {"bytes": 8})
 
-    def test_missing_dng_is_simply_absent(self):
-        os.remove(os.path.join(self.d, "f.dng"))
-        self.assertNotIn("dng", self.block()["files"])
+    def test_only_the_jpeg_is_listed(self):
+        # No DNGs since 2026-11-16 (#38): a stray one beside the frame is not recorded.
+        write(self.d, "f.dng", "dngdata")
+        self.assertEqual(sorted(self.block()["files"]), ["jpg"])
 
 
 class Annotate(CaptureBlock):
@@ -485,7 +484,7 @@ class Annotate(CaptureBlock):
 
     def test_leaves_nothing_a_publish_glob_would_move(self):
         self.run_main()
-        self.assertEqual(sorted(os.listdir(self.d)), ["f.dng", "f.jpg", "f.json"])
+        self.assertEqual(sorted(os.listdir(self.d)), ["f.jpg", "f.json"])
 
     def test_regular_schedule_by_default(self):
         self.run_main()
@@ -552,9 +551,9 @@ class Annotate(CaptureBlock):
         finally:
             meta.system_block = real
         data = self.load()
-        self.assertEqual(data["Capture"]["files"]["dng"]["sha256"], hashlib.sha256(b"dngdata").hexdigest())
+        self.assertEqual(data["Capture"]["files"]["jpg"]["sha256"], hashlib.sha256(b"jpegdata").hexdigest())
         self.assertNotIn("System", data)
-        self.assertEqual(sorted(os.listdir(self.d)), ["f.dng", "f.jpg", "f.json"])
+        self.assertEqual(sorted(os.listdir(self.d)), ["f.jpg", "f.json"])
 
     def test_deadline_option(self):
         self.assertEqual(self.run_main("--deadline", "0"), 0)

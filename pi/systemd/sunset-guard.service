@@ -1,0 +1,11 @@
+[Unit]
+Description=Project Sunset watchdogs: resets a hung Wi-Fi dongle, reboots when the network or a camera stays down
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/home/pi/sunset/sunset.env
+Environment=NETWATCH_LOG=/home/pi/sunset/netwatch.log
+Environment=CAMWATCH_LOG=/home/pi/sunset/camwatch.log
+Environment=CAMWATCH_CAPTURE_LOG=/home/pi/sunset/capture.log
+ExecStart=/home/pi/sunset/sunset-guard.sh
+TimeoutStartSec=60

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Temporary diagnostics page: live camera view and Pi health.
+# Temporary diagnostics page: live camera view (aiming, focus), capture and sync state.
 #   diag          turn it on, or restart its 30-minute clock
 #   diag start <camera> [rotation]
 #                 start on another camera (its ID, e.g. i2c@1, or number), optionally rotated 180

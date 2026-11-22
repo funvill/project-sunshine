@@ -450,7 +450,7 @@ def file_entry(path, checksums, deadline=None):
 
 
 def sha256_file(path, deadline=None):
-    """Hex digest, or None if the deadline passed first (a 25 MB DNG on a stalled SD card)."""
+    """Hex digest, or None if the deadline passed first (a stalled SD card)."""
     digest = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
@@ -483,9 +483,8 @@ def capture_block(json_path, data, kind, camera, slot, started, finished, setup_
     if decision_lux not in (None, ""):
         block["decision_lux"] = parse_value(decision_lux)
     files = {}
-    for ext in ("jpg", "dng"):
-        if os.path.exists(base + "." + ext):
-            files[ext] = file_entry(base + "." + ext, checksums, deadline)
+    if os.path.exists(base + ".jpg"):
+        files["jpg"] = file_entry(base + ".jpg", checksums, deadline)
     block["files"] = files
     if checksums and any("sha256" not in entry for entry in files.values()):
         block["unavailable"] = ["sha256"]     # the deadline passed before every file was hashed

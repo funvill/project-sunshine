@@ -21,7 +21,7 @@ else
 
   section "real rsync: normal run"
   real_env
-  real_file "$d/a.jpg"; real_file "$d/a.json"; real_file "$d/a.dng"
+  real_file "$d/a.jpg"; real_file "$d/a.json"; real_file "$d/a_night.jpg"
   sync_; rc=$?
   check "exits 0" test "$rc" = 0
   check "all three arrived" test "$(find "$NAS_TARGET" -type f | wc -l | tr -d ' ')" = 3
