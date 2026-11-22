@@ -5,8 +5,8 @@
 if [[ -n "${STUB_LOCK_PROBE:-}" ]] && command -v flock >/dev/null 2>&1; then
   if flock -n "$STUB_LOCK_PROBE" true 2>/dev/null; then echo free; else echo held; fi >> "${STUB_CALLS:-/dev/null}.lock"
 fi
-# More modes: failev (only calls with --ev fail, for the sunset bracket), hang_term (ignores SIGTERM, like a child stuck in a driver call), nodng (exits 0
-# but writes no DNG), nojson (no metadata file), failonce (the first call fails at once, as when
+# More modes: failev (only calls with --ev fail, for the sunset bracket), hang_term (ignores SIGTERM, like a child stuck in a driver call),
+# nojson (no metadata file), failonce (the first call fails at once, as when
 # another program holds the camera; later calls work), orphan (works, but leaves a child running
 # that keeps every inherited file descriptor open for STUB_ORPHAN_S seconds).
 case "${STUB_RPICAM:-ok}" in
@@ -54,6 +54,6 @@ PY
   exit 0
 fi
 printf 'jpegdata' > "$out"
-[[ $raw == 1 && "${STUB_RPICAM:-ok}" != nodng ]] && printf 'dngdata' > "${out%.jpg}.dng"
+[[ $raw == 1 ]] && printf 'dngdata' > "${out%.jpg}.dng"   # only the experiment runner still asks for --raw
 [[ -n "$meta" && "${STUB_RPICAM:-ok}" != nojson ]] && printf '{\n    "ExposureTime": 1000,\n    "Lux": %s,\n    "AnalogueGain": 1.0\n}\n' "${STUB_LUX:-1000}" > "$meta"
 exit 0

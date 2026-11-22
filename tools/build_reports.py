@@ -39,6 +39,8 @@ REPO = HERE.parent
 spec = importlib.util.spec_from_file_location("sunset_daily", REPO / "nas" / "sunset-daily.py")
 daily = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(daily)
+sys.path.insert(0, str(HERE))
+import frames as framenames  # noqa: E402  (tools/frames.py)
 
 # BC has been on UTC-7 all year since before the first frame (no fall back on 2026-11-01), so a fixed
 # offset is right for every day of the project, and doesn't depend on the machine's tzdata (2026a and
@@ -66,7 +68,6 @@ POST_THRESHOLD = 60
 # The first local day of each camera's reports: cm4wide was on a desk, then upside down for its
 # first evening at the window (Nov 11), so its sky score that day means nothing.
 FIRST_DAY = {"cm4wide": dt.date(2026, 11, 12)}
-FRAME_RE = re.compile(r"^[A-Za-z0-9-]+_(\d{8}T\d{6}Z)(_ev0|_ev-2|_night)?\.jpg$")
 EVENT_RE = re.compile(r"^- \*\*Event(?: \([^)]*\))?: (.+?)\*\*")
 
 
@@ -105,7 +106,7 @@ def list_day(frames_dir, day):
     """(frames, counts by suffix). Frames are the regular and dense ones of the local day, oldest
     first, as daily.Frame with the whole JSON kept in .source's place as `meta`."""
     start, end = local_bounds(day)
-    frames, counts = [], {"_ev0": 0, "_ev-2": 0, "_night": 0}
+    frames, counts = [], {"ev0": 0, "ev-2": 0, "night": 0}
     d = start.date()
     while d <= end.date():
         folder = os.path.join(frames_dir, "%04d" % d.year, "%02d" % d.month, "%02d" % d.day)
@@ -114,14 +115,14 @@ def list_day(frames_dir, day):
         except OSError:
             names = []
         for name in names:
-            m = FRAME_RE.match(name)
-            if not m:
+            frame = framenames.parse(name)
+            if not frame:
                 continue
-            t = dt.datetime.strptime(m.group(1), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+            _, t, kind = frame
             if not start <= t < end:
                 continue
-            if m.group(2):
-                counts[m.group(2)] += 1
+            if kind:
+                counts[kind] += 1
                 continue
             path = os.path.join(folder, name)
             meta = read_json(os.path.splitext(path)[0] + ".json")
@@ -150,7 +151,7 @@ def weather_at(weather_root, sunset):
             m = re.match(r"^forecast_(\d{8}T\d{6}Z)\.json$", name)
             if not m:
                 continue
-            fetched = dt.datetime.strptime(m.group(1), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+            fetched = framenames.parse_time(m.group(1))
             if fetched <= sunset and sunset - fetched <= dt.timedelta(hours=FORECAST_MAX_AGE_H):
                 if best is None or fetched > best[0]:
                     best = (fetched, os.path.join(folder, name))
@@ -231,7 +232,7 @@ def frame_stats(frames, counts, day):
     return {"regular": len(regular), "expected": expected,
             "missing_slots": len([i for i in range(expected) if i not in taken]),
             "dense": len(frames) - len(regular),
-            "bracket_pairs": min(counts["_ev0"], counts["_ev-2"]), "night": counts["_night"],
+            "bracket_pairs": min(counts["ev0"], counts["ev-2"]), "night": counts["night"],
             "largest_gap_min": round(gap, 1)}
 
 

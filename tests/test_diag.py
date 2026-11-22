@@ -35,23 +35,6 @@ def write(path, text):
 
 
 
-class Throttled(unittest.TestCase):
-    def test_all_clear(self):
-        self.assertEqual(diag.parse_throttled("throttled=0x0"), {"now": [], "since_boot": []})
-
-    def test_current_undervoltage(self):
-        self.assertIn("undervoltage", diag.parse_throttled("throttled=0x1")["now"])
-
-    def test_past_throttling_is_not_reported_as_current(self):
-        r = diag.parse_throttled("throttled=0x40000")
-        self.assertEqual(r["now"], [])
-        self.assertIn("throttled", r["since_boot"])
-
-    def test_unreadable_output(self):
-        self.assertIsNone(diag.parse_throttled(None))
-        self.assertIsNone(diag.parse_throttled("garbage"))
-
-
 class CaptureLog(unittest.TestCase):
     LINES = [
         "2026-11-03T06:00:03Z cam=wide lux=1 soc=48'C disk=5% raw=1 night=0 sun=na ok",     # over 24 h ago
@@ -158,7 +141,6 @@ def healthy():
         "capture": {"timer_enabled": "enabled", "last_ok_age_s": 300, "problems_24h": 0},
         "outbox": {"oldest_age_s": 60},
         "nas": {"state": "mounted"},
-        "system": {"ntp_synced": True, "disk_used_pct": 5, "throttled": {"now": [], "since_boot": []}},
     }
 
 
@@ -189,18 +171,6 @@ class Warnings(unittest.TestCase):
         s = healthy(); s["outbox"]["oldest_age_s"] = 7200
         self.assertWarns_(s, "waiting")
 
-    def test_clock(self):
-        s = healthy(); s["system"]["ntp_synced"] = False
-        self.assertWarns_(s, "clock")
-
-    def test_disk(self):
-        s = healthy(); s["system"]["disk_used_pct"] = 85
-        self.assertWarns_(s, "disk")
-
-    def test_undervoltage_now(self):
-        s = healthy(); s["system"]["throttled"]["now"] = ["undervoltage"]
-        self.assertWarns_(s, "undervoltage")
-
     def test_nas_missing(self):
         s = healthy(); s["nas"]["state"] = "not mounted"
         self.assertWarns_(s, "NAS")
@@ -216,13 +186,12 @@ class CollectStatus(unittest.TestCase):
     def test_survives_every_command_failing(self):
         with tempfile.TemporaryDirectory() as d:
             s = self.collect(d)
-            self.assertIsNone(s["system"]["temp"])
+            self.assertIsNone(s["capture"]["timer_enabled"])
             self.assertIsInstance(s["warnings"], list)
             json.dumps(s)
 
     def test_reports_timer_and_commands(self):
-        answers = {"is-enabled": "enabled\n", "measure_temp": "temp=48.3'C\n", "get_throttled": "throttled=0x0\n",
-                   "NTPSynchronized": "yes\n", "-I": "192.0.2.5 \n"}
+        answers = {"is-enabled": "enabled\n"}
 
         def run(cmd):
             for k, v in answers.items():
@@ -233,9 +202,16 @@ class CollectStatus(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             s = self.collect(d, run)
             self.assertEqual(s["capture"]["timer_enabled"], "enabled")
-            self.assertEqual(s["system"]["temp"], "48.3'C")
-            self.assertTrue(s["system"]["ntp_synced"])
-            self.assertEqual(s["system"]["ips"], ["192.0.2.5"])
+
+    def test_no_health_panel(self):
+        # Temperature, power, disk and uptime are tools/camera_check.py's job (batch B, 2026-11-22):
+        # the page runs no vcgencmd and has no System section.
+        calls = []
+        with tempfile.TemporaryDirectory() as d:
+            s = self.collect(d, lambda cmd: calls.append(cmd))
+        self.assertNotIn("system", s)
+        self.assertFalse([c for c in calls if c[0] in ("vcgencmd", "timedatectl", "hostname")], calls)
+        self.assertNotIn('id="system"', diag.PAGE)
 
     def test_never_includes_site_coordinates(self):
         old = {k: os.environ.get(k) for k in ("SITE_LAT", "SITE_LON")}

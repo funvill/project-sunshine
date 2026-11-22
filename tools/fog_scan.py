@@ -5,7 +5,7 @@ A fogged or misted window still gives a fresh frame every 5 minutes, so the fram
 green. This tool measures the picture instead, with no AI. Measure first: nothing alerts from it yet.
 
 For each 5-minute frame (every --every minutes of them), on the skyline band (rows 35% to 85% of
-the height, as in register_day.py; the sky above has nothing sharp in it):
+the height; the sky above has nothing sharp in it):
 
     sharpness   variance of the Laplacian of log(1 + grey), at quarter size. The log makes a darker
                 frame (evening, cloud) read about as sharp as a bright one; fog, mist and a soft
@@ -39,7 +39,6 @@ import argparse
 import csv
 import json
 import os
-import re
 import statistics
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -47,8 +46,10 @@ from datetime import date, datetime, timedelta, timezone
 import cv2
 import numpy as np
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import frames as framenames  # noqa: E402  (tools/frames.py)
+
 UTC = timezone.utc
-FRAME = re.compile(r"^(?P<cam>[A-Za-z0-9]+)_(?P<t>\d{8}T\d{6}Z)\.jpg$")   # regular frames only: no _night, _ev*
 BAND = (0.35, 0.85)
 FIELDS = ["time", "sharpness", "contrast", "mean", "lux", "elevation", "azimuth", "setup_id"]
 CACHE_HEADER = "# every_min=%d fields=2"   # fields=2: azimuth added; older caches are read again
@@ -88,10 +89,10 @@ def list_frames(frames_dir, camera, first, last, every_min=5):
     while day <= last:
         folder = os.path.join(frames_dir, "%04d" % day.year, "%02d" % day.month, "%02d" % day.day)
         for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
-            m = FRAME.match(name)
-            if not m or m.group("cam") != camera:
+            frame = framenames.parse(name)
+            if not frame or frame[0] != camera or frame[2]:   # regular frames only: no _night, _ev*
                 continue
-            t = datetime.strptime(m.group("t"), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+            t = frame[1]
             if t.second > 30 or t.minute % every_min:      # dense frames are taken ~12 s or more into the minute
                 continue
             path = os.path.join(folder, name)

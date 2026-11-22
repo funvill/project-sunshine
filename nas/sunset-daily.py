@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Turn each day's frames into a vertical video, from dark to dark. Runs on the NAS.
+"""Turn each day's frames into a vertical video, from dark to dark. Runs on a PC,
+from tools/build_video.py (and tools/build_reports.py for the sky score).
 
 Python standard library plus ffmpeg. It only reads frames and writes to DAILY_DIR, so
 the Pi and the frame layout don't change. It posts nothing: publishing is a later step.
@@ -8,9 +9,9 @@ Each video ends on the first dark frame after sunset, and the next starts on the
 after that, so together they show every frame once. Night is a larger share of a winter
 video and day of a summer one.
 
-Run it on a schedule through the afternoon and evening. Each run does nothing until a
-frame shows the sky has gone dark after sunset, and a day is never done twice, because
-`DAILY_DIR/<local date>.json` is written last and marks that day as finished.
+A run does nothing until a frame shows the sky has gone dark after sunset, and a day is
+never done twice, because `DAILY_DIR/<local date>.json` is written last and marks that
+day as finished.
 
 Settings come from the environment; see nas/README.md.
 """

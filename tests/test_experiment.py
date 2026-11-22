@@ -23,7 +23,6 @@ def timer_spacing_s():
 
 
 SLOT = 1793775600  # 2026-11-04T07:00:00Z, a real capture slot
-SUNSET = 1793839520  # 2026-11-05T00:45:20Z
 
 
 class ClearToStart(unittest.TestCase):
@@ -86,65 +85,6 @@ class DenseFrameGuard(unittest.TestCase):
         self.assertTrue(exp.clear_to_start(self.MID_GAP + 30 + exp.DENSE_AFTER_S, est_s=3, period=30))
         self.assertFalse(exp.clear_to_start(self.MID_GAP + 20, est_s=10, period=30))   # runs into :30
 
-    def test_twilight_ladders_fit_the_minute_guard(self):
-        # The dusk and dawn ladders run inside the dense windows, so they must not be exempt.
-        for ms in exp.DUSK_MS:
-            self.assertLessEqual(exp.estimate_s(ms * 1000), exp.MINUTE_GUARD_MAX_S, ms)
-
-
-class SunsetPlan(unittest.TestCase):
-    """Experiment 19: real inputs for the options Steven preferred (E, B, D)."""
-
-    def minute(self, offset_s):
-        m = SUNSET + offset_s
-        return m - m % 60
-
-    def five(self, offset_s):
-        m = self.minute(offset_s)
-        return m - m % exp.SLOT_S + 60  # the minute after a regular slot
-
-    def plain(self, offset_s):
-        m = self.five(offset_s)
-        return m + 60
-
-    def labels(self, minute):
-        return [s.label for s in exp.sunset_shots(minute, SUNSET)]
-
-    def test_every_minute_shoots_both_halves_of_e_and_b(self):
-        self.assertEqual(self.labels(self.plain(-1200)), ["ev-2-daylight", "ev+0-daylight", "ev-2"])
-
-    def test_daylight_shots_use_the_daylight_preset(self):
-        for s in exp.sunset_shots(self.plain(600), SUNSET):
-            if s.label.endswith("-daylight"):
-                self.assertEqual(s.extra, ("--awb", "daylight"))
-            else:
-                self.assertEqual(s.extra, ())
-        evs = {s.label: s.ev for s in exp.sunset_shots(self.plain(600), SUNSET)}
-        self.assertEqual(evs, {"ev-2-daylight": -2, "ev+0-daylight": 0, "ev-2": -2})
-
-    def test_five_minute_extras_before_sunset(self):
-        self.assertEqual(self.labels(self.five(-1200))[3:], ["ev-3-daylight", "sun-100us", "sun-500us"])
-
-    def test_no_sun_shots_after_sunset(self):
-        self.assertEqual(self.labels(self.five(1200))[3:], ["ev-3-daylight"])
-
-    def test_skips_the_regular_capture_minute(self):
-        m = self.minute(-1200)
-        self.assertEqual(exp.sunset_shots(m - m % exp.SLOT_S, SUNSET), [])
-
-    def test_nothing_outside_the_window(self):
-        self.assertEqual(exp.sunset_shots(self.plain(-exp.SUNSET_WINDOW_S - 600), SUNSET), [])
-        self.assertEqual(exp.sunset_shots(self.plain(exp.SUNSET_WINDOW_S + 600), SUNSET), [])
-
-    def test_a_busy_minute_fits_between_dense_frames(self):
-        # Shots run back to back from the guard's start; each took about 2.5 s on Nov 8.
-        minute = self.five(-1200)
-        t = minute + exp.DENSE_AFTER_S
-        for s in exp.sunset_shots(minute, SUNSET):
-            self.assertTrue(exp.clear_to_start(t, exp.estimate_s(s.shutter_us)), s.label)
-            t += 2.5
-        self.assertLess(t, minute + 60)
-
 
 class EstimatedTime(unittest.TestCase):
     def test_long_exposures_take_several_frames(self):
@@ -152,106 +92,6 @@ class EstimatedTime(unittest.TestCase):
 
     def test_auto_exposure_has_a_floor(self):
         self.assertGreaterEqual(exp.estimate_s(None), 6)
-
-
-class DayPlan(unittest.TestCase):
-    def labels(self, t):
-        return [s.label for s in exp.day_shots(t, SUNSET)]
-
-    def test_skips_slot_minutes_because_the_real_capture_is_that_frame(self):
-        self.assertEqual(self.labels(SLOT + 11 * 3600 + exp.SLOT_S), [])
-
-    def test_ordinary_minute_is_one_auto_jpeg(self):
-        shots = exp.day_shots(SLOT + 11 * 3600 + 60, SUNSET)
-        self.assertEqual([s.label for s in shots], ["rate"])
-        self.assertFalse(shots[0].raw)
-
-    def test_sunset_window_brackets_each_minute(self):
-        minute = SUNSET - (SUNSET % 60) - 600 + 60
-        if minute % exp.SLOT_S == 0:
-            minute += 60
-        self.assertEqual(self.labels(minute)[:3], ["ev-2", "ev+0", "ev+2"])
-
-    def test_outside_the_sunset_window_has_no_brackets(self):
-        self.assertNotIn("ev-2", self.labels(SUNSET - 46 * 60))
-
-    def test_sunset_window_adds_metering_and_raw_every_five_minutes(self):
-        minute = SUNSET - (SUNSET % 300) - 600 + 60   # the minute after a regular capture
-        shots = exp.day_shots(minute, SUNSET)
-        labels = [s.label for s in shots]
-        self.assertIn("meter-average", labels)
-        self.assertIn("meter-spot", labels)
-        self.assertTrue(any(s.raw for s in shots))
-
-    def test_sun_ladder_runs_every_ten_minutes_in_the_afternoon(self):
-        minute = SUNSET - 3 * 3600
-        minute = minute - minute % 600 + 60   # the minute after a regular capture
-        self.assertIn("sun-100us", self.labels(minute))
-
-    def test_sun_ladder_continues_into_the_sunset_window_until_sunset(self):
-        # The sun is only in frame in the last ~30 minutes before sunset at the pilot-3 framing.
-        minute = SUNSET - (SUNSET % 300) - 600 + 60   # the minute after a regular capture
-        labels = self.labels(minute)
-        self.assertIn("sun-100us", labels)
-        self.assertIn("sun-500us", labels)
-
-    def test_sun_ladder_in_the_sunset_window_is_only_every_five_minutes(self):
-        minute = SUNSET - (SUNSET % 300) - 600 + 120   # two minutes after a regular capture
-        self.assertNotIn("sun-100us", self.labels(minute))
-
-    def test_no_sun_ladder_after_sunset(self):
-        minute = SUNSET - (SUNSET % 300) + 600 + 60
-        self.assertNotIn("sun-100us", self.labels(minute))
-
-    def test_every_minute_of_the_sunset_window_fits_in_the_gap_budget(self):
-        for t in range(SUNSET - SUNSET % 60 - 45 * 60, SUNSET + 45 * 60, 60):
-            total = sum(exp.estimate_s(s.shutter_us) for s in exp.day_shots(t, SUNSET))
-            self.assertLess(total, 180, f"minute {t} plans {total} s of shooting")
-
-
-class DuskLadder(unittest.TestCase):
-    """Experiment 13: fixed exposures through the gap before the night frame takes over."""
-
-    DUSK = ["dusk-250ms", "dusk-500ms", "dusk-1000ms", "dusk-2000ms", "dusk-4000ms"]
-
-    def minute(self, after_sunset_s):
-        t = SUNSET + after_sunset_s
-        return t - t % 60 + 60  # the first whole minute at or after that moment
-
-    def dusk_labels(self, t, sunset=SUNSET):
-        return [s.label for s in exp.day_shots(t, sunset) if s.label.startswith("dusk-")]
-
-    def test_takes_the_ladder_ten_minutes_after_sunset(self):
-        self.assertEqual(self.dusk_labels(self.minute(600)), self.DUSK)
-
-    def test_keeps_the_auto_frame_alongside_it(self):
-        labels = [s.label for s in exp.day_shots(self.minute(600), SUNSET)]
-        self.assertIn("ev+0", labels)
-
-    def test_repeats_every_five_minutes_only(self):
-        self.assertEqual(self.dusk_labels(self.minute(900)), self.DUSK)
-        self.assertEqual(self.dusk_labels(self.minute(660)), [])
-
-    def test_stops_after_fifty_minutes(self):
-        self.assertEqual(self.dusk_labels(self.minute(3000)), self.DUSK)
-        self.assertEqual(self.dusk_labels(self.minute(3300)), [])
-
-    def test_not_before_ten_minutes(self):
-        self.assertEqual(self.dusk_labels(self.minute(300)), [])
-
-    def test_a_ladder_that_lands_on_a_real_capture_moves_to_the_next_minute(self):
-        sunset = SLOT - 600  # so sunset + 10 min is exactly a capture slot
-        self.assertEqual(self.dusk_labels(SLOT, sunset), [])
-        self.assertEqual(self.dusk_labels(SLOT + 60, sunset), self.DUSK)
-
-    def test_gain_one_auto_white_balance_no_raw(self):
-        shots = [s for s in exp.day_shots(self.minute(600), SUNSET) if s.label.startswith("dusk-")]
-        self.assertEqual([s.shutter_us for s in shots], [250_000, 500_000, 1_000_000, 2_000_000, 4_000_000])
-        self.assertTrue(all(s.gain == 1 and s.awbgains is None and not s.raw for s in shots))
-
-    def test_fits_the_gap_budget_with_the_bracket(self):
-        total = sum(exp.estimate_s(s.shutter_us) for s in exp.day_shots(self.minute(600), SUNSET))
-        self.assertLess(total, 180)
 
 
 class Calibration(unittest.TestCase):
@@ -306,39 +146,18 @@ class Calibration(unittest.TestCase):
         self.assertEqual(slept.count(4), 29)      # between the 30 checkerboard frames only
 
     def test_the_command_line_knows_the_programs(self):
-        for program in ("dark", "flat", "checker"):
+        for program in ("moon", "dark", "flat", "checker"):
             args = exp.parse_args([program, "--run", "calib-1"])
             self.assertEqual(args.program, program)
         self.assertEqual(exp.parse_args(["dark", "--run", "x", "--count", "3"]).count, 3)
+        self.assertEqual(exp.parse_args(["moon", "--run", "x", "--until", "5"]).until, 5)
 
-
-class NightPlan(unittest.TestCase):
-    def setUp(self):
-        self.shots = exp.night_shots()
-        self.labels = [s.label for s in self.shots]
-
-    def test_ladder_covers_every_shutter_and_gain(self):
-        ladder = [s for s in self.shots if s.label.startswith("ladder-")]
-        self.assertEqual(len(ladder), 15)
-        self.assertTrue(all(s.raw for s in ladder))
-
-    def test_compares_the_current_colour_gains_with_measured_ones(self):
-        self.assertIn("colour-1.6-1.8", self.labels)
-        self.assertIn("colour-2.07-2.28", self.labels)
-        self.assertIn("colour-auto", self.labels)
-
-    def test_takes_a_stack_of_short_exposures(self):
-        self.assertEqual(sum(label.startswith("stack-") for label in self.labels), 8)
-
-
-class NightRatePlan(unittest.TestCase):
-    def test_ordinary_minute_is_one_fixed_exposure(self):
-        shots = exp.night_rate_shots(SLOT + 3600 + 60)
-        self.assertEqual([s.label for s in shots], ["rate-night"])
-        self.assertEqual((shots[0].shutter_us, shots[0].gain), (4_000_000, 1))
-
-    def test_skips_the_real_capture_minute(self):
-        self.assertEqual(exp.night_rate_shots(SLOT + exp.SLOT_S), [])
+    def test_the_answered_programs_are_gone(self):
+        # removed 2026-11-22: night settings chosen, the sunset bracket in production
+        import contextlib, io
+        for program in ("night", "settle", "day", "rate-night", "night-sweep", "sunset"):
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                exp.parse_args([program, "--run", "x"])
 
 
 class MoonPlan(unittest.TestCase):
@@ -367,132 +186,6 @@ class MoonPlan(unittest.TestCase):
     def test_labels_are_unique_within_a_minute(self):
         labels = [s.label for s in exp.moon_shots(SLOT + 60)]
         self.assertEqual(len(labels), len(set(labels)))
-
-
-class NightSweep(unittest.TestCase):
-    """Experiment 14: every exposure and setting worth trying at night."""
-
-    def setUp(self):
-        self.shots = exp.night_sweep_shots()
-        self.labels = [s.label for s in self.shots]
-
-    def test_covers_every_shutter_and_gain(self):
-        ladder = [s for s in self.shots if s.label.startswith("ladder-")]
-        self.assertEqual(len(ladder), 12 * 7)
-        for label in ("ladder-100ms-g1", "ladder-30000ms-g8", "ladder-6000ms-g1.5", "ladder-20000ms-g3"):
-            self.assertIn(label, self.labels)
-
-    def test_labels_are_unique_so_results_can_be_told_apart(self):
-        self.assertEqual(len(self.labels), len(set(self.labels)))
-
-    def test_colour_gains_are_a_grid_not_a_guess(self):
-        grid = [s for s in self.shots if s.label.startswith("gains-")]
-        self.assertGreaterEqual(len(grid), 30)
-        for label in ("gains-1.6-1.6", "gains-2.6-2.8", "gains-2.2-2.2", "gains-2.25-2.40"):
-            self.assertIn(label, self.labels)
-
-    def test_every_white_balance_mode(self):
-        for mode in ("auto", "incandescent", "tungsten", "fluorescent", "indoor", "daylight", "cloudy"):
-            self.assertIn("awb-" + mode, self.labels)
-
-    def test_denoise_modes_at_several_exposures(self):
-        for mode in ("auto", "off", "cdn_off", "cdn_fast", "cdn_hq"):
-            for seconds in (2, 4, 8):
-                self.assertIn(f"denoise-{mode}-{seconds}s", self.labels)
-
-    def test_processing_swept_across_a_range(self):
-        for option, values in (("contrast", ("0.6", "0.8", "1.0", "1.2", "1.4")),
-                               ("saturation", ("0.6", "0.8", "1.0", "1.2", "1.4")),
-                               ("sharpness", ("0", "0.5", "1.0", "1.5", "2.0"))):
-            for value in values:
-                self.assertIn(f"{option}-{value}", self.labels)
-
-    def test_a_tuned_shot_passes_its_setting_to_the_camera(self):
-        shot = next(s for s in self.shots if s.label == "awb-tungsten")
-        cmd = shot.command("/tmp/x")
-        self.assertEqual(cmd[cmd.index("--awb") + 1], "tungsten")
-        self.assertIn("--shutter", cmd)
-
-    def test_fits_inside_one_sweep_interval(self):
-        total = sum(exp.estimate_s(s.shutter_us) for s in self.shots)
-        self.assertLess(total, exp.NIGHT_SWEEP_EVERY_S)
-
-
-class SweepDue(unittest.TestCase):
-    def test_first_sweep_runs_straight_away(self):
-        self.assertTrue(exp.sweep_due(SLOT, None, 7200))
-
-    def test_waits_for_the_interval(self):
-        self.assertFalse(exp.sweep_due(SLOT + 7199, SLOT, 7200))
-        self.assertTrue(exp.sweep_due(SLOT + 7200, SLOT, 7200))
-
-
-class DaySweep(unittest.TestCase):
-    """Experiment 15: one set of settings an hour through the day."""
-
-    def minute_at(self, past_hour):
-        return SLOT + 5 * 3600 + past_hour * 60
-
-    def test_runs_once_an_hour(self):
-        labels = [s.label for s in exp.day_shots(self.minute_at(exp.DAY_SWEEP_MINUTE), SUNSET)]
-        self.assertIn("sweep-ev-1", labels)
-        self.assertNotIn("sweep-ev-1", [s.label for s in exp.day_shots(self.minute_at(exp.DAY_SWEEP_MINUTE + 1), SUNSET)])
-
-    def test_never_on_a_capture_minute(self):
-        self.assertNotEqual(exp.DAY_SWEEP_MINUTE * 60 % exp.SLOT_S, 0)
-
-    def test_fits_the_gap_budget(self):
-        total = sum(exp.estimate_s(s.shutter_us) for s in exp.day_sweep_shots())
-        self.assertLess(total, 180)
-
-
-class SunsetColour(unittest.TestCase):
-    """Experiment 16: auto white balance may be taking the orange out of a sunset."""
-
-    def test_every_five_minutes_tries_fixed_white_balance(self):
-        minute = SUNSET - (SUNSET % 300) - 600 + 60   # the minute after a regular capture
-        labels = [s.label for s in exp.day_shots(minute, SUNSET)]
-        for label in ("ev-1", "awb-daylight", "awb-cloudy"):
-            self.assertIn(label, labels)
-
-
-class Sunrise(unittest.TestCase):
-    """Experiment 16: the same treatment either side of sunrise."""
-
-    SUNRISE = SUNSET - 9 * 3600
-
-    def minute(self, offset_s):
-        t = self.SUNRISE + offset_s
-        return t - t % 60 + 60
-
-    def labels(self, t):
-        return [s.label for s in exp.day_shots(t, SUNSET, self.SUNRISE)]
-
-    def test_brackets_around_sunrise(self):
-        t = self.minute(300)
-        if t % exp.SLOT_S < 60:
-            t += 60
-        self.assertEqual(self.labels(t)[:3], ["ev-2", "ev+0", "ev+2"])
-
-    def test_no_brackets_when_no_sunrise_is_given(self):
-        t = self.minute(300)
-        if t % exp.SLOT_S < 60:
-            t += 60
-        self.assertNotIn("ev-2", [s.label for s in exp.day_shots(t, SUNSET)])
-
-    def test_dawn_ladder_before_sunrise(self):
-        t = self.minute(-600)
-        if t % exp.SLOT_S < 60:
-            t += 60
-        self.assertIn("dawn-1000ms", self.labels(t))
-
-    def test_no_dawn_ladder_after_sunrise(self):
-        self.assertEqual([x for x in self.labels(self.minute(600)) if x.startswith("dawn-")], [])
-
-    def test_every_minute_fits_the_gap_budget(self):
-        for t in range(self.minute(-60 * 60), self.minute(60 * 60), 60):
-            total = sum(exp.estimate_s(s.shutter_us) for s in exp.day_shots(t, SUNSET, self.SUNRISE))
-            self.assertLess(total, 180, f"minute {t} plans {total} s of shooting")
 
 
 class FailureGuard(unittest.TestCase):
@@ -559,8 +252,6 @@ class ShotCommand(unittest.TestCase):
         self.assertNotIn("project_sunshine/", exp.NAS_EXP_ROOT)
 
 
-
-
 class Rotation(unittest.TestCase):
     """An upside-down camera (ROTATION=180 in sunset.env) gets upright experiment shots too."""
 
@@ -573,7 +264,7 @@ class Rotation(unittest.TestCase):
             os.environ["ROTATION"] = self.saved
 
     def test_no_rotation_unless_set(self):
-        self.assertNotIn("--rotation", exp.Shot("x", ev=0).command("/tmp/x"))
+        self.assertNotIn("--rotation", exp.Shot("x").command("/tmp/x"))
 
     def test_rotation_180_rotates_every_shot(self):
         os.environ["ROTATION"] = "180"
@@ -772,7 +463,7 @@ class ShotWithTheCaptureLock(unittest.TestCase):
 
     def test_the_shot_runs_while_holding_the_lock_and_lets_go_after(self):
         calls = self.fake_subprocess(lambda cmd, kw: exp.subprocess.CompletedProcess(cmd, 0))
-        self.run_.take(exp.Shot("ev-2", ev=-2), max_wait_s=0)
+        self.run_.take(exp.Shot("x"), max_wait_s=0)
         self.assertTrue(calls[0][2], "lock not held during the shot")
         self.assertEqual(self.lock.events, ["acquire", "release"])
         self.assertEqual(self.rows()[0]["status"], "ok")
@@ -782,7 +473,7 @@ class ShotWithTheCaptureLock(unittest.TestCase):
         calls = self.fake_subprocess(lambda cmd, kw: self.fail("shot taken without the lock"))
         exp.time = __import__("types").SimpleNamespace(time=time.time, sleep=lambda s: None,
                                                        strftime=time.strftime, gmtime=time.gmtime)
-        self.run_.take(exp.Shot("ev-2", ev=-2), max_wait_s=0)
+        self.run_.take(exp.Shot("x"), max_wait_s=0)
         self.assertEqual(calls, [])
         self.assertEqual(self.rows()[0]["status"], "skipped: camera busy (capture lock)")
 
@@ -796,7 +487,7 @@ class ShotWithTheCaptureLock(unittest.TestCase):
         exp.time = __import__("types").SimpleNamespace(time=time.time, sleep=sleep,
                                                        strftime=time.strftime, gmtime=time.gmtime)
         self.fake_subprocess(lambda cmd, kw: exp.subprocess.CompletedProcess(cmd, 0))
-        self.run_.take(exp.Shot("ev-2", ev=-2), max_wait_s=30)
+        self.run_.take(exp.Shot("x"), max_wait_s=30)
         self.assertEqual(len(sleeps), 1)
         self.assertEqual(self.rows()[0]["status"], "ok")
 
@@ -804,7 +495,7 @@ class ShotWithTheCaptureLock(unittest.TestCase):
         def hang(cmd, kw):
             raise exp.subprocess.TimeoutExpired(cmd, kw["timeout"])
         calls = self.fake_subprocess(hang)
-        shot = exp.Shot("ev-2", ev=-2)
+        shot = exp.Shot("x")
         self.run_.take(shot, max_wait_s=0)
         self.assertEqual(calls[0][1]["timeout"], exp.estimate_s(None) + 1 + exp.SHOT_TIMEOUT_MARGIN_S)
         self.assertEqual(self.rows()[0]["status"], "failed timeout")
@@ -818,7 +509,7 @@ class ShotWithTheCaptureLock(unittest.TestCase):
         exp.Shot.command = lambda self_, base: [sys.executable, "-c", "import time; time.sleep(30)"]
         try:
             t0 = time.time()
-            self.run_.take(exp.Shot("ev-2", ev=-2), max_wait_s=0)
+            self.run_.take(exp.Shot("x"), max_wait_s=0)
             took = time.time() - t0
         finally:
             exp.shot_timeout_s, exp.Shot.command = saved_timeout, saved_command
@@ -952,7 +643,7 @@ class FinalUpload(unittest.TestCase):
         exp.run_program = lambda run, args: self.assertTrue(state["held"])
         exp.EXP_ROOT, exp.load_site_env = pathlib.Path(tmp.name), (lambda: None)
         try:
-            exp.main(["sunset", "--run", "t", "--sunset", "1", "--until", "1"])
+            exp.main(["moon", "--run", "t", "--until", "1"])
         finally:
             exp.experiment_lock, exp.run_program, exp.Run.upload, exp.EXP_ROOT, exp.load_site_env = saved
         self.assertIs(state["held_at_upload"], False)

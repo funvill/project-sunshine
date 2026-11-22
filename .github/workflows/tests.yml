@@ -31,28 +31,3 @@ jobs:
           age=$(env -i PATH="$bb" FRAME_ROOT="$RUNNER_TEMP/frames/wide" FRAME_AGE_NOW="$now" "$bb/sh" homeassistant/sunset_frame_age.sh)
           echo "age=$age"
           test "$age" = 30
-
-  daily-video-image:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build the NAS image
-        run: docker build -t sunset-daily:ci nas/
-      - name: Vancouver is UTC-7 all year in the image's tzdata
-        # BC stays on UTC-7 from Nov 2026 (tzdata 2026b on). The video's start time and overlay come
-        # from this tzdata, and test_daily.py takes its expected times from the same data, so it can't
-        # catch an old copy.
-        run: |
-          docker run --rm --entrypoint python3 sunset-daily:ci -c '
-          import datetime as d
-          from zoneinfo import ZoneInfo
-          for s in ("2026-11-17T16:00", "2027-01-15T16:00", "2027-07-01T16:00", "2031-12-21T16:00"):
-              t = d.datetime.fromisoformat(s).replace(tzinfo=d.timezone.utc).astimezone(ZoneInfo("America/Vancouver"))
-              assert t.utcoffset() == d.timedelta(hours=-7), (s, t.isoformat())
-          print("America/Vancouver is UTC-7 all year")'
-      - name: Run tests/test_daily.py inside the image
-        # The image's entrypoint is the job itself, so override it. The image provides python3 and ffmpeg.
-        run: |
-          docker run --rm --entrypoint python3 \
-            -v "$PWD":/repo -w /repo \
-            sunset-daily:ci tests/test_daily.py

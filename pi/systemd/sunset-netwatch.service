@@ -1,9 +1,0 @@
-[Unit]
-Description=Project Sunset network watchdog (resets a hung Wi-Fi dongle)
-
-[Service]
-Type=oneshot
-EnvironmentFile=-/home/pi/sunset/sunset.env
-Environment=NETWATCH_LOG=/home/pi/sunset/netwatch.log
-ExecStart=/home/pi/sunset/sunset-netwatch.sh
-TimeoutStartSec=60

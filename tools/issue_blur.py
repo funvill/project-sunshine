@@ -8,40 +8,36 @@ Each building gets a "Blurred for privacy" label, so nobody mistakes it for a ba
 The frame is resized to the posted width first, so a style looks the same at any size.
 
     python3 tools/issue_blur.py frame.jpg out.jpg [--width 1200] [--style 1]
-            [--crop x0 y0 x1 y1] [--setup ID | --json frame.json | --buildings buildings.json]
+            [--crop x0 y0 x1 y1] [--setup ID] [--json frame.json] [--config crop.json]
 
-The outlines must match the camera position the frame was taken at. The setup is read from
-Capture.setup_id in the frame's JSON (frame.json beside frame.jpg, or --json), or given with
---setup. A setup with no outlines here is refused rather than blurred in the wrong place: draw
-its outlines and add them to BUILDINGS, or pass --buildings.
+The boxes are the video's tower blur: the `blur` boxes of the calibration in the camera's crop
+config (nas/crop.<camera>.json, camera from the frame's name, or --config) whose `setup_id` is
+the frame's camera position. The setup is read from Capture.setup_id in the frame's JSON
+(frame.json beside frame.jpg, or --json), or given with --setup. A setup with no calibration, or
+one with no blur boxes, is refused rather than blurred in the wrong place: add its calibration
+to the crop config first. The strength is this tool's style, not the calibration's blur_sigma.
 
 Runs on a PC, not the Pi: it needs numpy, OpenCV and Pillow.
 """
 import argparse
 import json
 import os
+import sys
 
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-# Outlines of the nearby buildings in full-frame pixels (4056 x 3040), by SETUP_ID.
-# Redo these whenever the camera moves (SETUP_ID changes). Only pilot-3 has been drawn: pilot-4
-# (timelaps since 2026-11-12) and cm4-window-1 (the CM4) have none yet, so they are refused.
-BUILDINGS = {
-    "pilot-3": [
-        [(1180, 775), (1300, 765), (1535, 800), (1535, 2215), (1190, 2215)],  # left tower
-        [(1725, 425), (1990, 380), (2045, 370), (2060, 735), (2145, 735), (2135, 2395), (1735, 2395)],  # centre tower
-        [(3675, 925), (3780, 900), (3945, 905), (3960, 1395), (4056, 1395), (4056, 2220), (3685, 2220)],  # right tower
-        [(145, 1845), (400, 1845), (405, 2330), (145, 2330)],  # low tower, far left
-    ],
-}
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import frames as framenames  # noqa: E402  (tools/frames.py)
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LABEL = ("Blurred", "for privacy")
 FONTS = ("arialbd.ttf", "DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
 
 
 class SetupError(Exception):
-    """No outlines that are known to fit this frame."""
+    """No blur boxes that are known to fit this frame."""
 
 
 def frame_setup(frame_path, json_path=None):
@@ -49,7 +45,7 @@ def frame_setup(frame_path, json_path=None):
     None if there is no such file or it has no setup_id. A `json_path` that can't be read is an error."""
     path = json_path or os.path.splitext(frame_path)[0] + ".json"
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except FileNotFoundError:
         if json_path:
@@ -61,20 +57,47 @@ def frame_setup(frame_path, json_path=None):
     return capture.get("setup_id") if isinstance(capture, dict) else None
 
 
-def choose_outlines(setup_arg, json_setup, buildings=None):
-    """The polygons to blur. `buildings` (explicit outlines) wins; otherwise the setup, which
-    must agree between --setup and the frame's JSON and must have outlines in BUILDINGS."""
-    if buildings is not None:
-        return buildings
+def default_config(frame_path):
+    """nas/crop.<camera>.json for the camera in the frame's file name, or None if the name isn't a frame's."""
+    frame = framenames.parse(os.path.basename(frame_path))
+    return os.path.join(REPO, "nas", "crop.%s.json" % frame[0]) if frame else None
+
+
+def read_config(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            config = json.load(f)
+    except (OSError, ValueError) as e:
+        raise SetupError("can't read the crop config %s: %s" % (path, e))
+    calibrations = config.get("calibrations") if isinstance(config, dict) else None
+    if not isinstance(calibrations, list):
+        raise SetupError("%s has no calibrations list" % path)
+    return calibrations
+
+
+def choose_boxes(setup_arg, json_setup, calibrations):
+    """The calibration's blur boxes [x, y, w, h] (full-frame pixels) for the frame's setup, which
+    must agree between --setup and the frame's JSON and must have a calibration with boxes. With
+    two calibrations for one setup, the later one wins."""
     if setup_arg and json_setup and setup_arg != json_setup:
         raise SetupError("--setup %s but the frame's JSON says %s" % (setup_arg, json_setup))
     setup = setup_arg or json_setup
     if not setup:
-        raise SetupError("the frame has no JSON with Capture.setup_id: pass --setup, --json or --buildings")
-    if setup not in BUILDINGS:
-        raise SetupError("no building outlines for setup %r (outlines exist for: %s). Draw them and add "
-                         "them to BUILDINGS, or pass --buildings" % (setup, ", ".join(sorted(BUILDINGS))))
-    return BUILDINGS[setup]
+        raise SetupError("the frame has no JSON with Capture.setup_id: pass --setup or --json")
+    known = [c for c in calibrations if isinstance(c, dict) and c.get("setup_id")]
+    matches = [c for c in known if c["setup_id"] == setup]
+    if not matches:
+        raise SetupError("no calibration for setup %r (calibrations exist for: %s). Add one to the crop "
+                         "config first" % (setup, ", ".join(sorted({c["setup_id"] for c in known})) or "none"))
+    boxes = matches[-1].get("blur") or []
+    if not boxes:
+        raise SetupError("the calibration for setup %r has no blur boxes" % setup)
+    return boxes
+
+
+def box_outlines(boxes):
+    """[x, y, w, h] boxes as rectangle outlines [(x, y), ...], which the mask and label use."""
+    return [[(x, y), (x + w, y), (x + w, y + h), (x, y + h)] for x, y, w, h in boxes]
 
 
 def gaussian(img, sigma):
@@ -180,22 +203,21 @@ def main():
     ap.add_argument("--width", type=int, default=1200, help="posted width in pixels (default 1200)")
     ap.add_argument("--style", type=int, default=1, choices=sorted(STYLES), help="1 is the chosen style (default)")
     ap.add_argument("--crop", type=int, nargs=4, metavar=("X0", "Y0", "X1", "Y1"), help="full-frame pixels")
-    ap.add_argument("--setup", help="framing the outlines belong to (default: Capture.setup_id in the frame's JSON)")
+    ap.add_argument("--setup", help="camera position the frame was taken at (default: Capture.setup_id in the frame's JSON)")
     ap.add_argument("--json", help="the frame's JSON, if it isn't beside the frame")
-    ap.add_argument("--buildings", help="JSON list of polygons [[x, y], ...] in full-frame pixels, instead of --setup")
+    ap.add_argument("--config", help="the camera's crop config (default: nas/crop.<camera>.json, camera from the frame's name)")
     a = ap.parse_args()
     try:
-        buildings = None
-        if a.buildings:
-            with open(a.buildings) as f:
-                buildings = json.load(f)
-        polygons = choose_outlines(a.setup, None if buildings else frame_setup(a.frame, a.json), buildings)
+        config = a.config or default_config(a.frame)
+        if not config:
+            raise SetupError("can't tell the camera from the file name %s: pass --config" % os.path.basename(a.frame))
+        boxes = choose_boxes(a.setup, frame_setup(a.frame, a.json), read_config(config))
     except SetupError as e:
         raise SystemExit("issue_blur: %s" % e)
     frame = cv2.imread(a.frame)
     if frame is None:
         raise SystemExit("can't read " + a.frame)
-    out = blur_for_issue(frame, polygons, a.style, a.width, a.crop)
+    out = blur_for_issue(frame, box_outlines(boxes), a.style, a.width, a.crop)
     cv2.imwrite(a.out, out, [cv2.IMWRITE_JPEG_QUALITY, 88])
     print(os.path.abspath(a.out))
 

@@ -29,7 +29,7 @@ check "ok logged" grep -q 'sync ok files=3' "$SYNC_LOG_FILE"
 
 section "sync pacing: a file bigger than the size cap still goes, on its own"
 pace_env; export SYNC_BATCH_MB=1
-big_file "$d/huge.dng" '30 minutes ago' 1500
+big_file "$d/huge.jpg" '30 minutes ago' 1500
 big_file "$d/small.jpg" '20 minutes ago' 10
 sync_; rc=$?
 check "exits 0" test "$rc" = 0

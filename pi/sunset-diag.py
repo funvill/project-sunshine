@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Temporary diagnostics page for the Pi. Stdlib only. Started by the `diag` command."""
+"""Temporary diagnostics page for the Pi: live camera view for aiming and focus, capture and sync
+state. Stdlib only. Started by the `diag` command. The Pi's health (temperature, power, disk) is
+tools/camera_check.py's job, not this page's."""
 import calendar
 import json
 import os
 import re
-import shutil
 import signal
 import socket
 import subprocess
@@ -26,20 +27,6 @@ Config = namedtuple("Config", "out_root capture_log sync_log nas_target sun_scri
 # Estimates, to tune from pilot data.
 STALE_CAPTURE_S = 10 * 60      # one missed 5-minute slot, plus some slack
 STUCK_FRAMES_S = 60 * 60       # the sync normally clears a frame within about 7 minutes
-DISK_WARN_PCT = 85             # the capture script starts dropping DNGs here
-
-THROTTLE_BITS = {0: "undervoltage", 1: "frequency capped", 2: "throttled", 3: "soft temperature limit"}
-SINCE_BOOT_OFFSET = 16
-
-
-def parse_throttled(text):
-    """Decode `vcgencmd get_throttled` into what is wrong now and what has happened since boot."""
-    try:
-        value = int(text.strip().split("=", 1)[1], 16)
-    except (AttributeError, IndexError, ValueError):
-        return None
-    return {"now": [n for b, n in THROTTLE_BITS.items() if value >> b & 1],
-            "since_boot": [n for b, n in THROTTLE_BITS.items() if value >> (b + SINCE_BOOT_OFFSET) & 1]}
 
 
 def tail_lines(path, count, max_bytes=65536):
@@ -131,7 +118,7 @@ def nas_state(target, mountinfo):
 def find_warnings(status):
     """Plain-language problems to show at the top of the page."""
     out = []
-    cap, box, sysinfo = status["capture"], status["outbox"], status["system"]
+    cap, box = status["capture"], status["outbox"]
     if cap.get("timer_enabled") != "enabled":
         out.append("Capture timer is %s: the Pi is NOT capturing." % (cap.get("timer_enabled") or "unknown"))
     age = cap.get("last_ok_age_s")
@@ -144,15 +131,6 @@ def find_warnings(status):
         out.append("Frames have been waiting to sync for %d minutes." % (box["oldest_age_s"] // 60))
     if status["nas"].get("state") in ("not mounted", "not configured"):
         out.append("NAS share: %s." % status["nas"]["state"])
-    if sysinfo.get("ntp_synced") is False:
-        out.append("The clock is not synchronized.")
-    if (sysinfo.get("disk_used_pct") or 0) >= DISK_WARN_PCT:
-        out.append("The disk is %d%% full." % sysinfo["disk_used_pct"])
-    throttled = sysinfo.get("throttled") or {}
-    if throttled.get("now"):
-        out.append("Power or heat problem now: %s." % ", ".join(throttled["now"]))
-    if throttled.get("since_boot"):
-        out.append("Power or heat problem since boot: %s." % ", ".join(throttled["since_boot"]))
     return out
 
 
@@ -166,55 +144,12 @@ def run_command(cmd, timeout=5):
         return None
 
 
-def _disk_used_pct(path):
-    while path and not os.path.exists(path):
-        parent = os.path.dirname(path)
-        if parent == path:
-            return None
-        path = parent
-    try:
-        usage = shutil.disk_usage(path)
-    except OSError:
-        return None
-    return round(100 * usage.used / (usage.used + usage.free)) if usage.used + usage.free else None
-
-
 def _read_text(path):
     try:
         with open(path) as f:
             return f.read()
     except OSError:
         return ""
-
-
-def _mem_available_mb():
-    for line in _read_text("/proc/meminfo").splitlines():
-        if line.startswith("MemAvailable:"):
-            return int(line.split()[1]) // 1024
-    return None
-
-
-def _uptime_s():
-    try:
-        return int(float(_read_text("/proc/uptime").split()[0]))
-    except (IndexError, ValueError):
-        return None
-
-
-def _wifi_signal():
-    """Signal level in dBm from /proc/net/wireless, or None when not on Wi-Fi."""
-    lines = _read_text("/proc/net/wireless").splitlines()
-    try:
-        return float(lines[2].split()[3].rstrip("."))
-    except (IndexError, ValueError):
-        return None
-
-
-def _load():
-    try:
-        return round(os.getloadavg()[0], 2)
-    except (AttributeError, OSError):
-        return None
 
 
 def _stripped(text):
@@ -237,26 +172,12 @@ def collect_status(cfg, run, now):
     capture = summarize_capture_log(capture_lines, now)
     capture["timer_enabled"] = _stripped(run(["systemctl", "is-enabled", "sunset-capture.timer"]))
     capture["recent"] = capture_lines[-8:]
-    temp = _stripped(run(["vcgencmd", "measure_temp"]))
-    ntp = _stripped(run(["timedatectl", "show", "-p", "NTPSynchronized", "--value"]))
     status = {
-        "time_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
         "capture": capture,
         "outbox": summarize_outbox(cfg.out_root, now),
         "sync": {"recent": sync_lines},
         "nas": {"state": nas_state(cfg.nas_target, _read_text(cfg.mountinfo))},
         "sun": _sun(cfg, run),
-        "system": {
-            "temp": temp.split("=", 1)[-1] if temp else None,
-            "throttled": parse_throttled(run(["vcgencmd", "get_throttled"])),
-            "ntp_synced": None if ntp is None else ntp == "yes",
-            "disk_used_pct": _disk_used_pct(cfg.out_root),
-            "mem_available_mb": _mem_available_mb(),
-            "uptime_s": _uptime_s(),
-            "load_1m": _load(),
-            "wifi_dbm": _wifi_signal(),
-            "ips": (run(["hostname", "-I"]) or "").split(),
-        },
     }
     status["warnings"] = find_warnings(status)
     return status
@@ -830,7 +751,6 @@ pre { margin: 8px 0 0; font-size: 12px; line-height: 1.4; white-space: pre-wrap;
 <div class="grid">
   <section><h2>Capture</h2><dl id="capture"></dl><pre id="captureLog"></pre></section>
   <section><h2>Sync and NAS</h2><dl id="sync"></dl><pre id="syncLog"></pre></section>
-  <section><h2>System</h2><dl id="system"></dl></section>
 </div>
 </main>
 <script>
@@ -911,7 +831,7 @@ $("centre").onclick = function () {
 };
 
 function show(s) {
-  var c = s.capture, b = s.outbox, y = s.system, f = b.newest_frame || {};
+  var c = s.capture, b = s.outbox, f = b.newest_frame || {};
   showCamera(s.diag);
 
   var w = $("warnings");
@@ -938,20 +858,6 @@ function show(s) {
     ["Oldest waiting", b.oldest_age_s === null ? "none" : ago(b.oldest_age_s)]
   ]);
   $("syncLog").textContent = s.sync.recent.join("\n");
-
-  var t = y.throttled;
-  fill("system", [
-    ["Time (UTC)", s.time_utc],
-    ["Clock synced", y.ntp_synced === null ? null : (y.ntp_synced ? "yes" : "NO")],
-    ["Temperature", y.temp],
-    ["Power and heat", !t ? null : (t.now.length ? t.now.join(", ") : (t.since_boot.length ? "earlier: " + t.since_boot.join(", ") : "ok"))],
-    ["Disk used", y.disk_used_pct === null ? null : y.disk_used_pct + "%"],
-    ["Memory free", y.mem_available_mb === null ? null : y.mem_available_mb + " MB"],
-    ["Load", y.load_1m],
-    ["Uptime", y.uptime_s === null ? null : (y.uptime_s / 3600).toFixed(1) + " h"],
-    ["Wi-Fi signal", y.wifi_dbm === null ? "not on Wi-Fi" : y.wifi_dbm + " dBm"],
-    ["IP", y.ips.join(", ")]
-  ]);
 }
 
 function poll(path, then) {
@@ -1001,7 +907,7 @@ $("full").onclick = function () { setView("full"); };
 $("focus").onclick = function () { setView("focus"); };
 $("reset").onclick = function () { best = 0; trend = []; };
 
-// Same formula as sunset-focus.py, worked out here so the Pi does no extra work.
+// A sharpness score, worked out here in the browser so the Pi does no extra work.
 var best = 0, canvas = document.createElement("canvas"), ctx = canvas.getContext("2d", { willReadFrequently: true });
 function sharpness() {
   if (!cam.naturalWidth) return null;

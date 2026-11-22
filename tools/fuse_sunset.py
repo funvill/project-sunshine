@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """Merge the sunset bracket into fused frames for the daily video, with no AI.
 
-The `sunset` experiment shoots a pair every minute around sunset: ev+0 and ev-2, both with
-daylight white balance. Steven ranked the merge of the two best (2026-11-09): it keeps the sky
-the camera blows out, and holds the glow warm. This tool merges each pair (Mertens exposure
-fusion) and blends the result with the production frame of the same minute, so the video
-slides into and out of it instead of jumping:
+With BRACKET=1 in sunset.env (#10) the capture saves an ev+0 and an ev-2 shot beside every frame
+within 45 minutes of sunset (<cam>_<UTC>_ev0.jpg and _ev-2.jpg), with daylight white balance to
+10 minutes after sunset. Steven ranked the merge of the two best (2026-11-09): it keeps the sky the
+camera blows out, and holds the glow warm. This tool merges each pair (Mertens exposure fusion)
+and blends the result with the production frame of the same minute, so the video slides into and
+out of it instead of jumping:
 
-    full strength from 40 min before sunset to 5 min after, fading in over the first 5 minutes
-    of the run and out between +5 and +12 minutes, when daylight white balance turns the
-    sky brown as the city lights the cloud.
+    full strength through the bracket to 5 min after sunset, fading in over its first 5 minutes
+    and out between +5 and +12 minutes, when daylight white balance turns the sky brown as the
+    city lights the cloud.
 
 The output files are named like the production frames, so the video job swaps them in:
 
-    python tools/fuse_sunset.py --run <NAS>/project_sunshine_experiments/cm4-sunset-1 \
-        --frames <NAS>/project_sunshine/cm4wide --out fused/
-    FUSED_DIR=fused/ ...   (or tools/build_video.py --fuse-run cm4-sunset-1)
+    python tools/fuse_sunset.py --frames <NAS>/project_sunshine/cm4wide --date 2026-11-17 --out fused/
+    FUSED_DIR=fused/ ...   (or tools/build_video.py --fuse-production)
 
-Then each sunset minute is blended 1:2:1 with the minutes either side (blend_run), which calms
+Then each sunset minute is blended 1:2:1 with the minutes either side (blend_minutes), which calms
 thin cloud crossing the glow; --no-blend skips it, and --force redoes both.
 
 It changes nothing on the NAS. Needs numpy and OpenCV.
@@ -25,17 +25,18 @@ It changes nothing on the NAS. Needs numpy and OpenCV.
 import argparse
 import json
 import os
-import re
 import shutil
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import cv2
 import numpy as np
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import frames as framenames  # noqa: E402  (tools/frames.py)
+
 UTC = timezone.utc
-NAME = re.compile(r"^(?P<prefix>.+)_(?P<t>\d{8}T\d{6}Z)\.jpg$")
-FADE_IN_MIN = 5.0          # of the run, so the first fused frames are mostly the production frame
+FADE_IN_MIN = 5.0          # of the bracket, so the first fused frames are mostly the production frame
 FADE_OUT_START = 5.0       # minutes after sunset
 FADE_OUT_END = 12.0
 PAIR_SECONDS = 5           # the two shots of a minute are about 2 s apart
@@ -48,12 +49,11 @@ def clamp(x):
     return max(0.0, min(1.0, x))
 
 
-def fuse_weight(minutes_from_sunset, minutes_into_run, fade_out=(FADE_OUT_START, FADE_OUT_END)):
-    """How much of the fused frame to use: 1 is all of it, 0 is the production frame. fade_out:
-    the minutes after sunset over which the merge hands back to the production frame."""
-    start, end = fade_out
-    fade_in = clamp(minutes_into_run / FADE_IN_MIN)
-    out = clamp((end - minutes_from_sunset) / (end - start)) if end > start else float(minutes_from_sunset < end)
+def fuse_weight(minutes_from_sunset, minutes_into_bracket):
+    """How much of the fused frame to use: 1 is all of it, 0 is the production frame. It hands back
+    to the production frame from FADE_OUT_START to FADE_OUT_END minutes after sunset."""
+    fade_in = clamp(minutes_into_bracket / FADE_IN_MIN)
+    out = clamp((FADE_OUT_END - minutes_from_sunset) / (FADE_OUT_END - FADE_OUT_START))
     return min(fade_in, out)
 
 
@@ -68,20 +68,6 @@ def blend(production, fused, weight):
     return np.clip(mixed + 0.5, 0, 255).astype(np.uint8)
 
 
-def parse_time(text):
-    return datetime.strptime(text, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
-
-
-def list_run(run_dir, prefix):
-    """(time, path) of every `prefix_<UTC>.jpg` in the experiment folder, oldest first."""
-    found = []
-    for name in os.listdir(run_dir):
-        m = NAME.match(name)
-        if m and m.group("prefix") == prefix:
-            found.append((parse_time(m.group("t")), os.path.join(run_dir, name)))
-    return sorted(found)
-
-
 def nearest(items, t, seconds):
     best = min(items, key=lambda item: abs((item[0] - t).total_seconds()), default=None)
     return best if best and abs((best[0] - t).total_seconds()) <= seconds else None
@@ -93,27 +79,24 @@ def production_frames(frames_dir, start, end):
     while day <= end.date():
         folder = os.path.join(frames_dir, "%04d" % day.year, "%02d" % day.month, "%02d" % day.day)
         for name in (os.listdir(folder) if os.path.isdir(folder) else []):
-            m = NAME.match(name)
-            if m and "night" not in name and start <= parse_time(m.group("t")) <= end:
-                found.append((parse_time(m.group("t")), os.path.join(folder, name)))
+            frame = framenames.parse(name)
+            if frame and frame[2] is None and start <= frame[1] <= end:
+                found.append((frame[1], os.path.join(folder, name)))
         day += timedelta(days=1)
     return sorted(found)
-
-
-BRACKET_NAME = re.compile(r"^(?P<prefix>.+)_(?P<t>\d{8}T\d{6}Z)_(?P<ev>ev0|ev-2)\.jpg$")
 
 
 def production_bracket(frames_dir, start, end):
     """(brights, darks) from the production bracket (BRACKET=1 in sunset.env, #10): the ev+0 and ev-2
     shots saved beside each frame in the sunset window as <cam>_<UTC>_ev0.jpg and _ev-2.jpg, timed
-    by the frame they belong to. Same shape as list_run() gives for an experiment run."""
+    by the frame they belong to, each a list of (time, path), oldest first."""
     found, day = {"ev0": [], "ev-2": []}, start.date()
     while day <= end.date():
         folder = os.path.join(frames_dir, "%04d" % day.year, "%02d" % day.month, "%02d" % day.day)
         for name in (os.listdir(folder) if os.path.isdir(folder) else []):
-            m = BRACKET_NAME.match(name)
-            if m and start <= parse_time(m.group("t")) <= end:
-                found[m.group("ev")].append((parse_time(m.group("t")), os.path.join(folder, name)))
+            frame = framenames.parse(name)
+            if frame and frame[2] in found and start <= frame[1] <= end:
+                found[frame[2]].append((frame[1], os.path.join(folder, name)))
         day += timedelta(days=1)
     return sorted(found["ev0"]), sorted(found["ev-2"])
 
@@ -150,21 +133,16 @@ def apply_ratio(production, ratio):
     return np.clip(out + 0.5, 0, 255).astype(np.uint8)
 
 
-def fuse_run(run_dir, frames_dir, out_dir, bright_name="ev+0-daylight", dark_name="ev-2-daylight", force=False,
-             smooth=SMOOTH_FRAMES, brackets=None, fade_out=(FADE_OUT_START, FADE_OUT_END)):
-    """Write the fused frames. Returns how many were written.
+def fuse_bracket(brackets, frames_dir, out_dir, force=False, smooth=SMOOTH_FRAMES):
+    """Write the fused frames from brackets, the (brights, darks) of production_bracket(). Returns
+    how many were written.
 
-    The runner skips the first minute of every 5-minute slot, and sometimes loses a longer stretch,
-    so some production frames have no bracket of their own. Such a frame keeps its own picture and
-    takes the fusion's change in exposure and colour from the pairs either side (worked out as a
-    smooth gain and interpolated in time, or held from the one side within FILL_MAX_MIN). Repeating
-    or blending the neighbours' pictures instead froze the video, then jumped, at the sunset.
-
-    brackets: (brights, darks) from production_bracket(), used instead of the experiment run.
-    fade_out: minutes after sunset over which the merge fades back to the production frame (5 to
-    12 by default, for the experiment's daylight-only bracket, whose sky turns brown after about
-    +15). The production bracket switches to auto white balance at +10, so it can go later."""
-    brights, darks = brackets if brackets else (list_run(run_dir, bright_name), list_run(run_dir, dark_name))
+    A production frame can be missing its pair (a pair that failed, or a minute the camera was
+    busy). Such a frame keeps its own picture and takes the fusion's change in exposure and colour
+    from the pairs either side (worked out as a smooth gain and interpolated in time, or held from
+    the one side within FILL_MAX_MIN). Repeating or blending the neighbours' pictures instead froze
+    the video, then jumped, at the sunset (seen with the experiment bracket, Nov 12)."""
+    brights, darks = brackets
     if not brights or not darks:
         return 0
     first, last = brights[0][0], brights[-1][0]
@@ -215,7 +193,7 @@ def fuse_run(run_dir, frames_dir, out_dir, bright_name="ev+0-daylight", dark_nam
         m = minutes_from_sunset(path)
         if m is None or not first - timedelta(seconds=MATCH_SECONDS) <= t <= last + timedelta(seconds=MATCH_SECONDS):
             continue
-        weight = fuse_weight(m, (t - first).total_seconds() / 60.0, fade_out)
+        weight = fuse_weight(m, (t - first).total_seconds() / 60.0)
         out = os.path.join(out_dir, os.path.basename(path))
         if weight <= 0 or (os.path.exists(out) and not force):
             continue
@@ -285,7 +263,7 @@ def read_mark(mark):
         return None
 
 
-def blend_minutes(frames_dir, out_dir, start, end, weights=BLEND_WEIGHTS):
+def blend_minutes(frames_dir, out_dir, start, end):
     """Blend each frame between start and end with the frames either side, 1:2:1. Returns how many
     were written.
 
@@ -325,6 +303,7 @@ def blend_minutes(frames_dir, out_dir, start, end, weights=BLEND_WEIGHTS):
             sources.append((t, os.path.join(saved_dir, name)))
         else:
             sources.append((t, path))
+    weights = BLEND_WEIGHTS
     record = {"weights": list(weights), "complete": False, "saved": saved, "blended": []}
     write_mark(mark, record)
     reach = len(weights) // 2
@@ -357,7 +336,7 @@ def undo_blend(out_dir):
     """Undo the blend, finished or cut off part way: put back the fused frames it blended (from
     .preblend), remove the frames it made from production frames, then its mark. Safe to repeat if
     it is itself cut off. Marks from before 2026-11-15 saved no fused frames, so those are removed;
-    run fuse_run again (with force) before blending again."""
+    run fuse_bracket again (with force) before blending again."""
     mark = os.path.join(out_dir, BLEND_MARK)
     saved_dir = os.path.join(out_dir, BLEND_SAVED)
     record = read_mark(mark)
@@ -380,14 +359,13 @@ def undo_blend(out_dir):
     os.remove(mark)
 
 
-def blend_run(run_dir, frames_dir, out_dir, bright_name="ev+0-daylight", weights=BLEND_WEIGHTS, brights=None):
-    """blend_minutes() over the bracket (the experiment run's, or `brights` from production_bracket())
-    and BLEND_MARGIN_MIN either side."""
-    brights = brights if brights is not None else list_run(run_dir, bright_name)
+def blend_bracket(brights, frames_dir, out_dir):
+    """blend_minutes() over the bracket (`brights` from production_bracket()) and BLEND_MARGIN_MIN
+    either side."""
     if not brights:
         return 0
     margin = timedelta(minutes=BLEND_MARGIN_MIN)
-    return blend_minutes(frames_dir, out_dir, brights[0][0] - margin, brights[-1][0] + margin, weights)
+    return blend_minutes(frames_dir, out_dir, brights[0][0] - margin, brights[-1][0] + margin)
 
 
 GAMMA = 2.2                # JPEG to roughly linear light, for re-colouring
@@ -536,22 +514,30 @@ def clear_marks(out_dir):
             pass
 
 
+def evening_window(day, tz=None):
+    """UTC start and end of the local evening of `day` (noon to 06:00 the next morning), which holds
+    that day's sunset and its bracket on both sides of midnight UTC."""
+    from zoneinfo import ZoneInfo
+    tz = tz or ZoneInfo("America/Vancouver")
+    noon = datetime(day.year, day.month, day.day, 12, tzinfo=tz)
+    return noon.astimezone(timezone.utc), (noon + timedelta(hours=18)).astimezone(timezone.utc)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", required=True, help="experiment folder, e.g. .../project_sunshine_experiments/cm4-sunset-1")
     ap.add_argument("--frames", required=True, help="the camera's frame folder, holding YYYY/MM/DD/")
+    ap.add_argument("--date", required=True, help="the local date of the sunset, YYYY-MM-DD")
     ap.add_argument("--out", required=True, help="where the fused frames go")
-    ap.add_argument("--bright", default="ev+0-daylight")
-    ap.add_argument("--dark", default="ev-2-daylight")
     ap.add_argument("--force", action="store_true", help="redo frames that already exist")
     ap.add_argument("--no-blend", action="store_true", help="skip the 1:2:1 blend of each minute with its neighbours")
     args = ap.parse_args()
     if args.force:
         undo_blend(args.out)
-    made = fuse_run(args.run, args.frames, args.out, args.bright, args.dark, args.force)
+    brackets = production_bracket(args.frames, *evening_window(date.fromisoformat(args.date)))
+    made = fuse_bracket(brackets, args.frames, args.out, args.force)
     print("%d fused frames in %s" % (made, args.out))
     if not args.no_blend:
-        print("%d frames blended with their neighbours" % blend_run(args.run, args.frames, args.out, args.bright))
+        print("%d frames blended with their neighbours" % blend_bracket(brackets[0], args.frames, args.out))
     return 0 if made else 1
 
 

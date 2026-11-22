@@ -42,19 +42,19 @@ section "sync: zero-length images are skipped, kept, and logged once"
 fresh_env; share_target
 d="$OUT_ROOT/wide/2026/01/01"
 mkfile "$d/a.jpg" '10 minutes ago' ""        # empty JPEG: a power cut's leftover
-mkfile "$d/a.dng" '10 minutes ago' ""        # empty DNG
+mkfile "$d/a_night.jpg" '10 minutes ago' ""  # and its night frame
 mkfile "$d/a.json" '10 minutes ago' ""       # an empty JSON is not an image: ships as before
 mkfile "$d/b.jpg" '10 minutes ago' "pixels"
 sync_; rc=$?
 check "exits 0" test "$rc" = 0
 check "good image shipped" nas_has wide/2026/01/01/b.jpg
 check "empty JPEG not shipped" test ! -e "$W/nas/wide/2026/01/01/a.jpg"
-check "empty DNG not shipped" test ! -e "$W/nas/wide/2026/01/01/a.dng"
+check "empty night JPEG not shipped" test ! -e "$W/nas/wide/2026/01/01/a_night.jpg"
 check "empty JPEG kept on the card" test -e "$d/a.jpg"
-check "empty DNG kept on the card" test -e "$d/a.dng"
+check "empty night JPEG kept on the card" test -e "$d/a_night.jpg"
 check "non-image empty file ships" nas_has wide/2026/01/01/a.json
 check "skip logged for the JPEG" grep -q 'zero-length image ./wide/2026/01/01/a.jpg' "$SYNC_LOG_FILE"
-check "skip logged for the DNG" grep -q 'zero-length image ./wide/2026/01/01/a.dng' "$SYNC_LOG_FILE"
+check "skip logged for the night JPEG" grep -q 'zero-length image ./wide/2026/01/01/a_night.jpg' "$SYNC_LOG_FILE"
 check "sync ok counts only what shipped" grep -q 'sync ok files=2' "$SYNC_LOG_FILE"
 sync_
 check "second run does not log them again" test "$(grep -c 'zero-length image' "$SYNC_LOG_FILE")" = 2

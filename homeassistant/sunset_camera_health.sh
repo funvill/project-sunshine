@@ -4,7 +4,7 @@
 #   undervoltage freq_capped throttled soft_temp_limit   throttled bits 0-3 right now (vcgencmd get_throttled)
 #   temp=N       cpu_temp_c above TEMP_LIMIT_C (default 75; the Pi 3 B+ soft limit is 60, the hard one 80)
 #   outbox=N     more than OUTBOX_MAX (default 50) finished frames waiting on the Pi for the sync
-#   disk=N%      outbox disk use above DISK_MAX_PCT (default 80; the Pi drops DNGs at 85)
+#   disk=N%      outbox disk use above DISK_MAX_PCT (default 80; the Pi skips night frames at 95)
 #   small_jpeg=N the JPEG on the NAS is under JPEG_MIN_BYTES (default 400000, an estimate to tune)
 #   repeat_frame the newest JPEG has the same checksum as the one before it of its kind (a frozen readout)
 #   no_meta      the frame has no Capture or System block (sunset-meta.py failed)

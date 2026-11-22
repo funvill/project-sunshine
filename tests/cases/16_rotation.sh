@@ -1,6 +1,6 @@
 # needs: 15_dense
 # ROTATION: a camera mounted upside down. rpicam's --rotation 180 flips the sensor readout,
-# so the JPEG and the DNG both come out upright. Only 0 and 180 are possible.
+# so the JPEG comes out upright. Only 0 and 180 are possible.
 
 section "rotation: default is none"
 fresh_env; unset ROTATION; export STUB_LUX=1

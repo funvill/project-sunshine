@@ -17,7 +17,6 @@ NIGHT_LUX="${NIGHT_LUX:-5}"
 NIGHT_SHUTTER_US="${NIGHT_SHUTTER_US:-4000000}"
 NIGHT_GAIN="${NIGHT_GAIN:-1}"
 NIGHT_AWB="${NIGHT_AWB:-2.25,2.40}"
-SAVE_RAW="${SAVE_RAW:-1}"
 CAPTURE_TIMEOUT_S="${CAPTURE_TIMEOUT_S:-60}"
 SUN_PY="${SUN_PY:-$HERE/sunset-sun.py}"
 SLOW_CAPTURE_S="${SLOW_CAPTURE_S:-30}"           # estimate: WARN above this for the day shot
@@ -106,7 +105,7 @@ head_ "Storage and memory"
 if [[ -d "$OUT_ROOT" ]] || mkdir -p "$OUT_ROOT" 2>/dev/null; then
   read -r PCT FREE < <(df -Pm "$OUT_ROOT" | awk 'NR==2{gsub("%","",$5); print $5, $4}')
   if (( PCT >= 95 )); then fail "disk ${PCT}% full (${FREE} MB free)"
-  elif (( PCT >= 85 )); then warn "disk ${PCT}% full (${FREE} MB free): DNGs are already being dropped"
+  elif (( PCT >= 85 )); then warn "disk ${PCT}% full (${FREE} MB free): the capture skips the night frame at 95%"
   else pass "disk ${PCT}% full (${FREE} MB free)"; fi
 else
   fail "cannot create $OUT_ROOT"
@@ -167,11 +166,8 @@ elif (( CAM_BUSY )); then
 elif ! have rpicam-still || ! grep -qi imx477 <<<"$CAMLIST"; then
   head_ "Captures"; warn "skipped: no usable camera"
 else
-  RAW_ARGS=(); [[ "$SAVE_RAW" == "1" ]] && RAW_ARGS=(--raw)
-
-  if [[ "$SAVE_RAW" == "1" ]]; then FMT="JPEG + DNG"; else FMT="JPEG only"; fi
-  head_ "Capture time: day shot (AE, $FMT)"
-  if timed_shot "day shot" -n -t 3000 ${RAW_ARGS[@]+"${RAW_ARGS[@]}"} \
+  head_ "Capture time: day shot (AE, JPEG)"
+  if timed_shot "day shot" -n -t 3000 \
        --metadata "$TMP_ROOT/shot.json" --metadata-format json -o "$TMP_ROOT/shot.jpg"; then
     S="${CAP_S%.*}"
     if (( S >= CAPTURE_TIMEOUT_S )); then fail "day shot took ${CAP_S}s, at the ${CAPTURE_TIMEOUT_S}s timeout"
@@ -189,7 +185,7 @@ else
   fi
 
   head_ "Capture time: night shot (${NIGHT_SHUTTER_US} us, gain ${NIGHT_GAIN})"
-  if timed_shot "night shot" -n -t 1000 ${RAW_ARGS[@]+"${RAW_ARGS[@]}"} \
+  if timed_shot "night shot" -n -t 1000 \
        --shutter "$NIGHT_SHUTTER_US" --gain "$NIGHT_GAIN" --awbgains "$NIGHT_AWB" \
        --metadata "$TMP_ROOT/shot.json" --metadata-format json -o "$TMP_ROOT/shot.jpg"; then
     if (( ${CAP_S%.*} >= CAPTURE_TIMEOUT_S )); then fail "night shot took ${CAP_S}s, at the ${CAPTURE_TIMEOUT_S}s timeout"

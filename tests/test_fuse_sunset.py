@@ -35,7 +35,7 @@ class Weight(unittest.TestCase):
         self.assertEqual(self.fs.fuse_weight(-30, 20), 1.0)
         self.assertEqual(self.fs.fuse_weight(4.9, 60), 1.0)
 
-    def test_fades_in_over_the_first_five_minutes_of_the_run(self):
+    def test_fades_in_over_the_first_five_minutes_of_the_bracket(self):
         self.assertEqual(self.fs.fuse_weight(-45, 0), 0.0)
         self.assertAlmostEqual(self.fs.fuse_weight(-43, 2), 0.4)
 
@@ -44,11 +44,6 @@ class Weight(unittest.TestCase):
         self.assertAlmostEqual(self.fs.fuse_weight(8.5, 60), 0.5)
         self.assertEqual(self.fs.fuse_weight(12, 60), 0.0)
         self.assertEqual(self.fs.fuse_weight(30, 60), 0.0)
-
-    def test_the_fade_out_window_can_be_given(self):
-        self.assertEqual(self.fs.fuse_weight(20, 60, fade_out=(30, 40)), 1.0)
-        self.assertAlmostEqual(self.fs.fuse_weight(35, 60, fade_out=(30, 40)), 0.5)
-        self.assertEqual(self.fs.fuse_weight(40, 60, fade_out=(30, 40)), 0.0)
 
 
 @unittest.skipIf(np is None, "needs numpy and OpenCV")
@@ -85,35 +80,37 @@ class Run(unittest.TestCase):
         self.fs = load()
         self.dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.dir, True)
-        self.run_dir = os.path.join(self.dir, "run")
         self.frames = os.path.join(self.dir, "cam")
         self.out = os.path.join(self.dir, "out")
-        os.makedirs(self.run_dir)
 
     def stamp(self, t):
         return t.strftime("%Y%m%dT%H%M%SZ")
 
     def add_minute(self, t, bright=200, dark=60, prod=120, pair=True):
-        """An experiment pair 14 s and 12 s into minute `t` (unless pair is False), and the
-        production frame at `t`."""
-        for name, dt, value in (("ev+0-daylight", 14, bright), ("ev-2-daylight", 12, dark)):
-            if pair:
-                cv2.imwrite(os.path.join(self.run_dir, "%s_%s.jpg" % (name, self.stamp(t + timedelta(seconds=dt)))),
-                            np.full((8, 8, 3), value, np.uint8))
+        """The production frame at `t` and, unless pair is False, its bracket beside it (_ev0, _ev-2)."""
         folder = os.path.join(self.frames, t.strftime("%Y/%m/%d"))
         os.makedirs(folder, exist_ok=True)
         base = os.path.join(folder, "cam_%s" % self.stamp(t))
         cv2.imwrite(base + ".jpg", np.full((8, 8, 3), prod, np.uint8))
+        if pair:
+            cv2.imwrite(base + "_ev0.jpg", np.full((8, 8, 3), bright, np.uint8))
+            cv2.imwrite(base + "_ev-2.jpg", np.full((8, 8, 3), dark, np.uint8))
         minutes = (t - SUNSET).total_seconds() / 60
         with open(base + ".json", "w") as f:
             json.dump({"Sun": {"minutes_from_sunset": round(minutes, 1), "nearest_sunset_utc":
                                SUNSET.strftime("%Y-%m-%dT%H:%M:%SZ")}}, f)
 
+    def brackets(self):
+        return self.fs.production_bracket(self.frames, SUNSET - timedelta(hours=3), SUNSET + timedelta(hours=3))
+
+    def fuse_all(self, **kwargs):
+        return self.fs.fuse_bracket(self.brackets(), self.frames, self.out, **kwargs)
+
     def test_writes_one_fused_frame_per_minute_named_like_the_production_frame(self):
         start = SUNSET - timedelta(minutes=40)
         for i in range(10):
             self.add_minute(start + timedelta(minutes=i))
-        made = self.fs.fuse_run(self.run_dir, self.frames, self.out)
+        made = self.fuse_all()
         self.assertEqual(made, 9, "the very first minute has no weight, so the production frame stays")
         self.assertEqual(sorted(os.listdir(self.out)),
                          ["cam_%s.jpg" % self.stamp(start + timedelta(minutes=i)) for i in range(1, 10)])
@@ -122,7 +119,7 @@ class Run(unittest.TestCase):
         start = SUNSET - timedelta(minutes=45)
         for i in range(10):
             self.add_minute(start + timedelta(minutes=i), prod=60)   # fusing 200 and 60 gives 130
-        self.fs.fuse_run(self.run_dir, self.frames, self.out)
+        self.fuse_all()
         first = cv2.imread(os.path.join(self.out, "cam_%s.jpg" % self.stamp(start + timedelta(minutes=1)))).mean()
         later = cv2.imread(os.path.join(self.out, "cam_%s.jpg" % self.stamp(start + timedelta(minutes=8)))).mean()
         self.assertAlmostEqual(first, 60 + 0.2 * 70, delta=4, msg="a fifth of the way in")
@@ -132,12 +129,12 @@ class Run(unittest.TestCase):
         return cv2.imread(os.path.join(self.out, "cam_%s.jpg" % self.stamp(t))).mean()
 
     def test_a_minute_with_no_bracket_is_filled_from_the_minutes_either_side(self):
-        # The runner skips the first minute of every 5-minute slot, so one frame in five has no pair;
-        # left as the production frame it would flash against the fused ones around it.
+        # A frame whose pair failed, left as the production frame, would flash against the fused
+        # ones around it (the experiment runner skipped one minute in five, Nov 12).
         start = SUNSET - timedelta(minutes=30)
         for i in range(10):
             self.add_minute(start + timedelta(minutes=i), bright=200 if i < 5 else 220, pair=(i != 5))
-        self.fs.fuse_run(self.run_dir, self.frames, self.out)
+        self.fuse_all()
         before, gap, after = (self.out_mean(start + timedelta(minutes=i)) for i in (4, 5, 6))
         self.assertTrue(min(before, after) - 0.5 <= gap <= max(before, after) + 0.5, (before, gap, after))
         self.assertNotAlmostEqual(gap, 120, delta=5, msg="not the production frame")
@@ -146,7 +143,7 @@ class Run(unittest.TestCase):
         start = SUNSET - timedelta(minutes=30)
         for i in range(24):
             self.add_minute(start + timedelta(minutes=i), pair=(i < 3 or i > 19))
-        self.fs.fuse_run(self.run_dir, self.frames, self.out)
+        self.fuse_all()
         held = self.out_mean(start + timedelta(minutes=5))      # 3 minutes from the pair at 2, 15 from the next
         self.assertNotAlmostEqual(held, 120, delta=5)
         self.assertFalse(os.path.exists(os.path.join(self.out, "cam_%s.jpg" % self.stamp(start + timedelta(minutes=11)))),
@@ -157,7 +154,7 @@ class Run(unittest.TestCase):
         start = SUNSET - timedelta(minutes=30)
         for i in range(8):
             self.add_minute(start + timedelta(minutes=i), prod=100 + 4 * i, pair=(i != 3))
-        self.fs.fuse_run(self.run_dir, self.frames, self.out)
+        self.fuse_all()
         means = [self.out_mean(start + timedelta(minutes=i)) for i in (2, 3, 4)]
         self.assertGreater(means[1], means[0] + 1, "it still follows the rising production frames")
         self.assertGreater(means[2], means[1] + 1)
@@ -168,10 +165,10 @@ class Run(unittest.TestCase):
         start = SUNSET - timedelta(minutes=30)
         for i in range(16):
             self.add_minute(start + timedelta(minutes=i), bright=200 if i % 2 else 240)
-        self.fs.fuse_run(self.run_dir, self.frames, self.out, smooth=0)
+        self.fuse_all(smooth=0)
         raw = [self.out_mean(start + timedelta(minutes=i)) for i in range(8, 12)]
         shutil.rmtree(self.out)
-        self.fs.fuse_run(self.run_dir, self.frames, self.out)
+        self.fuse_all()
         smooth = [self.out_mean(start + timedelta(minutes=i)) for i in range(8, 12)]
         swing = lambda xs: max(abs(a - b) for a, b in zip(xs, xs[1:]))
         self.assertGreater(swing(raw), 15)
@@ -181,10 +178,10 @@ class Run(unittest.TestCase):
         start = SUNSET - timedelta(minutes=30)
         for i in range(16):
             self.add_minute(start + timedelta(minutes=i), bright=150 + 5 * i)
-        self.fs.fuse_run(self.run_dir, self.frames, self.out, smooth=0)
+        self.fuse_all(smooth=0)
         raw = [self.out_mean(start + timedelta(minutes=i)) for i in (7, 8, 9)]
         shutil.rmtree(self.out)
-        self.fs.fuse_run(self.run_dir, self.frames, self.out)
+        self.fuse_all()
         smooth = [self.out_mean(start + timedelta(minutes=i)) for i in (7, 8, 9)]
         for a, b in zip(raw, smooth):
             self.assertAlmostEqual(a, b, delta=2)
@@ -193,20 +190,10 @@ class Run(unittest.TestCase):
         late = SUNSET + timedelta(minutes=20)
         for i in range(3):
             self.add_minute(late + timedelta(minutes=i))
-        # a run that starts earlier, so the fade-in is not what zeroes these
+        # a bracket that starts earlier, so the fade-in is not what zeroes these
         self.add_minute(SUNSET - timedelta(minutes=45))
-        self.fs.fuse_run(self.run_dir, self.frames, self.out)
+        self.fuse_all()
         self.assertFalse(any(self.stamp(late) in n for n in os.listdir(self.out)))
-
-    def test_the_fade_out_can_be_moved_later(self):
-        # The production bracket switches to auto white balance 10 min after sunset, so it can be
-        # merged well past the 12 min that the experiment's daylight-only bracket allowed (Nov 16).
-        late = SUNSET + timedelta(minutes=20)
-        for i in range(3):
-            self.add_minute(late + timedelta(minutes=i), prod=60)
-        self.add_minute(SUNSET - timedelta(minutes=45))
-        self.fs.fuse_run(self.run_dir, self.frames, self.out, fade_out=(30.0, 40.0))
-        self.assertAlmostEqual(self.out_mean(late), 130, delta=4, msg="fully fused 20 min after sunset")
 
 
 @unittest.skipIf(np is None, "needs numpy and OpenCV")
@@ -214,7 +201,7 @@ class TemporalBlend(unittest.TestCase):
     """Thin cloud crossing the glow changes the sky by 10 to 19 a minute (Nov 12, both cameras),
     which reads as flicker. A 1:2:1 blend of each minute with the minutes either side calms it."""
 
-    stamp, add_minute, out_mean = Run.stamp, Run.add_minute, Run.out_mean
+    stamp, add_minute, out_mean, brackets = Run.stamp, Run.add_minute, Run.out_mean, Run.brackets
 
     def setUp(self):
         Run.setUp(self)
@@ -318,10 +305,10 @@ class TemporalBlend(unittest.TestCase):
         self.assertEqual(os.listdir(self.out), [name])
         self.assertAlmostEqual(self.out_mean(self.at(2)), 180, delta=1)
 
-    def test_blend_run_covers_the_bracket_and_15_minutes_either_side(self):
+    def test_blend_bracket_covers_the_bracket_and_15_minutes_either_side(self):
         for i in range(30):
             self.add_minute(self.start + timedelta(minutes=i), prod=100 + 20 * (i % 2), pair=(10 <= i < 15))
-        made = self.fs.blend_run(self.run_dir, self.frames, self.out)
+        made = self.fs.blend_bracket(self.brackets()[0], self.frames, self.out)
         self.assertEqual(made, 28, "minutes 1 to 28: the bracket (10 to 14) is well inside 15 minutes")
         with open(os.path.join(self.out, self.fs.BLEND_MARK)) as f:
             self.assertEqual(len(json.load(f)["blended"]), 28)
@@ -339,7 +326,7 @@ class Redo(unittest.TestCase):
     """tools/build_video.py --redo after a change to the merge code: the fused frames must be made
     again, not reused (it printed "fused 0 frames" and encoded the old pictures)."""
 
-    stamp, add_minute, out_mean = Run.stamp, Run.add_minute, Run.out_mean
+    stamp, add_minute, out_mean, brackets = Run.stamp, Run.add_minute, Run.out_mean, Run.brackets
 
     def setUp(self):
         Run.setUp(self)
@@ -349,7 +336,7 @@ class Redo(unittest.TestCase):
             self.add_minute(self.start + timedelta(minutes=i))
 
     def prepare(self, redo):
-        return self.bv.prepare_fused(self.fs, self.run_dir, self.frames, self.out, redo=redo)
+        return self.bv.prepare_fused(self.fs, self.brackets(), self.frames, self.out, redo=redo)
 
     def new_merge(self):
         return mock.patch.object(self.fs, "fuse", lambda bright, dark: np.full_like(bright, 250))
@@ -392,7 +379,7 @@ class Redo(unittest.TestCase):
         self.assertTrue(os.path.exists(other), "only frame-named JPEGs are removed")
 
     def test_no_blend_leaves_the_fused_frames_unblended(self):
-        made, blended = self.bv.prepare_fused(self.fs, self.run_dir, self.frames, self.out, blend=False)
+        made, blended = self.bv.prepare_fused(self.fs, self.brackets(), self.frames, self.out, blend=False)
         self.assertGreater(made, 0)
         self.assertEqual(blended, 0)
         self.assertFalse(os.path.exists(os.path.join(self.out, self.fs.BLEND_MARK)))
@@ -449,7 +436,7 @@ class ProductionBracket(unittest.TestCase):
     def test_fuses_the_production_pairs_into_frames_named_like_the_production_frame(self):
         for i in range(10):
             self.add_minute(self.start + timedelta(minutes=i))
-        made = self.fs.fuse_run(None, self.frames, self.out, brackets=self.fs.production_bracket(self.frames, *self.window()))
+        made = self.fs.fuse_bracket(self.fs.production_bracket(self.frames, *self.window()), self.frames, self.out)
         self.assertEqual(made, 9, "the very first minute has no weight, so the production frame stays")
         self.assertEqual(sorted(os.listdir(self.out)),
                          ["cam_%s.jpg" % self.stamp(self.start + timedelta(minutes=i)) for i in range(1, 10)])
@@ -457,33 +444,32 @@ class ProductionBracket(unittest.TestCase):
     def test_a_frame_without_its_pair_takes_the_change_from_its_neighbours(self):
         for i in range(10):
             self.add_minute(self.start + timedelta(minutes=i), pair=(i != 6))
-        made = self.fs.fuse_run(None, self.frames, self.out, brackets=self.fs.production_bracket(self.frames, *self.window()))
+        made = self.fs.fuse_bracket(self.fs.production_bracket(self.frames, *self.window()), self.frames, self.out)
         self.assertEqual(made, 9)
 
     def test_no_pairs_makes_nothing(self):
         self.add_minute(self.start, pair=False)
-        self.assertEqual(self.fs.fuse_run(None, self.frames, self.out, brackets=self.fs.production_bracket(self.frames, *self.window())), 0)
+        self.assertEqual(self.fs.fuse_bracket(self.fs.production_bracket(self.frames, *self.window()), self.frames, self.out), 0)
 
     def test_blend_covers_the_production_pairs(self):
         for i in range(10):
             self.add_minute(self.start + timedelta(minutes=i))
         brackets = self.fs.production_bracket(self.frames, *self.window())
-        self.fs.fuse_run(None, self.frames, self.out, brackets=brackets)
-        self.assertGreater(self.fs.blend_run(None, self.frames, self.out, brights=brackets[0]), 0)
+        self.fs.fuse_bracket(brackets, self.frames, self.out)
+        self.assertGreater(self.fs.blend_bracket(brackets[0], self.frames, self.out), 0)
 
     def test_build_video_uses_the_production_pairs(self):
         for i in range(10):
             self.add_minute(self.start + timedelta(minutes=i))
         bv = load_build_video()
-        made, blended = bv.prepare_fused(self.fs, None, self.frames, self.out,
-                                         brackets=self.fs.production_bracket(self.frames, *self.window()))
+        made, blended = bv.prepare_fused(self.fs, self.fs.production_bracket(self.frames, *self.window()),
+                                         self.frames, self.out)
         self.assertEqual(made, 9)
         self.assertGreater(blended, 0)
 
-    def test_build_video_window_is_the_local_evening(self):
+    def test_the_window_is_the_local_evening(self):
         from datetime import date
-        bv = load_build_video()
-        start, end = bv.evening_window(date(2026, 11, 12))
+        start, end = self.fs.evening_window(date(2026, 11, 12))
         self.assertLess(start, SUNSET - timedelta(hours=1))
         self.assertGreater(end, SUNSET + timedelta(hours=1))
         self.assertLess(end - start, timedelta(hours=24))
@@ -668,12 +654,6 @@ class VideoOptions(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.bv.parse_pair(bad)
 
-    def test_parse_blend_weights(self):
-        self.assertEqual(self.bv.parse_weights("1,2,3,2,1"), (1, 2, 3, 2, 1))
-        for bad in ("1,2", "1", "1,0,1", "x"):
-            with self.assertRaises(ValueError):
-                self.bv.parse_weights(bad)
-
     def test_redo_clears_the_marks_so_other_settings_can_be_used(self):
         fs = load()
         d = tempfile.mkdtemp()
@@ -683,25 +663,12 @@ class VideoOptions(unittest.TestCase):
         for m in (10, 20, 40):
             write_frame(frames, SUNSET + timedelta(minutes=m), (120, 160, 110))
         window = (SUNSET - timedelta(hours=1), SUNSET + timedelta(hours=2))
-        with mock.patch.object(fs, "fuse_run", lambda *a, **k: 0), mock.patch.object(fs, "blend_run", lambda *a, **k: 0):
-            self.bv.prepare_fused(fs, None, frames, out, window=window, dusk_gains=(2.2, 2.8))
+        none = ([], [])
+        with mock.patch.object(fs, "fuse_bracket", lambda *a, **k: 0), mock.patch.object(fs, "blend_bracket", lambda *a, **k: 0):
+            self.bv.prepare_fused(fs, none, frames, out, window=window, dusk_gains=(2.2, 2.8))
             with self.assertRaises(ValueError):
-                self.bv.prepare_fused(fs, None, frames, out, window=window, dusk_gains=(2.0, 2.0))
-            self.bv.prepare_fused(fs, None, frames, out, redo=True, window=window, dusk_gains=(2.0, 2.0))
-
-    def test_fuse_until_reaches_the_merge(self):
-        fs, seen = load(), {}
-        d = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, d, True)
-        with mock.patch.object(fs, "fuse_run", lambda *a, **k: seen.update(k) or 0), \
-                mock.patch.object(fs, "blend_run", lambda *a, **k: 0):
-            self.bv.prepare_fused(fs, None, d, os.path.join(d, "out"), fuse_until=(30.0, 40.0))
-        self.assertEqual(seen.get("fade_out"), (30.0, 40.0))
-        seen.clear()
-        with mock.patch.object(fs, "fuse_run", lambda *a, **k: seen.update(k) or 0), \
-                mock.patch.object(fs, "blend_run", lambda *a, **k: 0):
-            self.bv.prepare_fused(fs, None, d, os.path.join(d, "out"))
-        self.assertNotIn("fade_out", seen, "the default stays fuse_run's own")
+                self.bv.prepare_fused(fs, none, frames, out, window=window, dusk_gains=(2.0, 2.0))
+            self.bv.prepare_fused(fs, none, frames, out, redo=True, window=window, dusk_gains=(2.0, 2.0))
 
 
 if __name__ == "__main__":
