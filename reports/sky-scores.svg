@@ -1,22 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 804 260" width="804" height="260" role="img" aria-labelledby="t">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 964 260" width="964" height="260" role="img" aria-labelledby="t">
 <title id="t">Sky score at sunset, one bar a day</title>
 <style>:root{--bg:#fcfcfa;--ink:#1f1f1f;--muted:#666;--grid:#e3e3df;--bar:#d9822b;--line:#7a7a7a}@media (prefers-color-scheme: dark){:root{--bg:#1b1b1d;--ink:#ececec;--muted:#a0a0a0;--grid:#333336;--bar:#f0a050;--line:#9a9a9a}}text{font:11px system-ui,sans-serif;fill:var(--muted)}.h{fill:var(--ink);font-size:13px}.bar{fill:var(--bar)}.grid{stroke:var(--grid)}.thr{stroke:var(--line);stroke-dasharray:4 3}.none{fill:none;stroke:var(--muted)}</style>
 <rect width="100%" height="100%" fill="var(--bg)"/>
 <text class="h" x="44" y="18">Sky score at sunset (0 to 100), wide camera</text>
-<line class="grid" x1="44" x2="684" y1="220.0" y2="220.0"/>
+<line class="grid" x1="44" x2="844" y1="220.0" y2="220.0"/>
 <text x="38" y="224.0" text-anchor="end">0</text>
-<line class="grid" x1="44" x2="684" y1="182.8" y2="182.8"/>
+<line class="grid" x1="44" x2="844" y1="182.8" y2="182.8"/>
 <text x="38" y="186.8" text-anchor="end">20</text>
-<line class="grid" x1="44" x2="684" y1="145.6" y2="145.6"/>
+<line class="grid" x1="44" x2="844" y1="145.6" y2="145.6"/>
 <text x="38" y="149.6" text-anchor="end">40</text>
-<line class="grid" x1="44" x2="684" y1="108.4" y2="108.4"/>
+<line class="grid" x1="44" x2="844" y1="108.4" y2="108.4"/>
 <text x="38" y="112.4" text-anchor="end">60</text>
-<line class="grid" x1="44" x2="684" y1="71.2" y2="71.2"/>
+<line class="grid" x1="44" x2="844" y1="71.2" y2="71.2"/>
 <text x="38" y="75.2" text-anchor="end">80</text>
-<line class="grid" x1="44" x2="684" y1="34.0" y2="34.0"/>
+<line class="grid" x1="44" x2="844" y1="34.0" y2="34.0"/>
 <text x="38" y="38.0" text-anchor="end">100</text>
-<line class="thr" x1="44" x2="684" y1="108.4" y2="108.4"/>
-<text x="690" y="112.4">posting threshold 60</text>
+<line class="thr" x1="44" x2="844" y1="108.4" y2="108.4"/>
+<text x="850" y="112.4">posting threshold 60</text>
 <g><title>Nov 12: 48 (some colour)</title><rect class="bar" x="70.0" y="130.7" width="28" height="89.3" rx="2"/></g>
 <text x="84.0" y="236" text-anchor="middle">Nov 12</text>
 <g><title>Nov 13: 2 (grey)</title><rect class="bar" x="150.0" y="216.3" width="28" height="3.7" rx="2"/></g>
@@ -33,5 +33,9 @@
 <text x="564.0" y="236" text-anchor="middle">Nov 18</text>
 <g><title>Nov 19: 31 (some colour)</title><rect class="bar" x="630.0" y="162.3" width="28" height="57.7" rx="2"/></g>
 <text x="644.0" y="236" text-anchor="middle">Nov 19</text>
+<g><title>Nov 20: 23 (some colour)</title><rect class="bar" x="710.0" y="177.2" width="28" height="42.8" rx="2"/></g>
+<text x="724.0" y="236" text-anchor="middle">Nov 20</text>
+<g><title>Nov 21: 7 (grey)</title><rect class="bar" x="790.0" y="207.0" width="28" height="13.0" rx="2"/></g>
+<text x="804.0" y="236" text-anchor="middle">Nov 21</text>
 <text x="44" y="254">Circles: no score that day (no frames or too few around sunset).</text>
 </svg>
