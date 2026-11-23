@@ -1,5 +1,5 @@
 [Unit]
-Description=Project Sunset extra 1-a-minute frame around sunset, both cameras
+Description=Project Sunset extra 1-a-minute frame around sunset
 
 [Service]
 Type=oneshot
@@ -7,8 +7,5 @@ User=pi
 WorkingDirectory=/home/pi/sunset
 EnvironmentFile=-/home/pi/sunset/sunset.env
 # Exits at once outside the sunset window and on regular slot minutes.
-# The first camera, then the second, as in sunset-capture.service ("-": one failing doesn't stop the other).
-ExecStart=-/home/pi/sunset/sunset-capture.sh --dense
-ExecStart=-/home/pi/sunset/sunset-capture.sh --dense --env /home/pi/sunset/sunset2.env
-# 120 s per camera.
-TimeoutStartSec=240
+ExecStart=/home/pi/sunset/sunset-capture.sh --dense
+TimeoutStartSec=120

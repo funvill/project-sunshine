@@ -4,37 +4,18 @@
 #   sunset-capture.sh           the regular 5-minute frame (+ night frame when dark)
 #   sunset-capture.sh --dense   an extra 1-a-minute frame around sunset:
 #                               same auto exposure as the regular frame
-#   --env FILE                  first load FILE over the environment: the second camera's
-#                               sunset2.env over sunset.env. No FILE (or an empty one): exit 0.
 # Every frame is a JPEG and its JSON. No DNGs (decided 2026-11-16, #38).
 # With BRACKET=1, any frame near sunset is followed by an ev+0 and an ev-2 shot (<name>_ev0,
 # <name>_ev-2): the sunset bracket that tools/fuse_sunset.py merges (#10, option E).
 set -eEuo pipefail
 
 SCHEDULE=regular
-ENV_OVERLAY=""
-while (( $# )); do
-  case "$1" in
+for arg in "$@"; do
+  case "$arg" in
     --dense) SCHEDULE=dense ;;
-    --env) ENV_OVERLAY="${2:-}"; [[ -n "$ENV_OVERLAY" ]] || { echo "sunset-capture.sh: --env needs a file" >&2; exit 2; }; shift ;;
-    *) echo "sunset-capture.sh: unknown option $1" >&2; exit 2 ;;
+    *) echo "sunset-capture.sh: unknown option $arg" >&2; exit 2 ;;
   esac
-  shift
 done
-# The units run this once per camera; the second run loads sunset2.env over sunset.env, as a
-# second EnvironmentFile= line did. Read as systemd reads it (KEY=value, optional quotes), not
-# sourced. A Pi without that file has one camera: nothing to do.
-if [[ -n "$ENV_OVERLAY" ]]; then
-  [[ -s "$ENV_OVERLAY" ]] || exit 0
-  env_re='^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$'; dq_re='^"(.*)"$'; sq_re="^'(.*)'$"
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line%$'\r'}"
-    [[ "$line" =~ $env_re ]] || continue
-    k="${BASH_REMATCH[1]}"; v="${BASH_REMATCH[2]}"
-    if [[ "$v" =~ $dq_re || "$v" =~ $sq_re ]]; then v="${BASH_REMATCH[1]}"; fi
-    export "$k=$v"
-  done < "$ENV_OVERLAY"
-fi
 
 CAM_NAME="${CAM_NAME:-wide}"                     # wide | tight
 OUT_ROOT_GIVEN="${OUT_ROOT:+1}"                   # the caller chose the outbox (the offline tests do)
@@ -153,7 +134,7 @@ clock_synced() {
       log "WARN clock: cannot remove $CLOCK_TRUST_FILE, so not trusting it"
     elif [[ "$at" =~ ^[0-9]+$ ]] && (( now >= at && now - at <= CLOCK_TRUST_MAX_S )); then
       : > "$CLOCK_OK_FILE" 2>/dev/null || true
-      log "clock trusted without NTP: netwatch rebooted $(( now - at )) s ago with a synced clock"
+      log "clock trusted without NTP: the guard rebooted $(( now - at )) s ago with a synced clock"
       return 0
     else
       log "WARN clock: ignored netwatch's reboot marker (written at ${at:-?}, clock now $now)"

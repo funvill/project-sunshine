@@ -431,8 +431,9 @@ history before 2026-11-21.)
    `project_sunshine/cm4wide/` and `project_sunshine/cm4city/`.
 10. **Install.** `cd ~/sunset && sudo ./install.sh --cm4-two --ups`, with no `--enable`
     (`--ups` starts the UPS monitor; see "UPS" above). It writes the
-    cam0 and cam1 overlays (and changes nothing if step 4 already did). The capture and dense services take the second
-    camera too, right after the first, when `sunset2.env` exists (`sunset-capture.sh --env`).
+    cam0 and cam1 overlays (and changes nothing if step 4 already did). It installs the second camera's
+    units too (`sunset-capture2`, `sunset-dense2`, 30 s after the first camera's); with `--enable` it
+    starts them only if `sunset2.env` exists.
 11. **Low wear.** `sudo ./sunset-lowwear.sh`, then reboot.
 12. **Experiments and the weather units.** `mkdir -p ~/sunset/experiments` and copy the repo's
     `experiments/` into it (the unit runs `~/sunset/experiments/sunset-weather.py`). For the weather
@@ -452,10 +453,10 @@ history before 2026-11-21.)
     `tail ~/sunset/capture.log` and `sudo systemctl start sunset-sync.service`. The log line must
     end in `ok` and say `cam=cm4wide`, the
     JPEG must be upright, and the JSON `Capture.settings` must say `camera: i2c@0`. Check that the
-    frame is under `cm4wide/` on the NAS and not in `wide/`. The same run takes
-    the second camera right after: `cam=cm4city`, `camera: i2c@1`, frames under `cm4city/`.
+    frame is under `cm4wide/` on the NAS and not in `wide/`. Then `sudo systemctl start
+    sunset-capture2.service`: `cam=cm4city`, `camera: i2c@1`, frames under `cm4city/`.
 16. **Start.** `sudo systemctl enable --now sunset-capture.timer sunset-sync.timer
-    sunset-dense.timer sunset-guard.timer`, and check
+    sunset-dense.timer sunset-capture2.timer sunset-dense2.timer sunset-guard.timer`, and check
     `systemctl list-timers 'sunset*'`. Each camera has its own Home Assistant alerts (`cm4wide`,
     `cm4city`); they should stay quiet, or clear within about 75 minutes.
 17. **Record it.** Add a `changelog.md` entry: date, what was restored, the new `SETUP_ID` if it

@@ -1,5 +1,5 @@
 [Unit]
-Description=Project Sunset capture every 5 minutes (both cameras, one after the other)
+Description=Project Sunset capture every 5 minutes
 
 [Timer]
 OnCalendar=*:00/5
