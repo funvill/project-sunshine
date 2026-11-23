@@ -120,8 +120,23 @@ result(auto["action"][0]["service"] == "alert.turn_on", "re-arm calls alert.turn
 result(main["input_number"]["sunset_min_free_gb"]["initial"] == 100, "free-space limit starts at 100 GB")
 result(sorted(sensors) == ["sensor.sunset_cm4_camera_health", "sensor.sunset_cm4_newest_frame_age",
                            "sensor.sunset_cm4city_camera_health", "sensor.sunset_cm4city_newest_frame_age",
-                           "sensor.sunset_nas_free_space", "sensor.sunset_ups"],
-       "the command-line sensors are the installed set (frame age, health, NAS space, UPS)")
+                           "sensor.sunset_nas_free_space", "sensor.sunset_sky_score", "sensor.sunset_ups"],
+       "the command-line sensors are the installed set (frame age, health, NAS space, sky score, UPS)")
+
+# The good-sunset notification (2026-11-22).
+sky_sensor = sensors["sensor.sunset_sky_score"]
+result(sky_sensor.get("value_template") == "{{ value_json.state }}" and "date" in sky_sensor["json_attributes"]
+       and "sunset_utc" in sky_sensor["json_attributes"], "the sky sensor keeps the score as state, date and sunset as attributes")
+result(main["input_number"]["sunset_sky_post_threshold"]["initial"] == 60, "post threshold starts at 60 (Steven, 2026-11-16)")
+result("initial" not in main["input_text"]["sunset_sky_notified_date"], "the notified date is restored, not reset, on restart")
+good = [a for a in main["automation"] if a["id"] == "sunset_good_sunset_notify"]
+result(len(good) == 1, "one good-sunset automation")
+good = good[0]
+result(good["trigger"][0]["entity_id"] == "sensor.sunset_sky_score" and "to" not in good["trigger"][0],
+       "it runs on any change of the sky sensor, attributes included")
+services = [a.get("service") for a in good["action"]]
+result(services[0] == "input_text.set_value" and "persistent_notification.create" in services,
+       "it records the date first, then notifies")
 
 # ---- Templates, if jinja2 is here ----
 try:
@@ -182,6 +197,45 @@ for entity, sensor in (("binary_sensor.sunset_cm4_frames_stale", "sensor.sunset_
                        ("binary_sensor.sunset_cm4city_frames_stale", "sensor.sunset_cm4city_newest_frame_age")):
     for value, want in (("0", False), ("60", False), ("61", True), ("unknown", True), ("unavailable", True)):
         result(truth(entity, with_state(sensor, value)) is want, "%s with age %r is %s" % (entity, value, want))
+
+good_condition = good["condition"][0]["value_template"]
+
+
+def good_fires(score, day, sunset_utc, notified="", threshold="60.0", hours_since=1.0):
+    import datetime as _dt
+    utc = _dt.timezone.utc
+    sunset = _dt.datetime(2026, 11, 23, 0, 22, tzinfo=utc)
+    attrs = {"date": day, "sunset_utc": sunset_utc}
+    st = {"sensor.sunset_sky_score": score, "input_number.sunset_sky_post_threshold": threshold,
+          "input_text.sunset_sky_notified_date": notified}
+
+    def as_datetime(text):
+        try:
+            return _dt.datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=utc)
+        except (TypeError, ValueError):
+            return None
+
+    def is_number(value):
+        try:
+            float(value)
+            return True
+        except (TypeError, ValueError):
+            return False
+    text = env.from_string(good_condition).render(
+        states=lambda e: st.get(e, "unknown"), state_attr=lambda e, a: attrs.get(a), is_number=is_number,
+        as_datetime=as_datetime, now=lambda: sunset + _dt.timedelta(hours=hours_since)).strip()
+    return text == "True"
+
+
+S = "2026-11-23T00:22:00Z"
+for score, want in (("71", True), ("60", True), ("59", False), ("none", False), ("unknown", False), ("unavailable", False)):
+    result(good_fires(score, "2026-11-22", S) is want, "good sunset with score %r is %s" % (score, want))
+result(good_fires("71", "2026-11-22", S, notified="2026-11-22") is False, "an evening is announced once")
+result(good_fires("71", "2026-11-22", S, notified="2026-11-21") is True, "a new evening is announced")
+result(good_fires("71", "2026-11-22", S, hours_since=13) is False, "an old result after a restart is not announced")
+result(good_fires("71", "2026-11-22", None) is False, "no sunset time, no announcement")
+result(good_fires("45", "2026-11-22", S, threshold="40.0") is True, "the threshold can be lowered")
+result(good_fires("71", None, S) is False, "no date, no announcement")
 
 for key, a in alerts.items():
     for values in ({}, {"sensor.sunset_nas_free_space": "128", "sensor.sunset_cm4_newest_frame_age": "75"}):

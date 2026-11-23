@@ -51,7 +51,7 @@ is in [`changelog.md`](changelog.md).
 
 | Folder | What is in it | Read |
 |---|---|---|
-| `pi/` | Everything that runs on the Pi: capture, sync, metadata, sun position, self-test, diagnostics page with focus peaking, systemd units. Copied flat into `~/sunset` | [Pi setup guide](docs/setup.md) |
+| `pi/` | Everything that runs on the Pi: capture, sync, metadata, sun position, the evening sky score for the good-sunset notification, self-test, diagnostics page with focus peaking, systemd units. Copied flat into `~/sunset` | [Pi setup guide](docs/setup.md) |
 | `nas/` | The daily sunset video job (Python + ffmpeg), run on the PC by `tools/build_video.py`, and the camera's `crop.cm4wide.json` | [nas/README.md](nas/README.md) |
 | `experiments/` | Pilot experiment runner and the hourly weather log. Not part of production capture | Issue #3 |
 | `tools/` | PC-side helpers: `build_video.py` (builds one day's Instagram video and prints its sky score, no AI), `fuse_sunset.py` (merges the sunset bracket so the sunset isn't blown out), `issue_blur.py` (blurs the nearby buildings in images posted to issues), `fog_scan.py` (measures how clear each frame is, to find fog or condensation, #33; measuring only, no alert) | [Building a video](#building-a-days-video-by-hand) |

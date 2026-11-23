@@ -2,7 +2,7 @@
 # Home Assistant runs these under BusyBox sh, so each one is checked under the machine's `sh` and,
 # when there is one, under `busybox sh`: a native busybox, or the one in WSL on a Windows PC
 # (the repo is then read through /mnt/c). With neither, only the plain sh runs and that is said once.
-HA_VARS="FRAME_BASE FRAME_ROOT FRAME_AGE_NOW FUTURE_TOLERANCE_MIN DAILY_DIR RESULT_DIR FREE_PATH DF SUNSET_NOW TEMP_LIMIT_C OUTBOX_MAX DISK_MAX_PCT JPEG_MIN_BYTES MAX_AGE_DAYS"
+HA_VARS="SKY_BASE FRAME_BASE FRAME_ROOT FRAME_AGE_NOW FUTURE_TOLERANCE_MIN DAILY_DIR RESULT_DIR FREE_PATH DF SUNSET_NOW TEMP_LIMIT_C OUTBOX_MAX DISK_MAX_PCT JPEG_MIN_BYTES MAX_AGE_DAYS"
 HA_BB=""
 if [ -n "${HA_NO_BUSYBOX:-}" ]; then   # HA_NO_BUSYBOX=1: skip the (slow, 0.3 s a call) WSL variant
   :

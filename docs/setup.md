@@ -253,6 +253,23 @@ python3 sunset-sun.py sunset --json     # plus sunset azimuth
 python3 sunset-sun.py position          # sun now
 ```
 
+### Good-sunset notification (sky score)
+`sunset-sky.py` (from `sunset-sky.timer`, every 15 minutes) scores each sunset once, about 40 minutes
+after it: the same sky score as `tools/build_video.py` and the reports, on the `cm4wide` frames from
+35 minutes before to 25 after sunset, read from the share (and the outbox for any not synced yet). It
+writes `project_sunshine_sky/cm4wide/<local date>.json` next to `project_sunshine/` on the share, with
+the score, its label, the best frame's name and the sunset time, and no `Sun` block or coordinates.
+One line a day goes to `~/sunset/sky.log`. Home Assistant reads the newest file and notifies when the
+score reaches `input_number.sunset_sky_post_threshold` (60): see "Monitoring beyond frame age".
+It needs Pillow: `sudo apt-get install --no-install-recommends python3-pil` (16 packages, in
+`keep-packages.txt`). Settings, all optional: `SKY_FULL_WARM` (the camera's scale, 0.178 for
+`cm4wide`, as in `nas/crop.cm4wide.json`), `SKY_ROWS`, `SKY_DELAY_MIN`, `SKY_GIVE_UP_H`, `SKY_OUT`,
+`SKY_LOG`. Run it by hand with `python3 ~/sunset/sunset-sky.py` (with `sunset.env` loaded): it does
+nothing outside 40 minutes to 6 hours after a sunset, or when that evening already has its file.
+The Pi decodes with Pillow where the PC uses ffmpeg, and on Nov 12-22 it read 0 to 4 points higher
+than the PC's score for the same frames (most on colourful evenings), so a borderline day can notify
+at 60 and show 57 in `build_video.py`.
+
 ### Diagnostics page and focus
 Over SSH, type `diag`. It prints a link to a temporary page with a live camera view and the Pi's
 health: capture and sync status, clock, disk, memory, temperature and power.
@@ -361,6 +378,14 @@ The package alerts on:
   mains, 0 on the cells. The board reports no discharge current or run time, so there are no sensors
   for those. A value the frame lacks (stale UPS status) is a gap in the graph, never a 0. The same
   script also gives the CM4's CPU temperature from that frame (`sensor.sunset_cm4_cpu_temperature`);
+- **a good sunset** (2026-11-22): `sensor.sunset_sky_score` (`homeassistant/sunset_sky.sh cm4wide`)
+  is the newest evening's score from the Pi's `sunset-sky.py` ("none" when too few frames), with the
+  date, label, sunset time and best frame as attributes. The `sunset_good_sunset_notify` automation
+  sends one notification an evening when the score reaches `input_number.sunset_sky_post_threshold`
+  (60), and only within 12 hours of that sunset; `input_text.sunset_sky_notified_date` remembers the
+  last evening announced. It is an automation, not an alert, so the phone goes in its `action` list
+  (a commented example is there), not under `notifiers`. Lower the threshold briefly to test it on an
+  evening that has a score, then set it back. Building and posting the video stay by hand;
 
 Anything unknown counts as bad. Python 3 is needed in HA's container. An alert you acknowledge is
 re-armed after 12 hours.

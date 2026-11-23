@@ -48,7 +48,7 @@ if (( CM4_TWO )); then
 fi
 
 mkdir -p "$ROOT/etc/systemd/system" "$ROOT/usr/local/bin" "$ROOT/etc/udev/rules.d"
-for u in sunset-capture.service sunset-capture.timer sunset-sync.service sunset-sync.timer sunset-dense.service sunset-dense.timer sunset-diag.service sunset-kernlog.service sunset-guard.service sunset-guard.timer sunset-capture2.service sunset-capture2.timer sunset-dense2.service sunset-dense2.timer sunset-ups.service; do
+for u in sunset-capture.service sunset-capture.timer sunset-sync.service sunset-sync.timer sunset-dense.service sunset-dense.timer sunset-diag.service sunset-kernlog.service sunset-guard.service sunset-guard.timer sunset-capture2.service sunset-capture2.timer sunset-dense2.service sunset-dense2.timer sunset-sky.service sunset-sky.timer sunset-ups.service; do
   # Via a temp file: a plain "> unit" empties the live unit first, and a missing source then
   # leaves it empty (2026-11-20, the CM4's second camera lost one slot to that).
   [[ -f "$HERE/systemd/$u" ]] || { echo "missing $HERE/systemd/$u: copy all of pi/systemd first; nothing installed past this point" >&2; exit 1; }
@@ -83,6 +83,8 @@ if (( UPS )); then
 fi
 if (( ENABLE )); then
   systemctl enable --now sunset-capture.timer sunset-sync.timer sunset-dense.timer
+  # The evening's sky score for Home Assistant's good-sunset alert (needs python3-pil).
+  systemctl enable --now sunset-sky.timer
   # The second camera only where it is set up: its units need sunset2.env (no "-" on that line).
   if [[ -s "$ROOT$HOME_DIR/sunset/sunset2.env" ]]; then
     systemctl enable --now sunset-capture2.timer sunset-dense2.timer
