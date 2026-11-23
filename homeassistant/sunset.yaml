@@ -1,5 +1,5 @@
 # Project Sunset: alerts for frames reaching the NAS, the cameras' health, the NAS itself and the
-# CM4's UPS. Install steps are in docs/setup.md.
+# CM4's UPS, and a notification when the evening's sunset is worth posting. Install steps are in docs/setup.md.
 # This reads the NAS directly, so it still works if a Pi is dead.
 #
 # Conventions: one sensor per camera for each check; an unknown value (share unreadable, script
@@ -65,6 +65,17 @@ command_line:
       scan_interval: 120
       command_timeout: 30
 
+  # ---- The evening's sky score (2026-11-22): pi/sunset-sky.py scores each sunset about 40 minutes
+  # after it and writes it to the share; the automation at the end notifies when it is worth posting ----
+  - sensor:
+      name: Sunset sky score
+      unique_id: sunset_sky_score
+      command: "sh /config/sunset/sunset_sky.sh cm4wide"
+      value_template: "{{ value_json.state }}"
+      json_attributes: [date, label, sunset_utc, frames_scored, warm_sky_percent, best_frame]
+      scan_interval: 600
+      command_timeout: 30
+
 input_number:
   sunset_max_frame_age:
     name: Sunset max frame age
@@ -89,6 +100,24 @@ input_number:
     # up (a third camera). Other data on the share uses the same space.
     initial: 100
     mode: box
+
+  # A sunset scoring this or more is worth posting (Steven, 2026-11-16: 60). The score is provisional,
+  # tuned on few good sunsets, so expect to change this.
+  sunset_sky_post_threshold:
+    name: Sunset sky score to post
+    icon: mdi:weather-sunset
+    min: 1
+    max: 100
+    step: 1
+    initial: 60
+    mode: box
+
+# The date of the last good-sunset notification, so an evening is announced once, not again after a
+# restart. No initial: Home Assistant restores it.
+input_text:
+  sunset_sky_notified_date:
+    name: Sunset sky notified date
+    max: 10
 
 template:
   - binary_sensor:
@@ -340,3 +369,42 @@ automation:
       - service: alert.turn_on
         target:
           entity_id: "{{ trigger.entity_id }}"
+
+  # A good sunset (2026-11-22): once an evening, when the sky score reaches the threshold and the
+  # sunset was less than 12 hours ago (an old result after a restart says nothing about tonight).
+  # Building and posting the video stay by hand (README: building a day's video).
+  - id: sunset_good_sunset_notify
+    alias: Project Sunset good sunset
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: sensor.sunset_sky_score
+    condition:
+      - condition: template
+        value_template: >
+          {% set score = states('sensor.sunset_sky_score') %}
+          {% set day = state_attr('sensor.sunset_sky_score', 'date') %}
+          {% set sunset = as_datetime(state_attr('sensor.sunset_sky_score', 'sunset_utc') or '') %}
+          {{ is_number(score) and score | float >= states('input_number.sunset_sky_post_threshold') | float(60)
+             and day is string and day != states('input_text.sunset_sky_notified_date')
+             and sunset is not none and (now() - sunset).total_seconds() < 43200 }}
+    action:
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.sunset_sky_notified_date
+        data:
+          value: "{{ state_attr('sensor.sunset_sky_score', 'date') }}"
+      - service: persistent_notification.create
+        data:
+          notification_id: sunset_good_sunset
+          title: "Good sunset: {{ states('sensor.sunset_sky_score') }}"
+          message: >
+            {{ state_attr('sensor.sunset_sky_score', 'date') }} scored {{ states('sensor.sunset_sky_score') }}
+            ({{ state_attr('sensor.sunset_sky_score', 'label') }}), at or above
+            {{ states('input_number.sunset_sky_post_threshold') | int(60) }}. Worth an Instagram post:
+            build the video with tools/build_video.py for that date.
+      # Add your phone here so it reaches you, for example:
+      # - service: notify.mobile_app_your_phone
+      #   data:
+      #     title: "Good sunset: {{ states('sensor.sunset_sky_score') }}"
+      #     message: "{{ state_attr('sensor.sunset_sky_score', 'date') }} is worth posting."

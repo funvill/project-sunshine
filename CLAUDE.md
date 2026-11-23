@@ -146,6 +146,11 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
 - **Posting:** only days scoring **60** or more (Steven, kept 2026-11-20). **Steven uploads by hand** to his
   account, so there is no publisher. Public posts are fine with the towers blurred and no location tag;
   captions name the city only. **ToDo: open-source-licensed music.**
+- **Good-sunset notification (2026-11-22):** `pi/sunset-sky.py` (`sunset-sky.timer`) scores each sunset
+  on the Pi about 40 min after it, with the same maths (Pillow instead of ffmpeg for the shrink), and
+  writes `project_sunshine_sky/cm4wide/<date>.json` to the share; Home Assistant (`sunset_sky.sh`,
+  `sensor.sunset_sky_score`) notifies once an evening at the threshold
+  (`input_number.sunset_sky_post_threshold`, 60). That is the cue to build the video and upload it.
 - **Before anything posts:** the sunset flicker. It is real cloud crossing the glow (same minutes on both
   cameras), not exposure; the 1:2:1 blend roughly halves it. Steven to judge. Also: recheck the tower blur
   boxes and the calibration on a clear sunset, and copy `crop.cm4wide.json` to the NAS.

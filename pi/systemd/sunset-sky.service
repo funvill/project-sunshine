@@ -1,0 +1,14 @@
+[Unit]
+Description=Project Sunset sky score of the evening's sunset, for Home Assistant's good-sunset alert
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+EnvironmentFile=-/home/pi/sunset/sunset.env
+ExecStart=/usr/bin/python3 /home/pi/sunset/sunset-sky.py
+# About 60 to 90 frames read from the share, once an evening; it never uses the camera.
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=600

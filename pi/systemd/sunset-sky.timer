@@ -1,0 +1,8 @@
+[Unit]
+Description=Project Sunset sky score: check every 15 minutes (scores each sunset once, 40 min after it)
+
+[Timer]
+OnCalendar=*:07/15
+
+[Install]
+WantedBy=timers.target

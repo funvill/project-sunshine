@@ -34,7 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOSTS_FILE = os.path.join(HERE, "camera_check.hosts")
 SLOT_S = 300
 UNITS = ["sunset-capture.timer", "sunset-dense.timer", "sunset-capture2.timer", "sunset-dense2.timer",
-         "sunset-sync.timer", "sunset-guard.timer", "sunset-diag.service", "sunset-ups.service"]
+         "sunset-sync.timer", "sunset-guard.timer", "sunset-sky.timer", "sunset-diag.service", "sunset-ups.service"]
 
 # Runs on the Pi. Prints sections that parse() splits on "### name".
 REMOTE = r"""
