@@ -1,6 +1,6 @@
 {
  "camera": "cm4wide",
- "generated_utc": "2026-11-20T07:12:33Z",
+ "generated_utc": "2026-11-23T01:29:24Z",
  "days": [
   {
    "date": "2026-11-12",
@@ -331,6 +331,101 @@
    },
    "weather": null,
    "thumbnail": "thumbs/cm4wide/2026-11-19.jpg",
+   "thumbnail_note": null,
+   "camera": "cm4wide"
+  },
+  {
+   "date": "2026-11-20",
+   "weekday": "Fri",
+   "frames": {
+    "regular": 288,
+    "expected": 288,
+    "missing_slots": 0,
+    "dense": 92,
+    "bracket_pairs": 90,
+    "night": 163,
+    "largest_gap_min": 5.0
+   },
+   "pi": {
+    "cpu_max_c": 44.8,
+    "reboots": 0,
+    "throttled": [],
+    "outbox_max_files": 76,
+    "wifi_dbm_median": -39
+   },
+   "setup_ids": [
+    "cm4-window-3",
+    "cm4-window-4"
+   ],
+   "events": [
+    "Home Assistant restarted at 21:46:16 UTC (2:46 pm)",
+    "the CM4's wired Ethernet unplugged",
+    "runtime test on `sunshine`, stopped early",
+    "power-cut test on `sunshine`",
+    "foam hood fitted",
+    "no weather forecast from 04:07 UTC Nov 17 (9:07 pm Nov 16) to 18:03 UTC Nov 20 (11:03 am)",
+    "`cm4city` slot 07:25:30 UTC taken 23 s late; no frame lost"
+   ],
+   "sunset_local": "17:24",
+   "sunset_bearing_deg": 240,
+   "sky": {
+    "score": 23,
+    "label": "some colour",
+    "warm_sky_percent": 4.36
+   },
+   "weather": {
+    "cloud_pct": 42,
+    "low_pct": 22,
+    "mid_pct": 42,
+    "high_pct": 2,
+    "visibility_km": 17,
+    "precip_mm": 0.0,
+    "fetched_utc": "2026-11-21T00:07Z"
+   },
+   "thumbnail": "thumbs/cm4wide/2026-11-20.jpg",
+   "thumbnail_note": null,
+   "camera": "cm4wide"
+  },
+  {
+   "date": "2026-11-21",
+   "weekday": "Sat",
+   "frames": {
+    "regular": 288,
+    "expected": 288,
+    "missing_slots": 0,
+    "dense": 93,
+    "bracket_pairs": 90,
+    "night": 166,
+    "largest_gap_min": 5.0
+   },
+   "pi": {
+    "cpu_max_c": 38.0,
+    "reboots": 0,
+    "throttled": [],
+    "outbox_max_files": 90,
+    "wifi_dbm_median": -44
+   },
+   "setup_ids": [
+    "cm4-window-4"
+   ],
+   "events": [],
+   "sunset_local": "17:23",
+   "sunset_bearing_deg": 239,
+   "sky": {
+    "score": 7,
+    "label": "grey",
+    "warm_sky_percent": 1.38
+   },
+   "weather": {
+    "cloud_pct": 100,
+    "low_pct": 0,
+    "mid_pct": 100,
+    "high_pct": 6,
+    "visibility_km": 23,
+    "precip_mm": 0.0,
+    "fetched_utc": "2026-11-22T00:07Z"
+   },
+   "thumbnail": "thumbs/cm4wide/2026-11-21.jpg",
    "thumbnail_note": null,
    "camera": "cm4wide"
   }
