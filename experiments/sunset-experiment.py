@@ -264,6 +264,11 @@ def camera_index(camera, listing):
     return re.match(r"^\s*(\d+) : ", lines[0]).group(1)
 
 
+def second_camera_on():
+    """The second camera's dense frames run at :30 each minute while this timer is active."""
+    return read_text(["systemctl", "is-active", "sunset-dense2.timer"]) == "active"
+
+
 def camera_busy():
     for name in ("rpicam-vid", "rpicam-still"):
         if subprocess.run(["pgrep", "-x", name], capture_output=True).returncode == 0:
@@ -271,7 +276,8 @@ def camera_busy():
     if read_text(["systemctl", "is-active", "sunset-diag.service"]) == "active":
         return True  # someone may be looking at the page; the stream comes first
     return any(read_text(["systemctl", "is-active", unit]) in ("active", "activating")
-               for unit in ("sunset-capture.service", "sunset-dense.service"))
+               for unit in ("sunset-capture.service", "sunset-dense.service",
+                            "sunset-capture2.service", "sunset-dense2.service"))
 
 
 def load_site_env():
@@ -335,9 +341,7 @@ class Run:
             self.record(utc=stamp, label=shot.label, status=f"skipped: SD low ({low})")
             return
         est = estimate_s(shot.shutter_us)
-        # Both cameras' dense frames start at :00 from one service, one after the other;
-        # camera_busy() sees that service while either is shooting.
-        period = 60
+        period = 30 if second_camera_on() else 60
         waited = time.time()
         while True:
             if not clear_to_start(time.time(), est, period) or camera_busy():

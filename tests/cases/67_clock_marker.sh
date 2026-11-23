@@ -18,7 +18,7 @@ check "says so in its log" grep -q 'clock trusted at [0-9]*: kept for the captur
 reboot_pi; export STUB_NTP=no; sleep 1
 capture; rc=$?
 check "first capture after the reboot runs without NTP" test "$rc" = 0 -a "$(count 'wide_*Z.jpg')" = 2
-check "logged" grep -q 'clock trusted without NTP: netwatch rebooted [0-9]* s ago' "$LOG_FILE"
+check "logged" grep -q 'clock trusted without NTP: the guard rebooted [0-9]* s ago' "$LOG_FILE"
 check "marker consumed" test ! -e "$marker"
 sleep 1; capture
 check "later captures in the same boot keep going" test "$(count 'wide_*Z.jpg')" = 3

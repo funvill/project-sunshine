@@ -1,16 +1,12 @@
 [Unit]
-Description=Project Sunset capture, both cameras
+Description=Project Sunset capture
 
 [Service]
 Type=oneshot
 User=pi
 WorkingDirectory=/home/pi/sunset
 EnvironmentFile=-/home/pi/sunset/sunset.env
-# The first camera, then the second (CAM1) with sunset2.env over sunset.env. The capture lock
-# keeps them apart anyway. Without sunset2.env the second line does nothing (a one-camera Pi).
-# "-": a failed first camera must not stop the second (systemd stops at the first failing line).
-ExecStart=-/home/pi/sunset/sunset-capture.sh
-ExecStart=-/home/pi/sunset/sunset-capture.sh --env /home/pi/sunset/sunset2.env
-# Day shot + night shot per camera, each bounded by CAPTURE_TIMEOUT_S (60 s): 300 s per camera.
+ExecStart=/home/pi/sunset/sunset-capture.sh
+# Day shot + night shot, each bounded by CAPTURE_TIMEOUT_S (60 s).
 # Comments must stay on their own line: systemd ignores a setting with one after it.
-TimeoutStartSec=600
+TimeoutStartSec=300

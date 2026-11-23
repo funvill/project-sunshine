@@ -86,8 +86,10 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   - Both loose behind the glass with the **foam hood fitted** (Nov 20). The keyed mount is waiting on
     Steven's 3D printer (#35).
 - **Capture:** a frame every **5 minutes, 24/7**, plus **1 a minute from 60 min before sunset to the
-  sun at -9°** (`Capture.schedule: "dense"`). One capture timer and one dense timer take both cameras,
-  `cm4wide` then `cm4city`, sharing the capture lock. Dark slots add a long night frame (`_night`;
+  sun at -9°** (`Capture.schedule: "dense"`). Each camera has its own capture and dense timers,
+  `cm4city` (`sunset-capture2`/`sunset-dense2`) 30 s after `cm4wide`, sharing the capture lock. (One
+  combined run, `cm4city` straight after `cm4wide`, made `cm4wide` fail about one slot in three; rolled
+  back 2026-11-23.) Dark slots add a long night frame (`_night`;
   `cm4wide`: `NIGHT_SHUTTER_US=8000000`, gain 1, `NIGHT_AWB=2.20,2.80`). **JPEG + JSON only**, no DNGs
   (Steven, 2026-11-16; the DNG code was removed 2026-11-22). About 3.3 GB a day for both cameras.
 - **Sunset bracket (option E), kept (Steven, 2026-11-22):** `BRACKET=1` adds ev+0 and ev-2 after every frame

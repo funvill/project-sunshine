@@ -52,7 +52,8 @@ class Cfg:
     low_cell_v = 3.45
     warn_temp = 40
     pause = True
-    pause_units = ["sunset-capture.timer", "sunset-dense.timer", "sunset-sync.timer"]
+    pause_units = ["sunset-capture.timer", "sunset-dense.timer", "sunset-capture2.timer",
+                   "sunset-dense2.timer", "sunset-sync.timer"]
     pause_flag = ""
 
 
@@ -193,12 +194,12 @@ class Events(unittest.TestCase):
         self.assertEqual(calls[2], ["systemctl", "start"] + Cfg.pause_units)
 
     def test_default_units_cover_both_cameras_and_the_sync(self):
-        # One capture and one dense timer take both cameras (no *2 timers since batch B).
-        self.assertEqual(ups.PAUSE_UNITS.split(),
-                         ["sunset-capture.timer", "sunset-dense.timer", "sunset-sync.timer"])
+        for u in ("sunset-capture.timer", "sunset-dense.timer", "sunset-capture2.timer",
+                  "sunset-dense2.timer", "sunset-sync.timer"):
+            self.assertIn(u, ups.PAUSE_UNITS.split())
 
     def test_resume_starts_only_what_the_pause_stopped(self):
-        running = {"sunset-capture.timer", "sunset-sync.timer"}  # say the dense timer is off
+        running = {"sunset-capture.timer", "sunset-sync.timer"}  # say the second camera is off
         m, lines, calls, _ = monitor(running=running)
         m.poll(reply("battery", vin=0.0, cells=(3.40, 3.40, 3.40), pct=5))
         self.assertEqual(calls[0], ["systemctl", "stop", "sunset-capture.timer", "sunset-sync.timer"])
@@ -291,7 +292,7 @@ class Events(unittest.TestCase):
 class Diag(unittest.TestCase):
     """The diag page stops the camera timers while it is on and starts them when it ends."""
 
-    CAMS = ["sunset-capture.timer", "sunset-dense.timer"]
+    CAMS = ["sunset-capture.timer", "sunset-dense.timer", "sunset-capture2.timer", "sunset-dense2.timer"]
 
     def test_diag_ending_during_a_pause_hands_its_timers_to_the_resume(self):
         # Diag stopped the cameras, so the pause stopped only the sync. Diag ended while paused and

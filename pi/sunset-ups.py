@@ -20,7 +20,7 @@ Keeps SD-card writes to a minimum (decided 2026-11-16, issue #29):
 
 Low battery (on battery and a cell below UPS_LOW_CELL_V; the board's charge % stays at 100 on
 battery, so it is not used):
-stops the capture, dense and sync timers (both cameras; stop, not disable; only those that
+stops the capture, dense and sync timers of both cameras (stop, not disable; only those that
 were running) and flushes the disks, then starts the same ones again if mains comes back. If it doesn't, the UPS cuts its own output and the
 Pi boots when mains returns, with the timers still enabled. UPS_PAUSE=0 only logs.
 
@@ -60,10 +60,10 @@ DEADBANDS = {
 EXACT = ("source", "fw", "ups_state", "chg_state", "present", "flags")
 
 # The diag page (sunset-diag.service) stops these while it is on and starts them when it ends.
-# Each takes both cameras, one after the other.
 DIAG_UNIT = "sunset-diag.service"
-DIAG_STOPS = ("sunset-capture.timer", "sunset-dense.timer")
-PAUSE_UNITS = "sunset-capture.timer sunset-dense.timer sunset-sync.timer"
+DIAG_STOPS = ("sunset-capture.timer", "sunset-dense.timer", "sunset-capture2.timer", "sunset-dense2.timer")
+PAUSE_UNITS = ("sunset-capture.timer sunset-dense.timer sunset-capture2.timer "
+               "sunset-dense2.timer sunset-sync.timer")
 
 
 def env(name, default, cast=str):
