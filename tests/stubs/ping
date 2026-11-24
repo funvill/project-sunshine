@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
-# Stub: succeeds if $STUB_PING is "ok", fails otherwise. Records how it was called.
+# Stub: succeeds if $STUB_PING is "ok", fails otherwise, and always fails through an interface
+# (-I) named in $STUB_PING_DOWN (space-separated). Records how it was called.
 echo "ping $*" >> "${STUB_CALLS:-/dev/null}"
+args=" $* "
+for i in ${STUB_PING_DOWN:-}; do [[ "$args" == *" -I $i "* ]] && exit 1; done
 [[ "${STUB_PING:-ok}" == ok ]]

@@ -49,7 +49,7 @@ for v in $(script_vars); do
   grep -qx "$v" <(example_keys) || unlisted="$unlisted $v"
 done
 check "no setting is missing from the example (missing:${unlisted:- none})" test -z "$unlisted"
-for v in REQUIRE_TIME_SYNC CAPTURE_TIMEOUT_S NETWATCH NETWATCH_RESET_MIN NETWATCH_REBOOT_MIN NETWATCH_REBOOT_GAP_H NETWATCH_IFACE NETWATCH_TARGET; do
+for v in REQUIRE_TIME_SYNC CAPTURE_TIMEOUT_S NETWATCH NETWATCH_RESET_MIN NETWATCH_REBOOT_MIN NETWATCH_REBOOT_GAP_H NETWATCH_IFACE NETWATCH_WIRED NETWATCH_TARGET; do
   check "example lists $v" grep -qx "$v" <(example_keys)
 done
 stale=""

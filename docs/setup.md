@@ -119,10 +119,12 @@ clears transient experiment timers (`exp-*`).
 - **Network (`NETWATCH=1`)**, for a Pi on a USB Wi-Fi dongle such as the CM4 (on 2026-11-13 its dongle
   dropped off and didn't rejoin until a power-cycle). It pings the default gateway through `wlan0`.
   After 10 minutes without an answer it unbinds and rebinds the dongle's USB device, once per outage (a
-  software replug: the dongle rejoined in 6 s). After 30 minutes it reboots. It watches `wlan0` only:
-  if the Wi-Fi is gone it reboots even when wired Ethernet is up (it did on 2026-11-20, while the new
-  dongle had no driver). Tune with `NETWATCH_IFACE`, `NETWATCH_RESET_MIN`, `NETWATCH_REBOOT_MIN`,
-  `NETWATCH_REBOOT_GAP_H`.
+  software replug: the dongle rejoined in 6 s). After 30 minutes it reboots. If `wlan0` gets no answer
+  it tries again through `eth0` (`NETWATCH_WIRED`, space-separated, empty for none), and an answer
+  through either counts as online: with the cable working, a Wi-Fi outage is left alone. Until
+  2026-11-24 it watched `wlan0` only, and rebooted on 2026-11-20 with Ethernet up while the new dongle
+  had no driver. Tune with `NETWATCH_IFACE`, `NETWATCH_WIRED`, `NETWATCH_RESET_MIN`,
+  `NETWATCH_REBOOT_MIN`, `NETWATCH_REBOOT_GAP_H`.
 - **Cameras (`CAMWATCH=1`).** From 14:05 UTC 2026-11-19 both CM4 cameras failed captures on and off
   ("Failed to queue buffer for Unicam Image", "Device timeout") for 16 hours, until a reboot cleared
   it. It reads `capture.log` and counts, per camera, failed captures (5-minute, dense and night; not

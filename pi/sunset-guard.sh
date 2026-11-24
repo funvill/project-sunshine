@@ -6,7 +6,10 @@
 # Network (NETWATCH=1): brings the Pi back onto the network when its Wi-Fi hangs. On 2026-11-13
 # the CM4's USB dongle dropped off and never rejoined until a power-cycle (1 h 45 min, frames
 # piled up on the Pi).
-#   - pings the default gateway through NETWATCH_IFACE (wlan0)
+#   - pings the default gateway through NETWATCH_IFACE (wlan0); if that fails, through each of
+#     NETWATCH_WIRED (default eth0, "" for none). Reachable through any of them counts as online, so
+#     a Wi-Fi outage while the wired link works is left alone (the CM4 is on Ethernet from 2026-11-24,
+#     the dongle kept as a fallback route). A Pi with no cable on eth0 behaves as before.
 #   - down 10 min: unbinds and rebinds the interface's USB device, once per outage (a software replug)
 #   - down 30 min: reboots, at most once every 6 hours, so a router outage can't cause a reboot loop.
 #     A reboot costs about one capture and clears transient experiment timers (exp-*).
@@ -70,6 +73,12 @@ net_online() {
   [[ -n "$gw" ]] && ping -c 3 -W 3 -I "$1" "$gw" >/dev/null 2>&1
 }
 
+net_wired_online() {
+  local i
+  for i in ${NETWATCH_WIRED-eth0}; do net_online "$i" && return 0; done
+  return 1
+}
+
 net_reset_dongle() { # net_reset_dongle <iface> <minutes down>
   local sysfs="${NETWATCH_SYSFS:-/sys}" dev usb
   dev="$(cd "$sysfs/class/net/$1/device" 2>/dev/null && pwd -P)" || { net_log "reset skipped: no device for $1"; return; }
@@ -85,7 +94,7 @@ check_network() {
   local iface="${NETWATCH_IFACE:-wlan0}" state="${NETWATCH_STATE:-/run/sunset-netwatch}"
   local mark="${NETWATCH_REBOOT_MARK:-$(dirname "$NET_LOG")/.netwatch-reboot}"
   local uptime="${NETWATCH_UPTIME:-$PROC_UPTIME}" since reset_done down _
-  if net_online "$iface"; then
+  if net_online "$iface" || net_wired_online; then
     if [[ -f "$state" ]]; then
       read -r since _ < "$state"
       net_log "network back after $(( (uptime - since) / 60 )) min"

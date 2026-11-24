@@ -72,9 +72,10 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
 ## The system now
 - **One Pi: a CM4 (`sunshine`, user `sunshine`, 8 GB, 32 GB eMMC) on a MyPi Industrial IoT Integrator
   Board XT**, Raspberry Pi OS Lite Bookworm 32-bit userland on the 64-bit kernel 6.12.109, rpicam-apps 1.9.0.
-  On Wi-Fi only, through an AIC8800D80 USB dongle on 5 GHz (out-of-tree driver, `docs/setup.md`); addresses
-  only in `tools/camera_check.hosts`, whose `key=` word lets the Wi-Fi address use the wired one's host key.
-  **Wired Ethernet before Dec 21** is still wanted.
+  **On wired Ethernet for good from 2026-11-24 05:11 UTC** (`eth0`, 1 Gbps, the default route and the NAS);
+  the AIC8800D80 USB Wi-Fi dongle on 5 GHz (out-of-tree driver, `docs/setup.md`) stays up as a fallback
+  route. Addresses only in `tools/camera_check.hosts`, whose `key=` word lets the Wi-Fi address use the
+  wired one's host key.
 - **Two cameras, both IMX477, chosen by port ID** (`CAMERA=i2c@0` / `i2c@1`; with both ports on, rpicam
   calls CAM1 camera 0; `install.sh --cm4-two` writes both overlays):
   - **CAM0 `cm4wide`, the official five-year series:** Arducam B0240E with the 3.2 mm lens, upright
@@ -114,7 +115,8 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
   not a power cut. Capture refuses to run until NTP has synced once since boot (`SKIPPED`), then keeps going
   through later NTP outages. A gap is preferred to frames with a wrong UTC name.
 - **Recovery:** systemd's hardware watchdog (15 s) reboots a hard freeze. One watchdog unit
-  (`sunset-guard`; `NETWATCH=1`, `CAMWATCH=1`) resets the Wi-Fi dongle after 10 min without the gateway and
+  (`sunset-guard`; `NETWATCH=1`, `CAMWATCH=1`) resets the Wi-Fi dongle after 10 min without the gateway
+  over both `wlan0` and `eth0` (`NETWATCH_WIRED`; a Wi-Fi outage with the cable working is left alone) and
   reboots after 30, and reboots when one camera fails 3 captures within 60 minutes; at most one reboot every
   6 h. `sunset-kernlog.service` keeps kernel messages in `~/sunset/kernel.log`. All LEDs are off
   (`90-sunset-leds.rules`): they showed in the glass.
@@ -157,7 +159,7 @@ The one exception is `reports/thumbs/`: 100 x 100 crops of the sunset point, tow
 - How the long film handles gaps is decided when it is edited.
 
 ## Open items
-- Before Dec 21: settings freeze (Dec 14, `PROFILE_ID`), wired Ethernet, keyed mount (#35) after the FOV and
+- Before Dec 21: settings freeze (Dec 14, `PROFILE_ID`), keyed mount (#35) after the FOV and
   edges are measured (#4, experiment 22), RTC coin cell, the 16 mm spacer.
 - Fog detection alerts (#33). Sun protection for a telephoto lens (#32: software can't protect the sensor;
   an iris or ND filter is Steven's call). Long-film post-processing (#20, #21).
