@@ -35,10 +35,10 @@ ha_out "a throttled probe that failed (null) is skipped" ok "$SH" wide
 
 section "camera health: limits"
 fresh_health
-hframe wide 20261105T175500Z '"0x0"' 75.0 50 80.0 400000 aaa
+hframe wide 20261105T175500Z '"0x0"' 75.0 150 80.0 400000 aaa
 ha_out "exactly at every limit is fine" ok "$SH" wide
-hframe wide 20261105T175500Z '"0x0"' 78.4 51 80.1 399999 aaa
-ha_out "just past every limit" "temp=78.4 outbox=51 disk=80.1% small_jpeg=399999" "$SH" wide
+hframe wide 20261105T175500Z '"0x0"' 78.4 151 80.1 399999 aaa
+ha_out "just past every limit" "temp=78.4 outbox=151 disk=80.1% small_jpeg=399999" "$SH" wide
 hframe wide 20261105T175500Z '"0x0"' null 2 null 500000 aaa
 ha_out "null temperature and disk are skipped" ok "$SH" wide
 hframe wide 20261105T175500Z '"0x0"' 61.0 2 40.0 500000 aaa

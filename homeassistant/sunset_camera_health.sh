@@ -3,7 +3,7 @@
 # pi/sunset-meta.py writes). Prints "ok", or the problems separated by spaces:
 #   undervoltage freq_capped throttled soft_temp_limit   throttled bits 0-3 right now (vcgencmd get_throttled)
 #   temp=N       cpu_temp_c above TEMP_LIMIT_C (default 75; the Pi 3 B+ soft limit is 60, the hard one 80)
-#   outbox=N     more than OUTBOX_MAX (default 50) finished frames waiting on the Pi for the sync
+#   outbox=N     more than OUTBOX_MAX (default 150) files waiting on the Pi for the sync, both cameras together
 #   disk=N%      outbox disk use above DISK_MAX_PCT (default 80; the Pi skips night frames at 95)
 #   small_jpeg=N the JPEG on the NAS is under JPEG_MIN_BYTES (default 400000, an estimate to tune)
 #   repeat_frame the newest JPEG has the same checksum as the one before it of its kind (a frozen readout)
@@ -26,7 +26,7 @@ root, cam = sys.argv[1], sys.argv[2]
 env = os.environ.get
 now = float(env("SUNSET_NOW") or time.time())
 temp_limit = float(env("TEMP_LIMIT_C") or 75)
-outbox_max = float(env("OUTBOX_MAX") or 50)
+outbox_max = float(env("OUTBOX_MAX") or 150)
 disk_max = float(env("DISK_MAX_PCT") or 80)
 jpeg_min = int(env("JPEG_MIN_BYTES") or 400000)
 
