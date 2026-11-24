@@ -7,7 +7,7 @@ net_env() {
   fresh_env
   export NETWATCH=1 NETWATCH_STATE="$W/run" NETWATCH_LOG="$W/netwatch.log" NETWATCH_SYSFS="$W/sys"
   export NETWATCH_REBOOT_MARK="$W/.netwatch-reboot" NETWATCH_SETTLE_S=0
-  unset NETWATCH_IFACE NETWATCH_TARGET STUB_GATEWAY CAMWATCH
+  unset NETWATCH_IFACE NETWATCH_TARGET NETWATCH_WIRED STUB_GATEWAY STUB_PING_DOWN CAMWATCH
   export STUB_PING=ok
   mkdir -p "$W/sys/devices/usb1/1-1/1-1.3/1-1.3:1.0" "$W/sys/class/net/wlan0" "$W/sys/bus/usb/drivers/usb"
   # Git Bash copies instead of linking unless asked for a native link; ignored on Linux.
@@ -53,6 +53,24 @@ net_env; export STUB_GATEWAY="" STUB_PING=ok
 netwatch 1000; netwatch 1610
 check "resets when there is no default route" grep -qx '1-1.3' "$W/sys/bus/usb/drivers/usb/unbind"
 
+section "netwatch: Wi-Fi down while Ethernet works is left alone"
+# The CM4 has been on wired Ethernet since 2026-11-24, with the dongle as a fallback route.
+net_env; export STUB_PING_DOWN=wlan0
+netwatch 1000; netwatch 1610; netwatch 5810
+check "tries the gateway through eth0" grep -q 'ping .*-I eth0.* 192.0.2.1' "$STUB_CALLS"
+check "no dongle reset" test ! -s "$W/sys/bus/usb/drivers/usb/unbind"
+check "no reboot" sh -c "! grep -q reboot '$STUB_CALLS'"
+check "writes nothing to the SD" test ! -e "$NETWATCH_LOG"
+net_env; export STUB_PING_DOWN="wlan0 eth0"
+netwatch 1000; netwatch 1610
+check "both down: resets the dongle" grep -qx '1-1.3' "$W/sys/bus/usb/drivers/usb/unbind"
+net_env; export STUB_PING_DOWN="wlan0 eth1" NETWATCH_WIRED="eth1 eth0"
+netwatch 1000; netwatch 1610
+check "any of NETWATCH_WIRED will do" test ! -s "$W/sys/bus/usb/drivers/usb/unbind"
+net_env; export STUB_PING_DOWN=wlan0 NETWATCH_WIRED=""
+netwatch 1000; netwatch 1610
+check "NETWATCH_WIRED empty: Wi-Fi alone counts" grep -qx '1-1.3' "$W/sys/bus/usb/drivers/usb/unbind"
+
 section "netwatch: reboots after 30 minutes, at most every 6 hours"
 net_env; export STUB_PING=fail
 netwatch 4000; netwatch 4000; netwatch 5810
@@ -65,7 +83,7 @@ check "no second reboot within 6 hours" sh -c "! grep -q 'systemctl reboot' '$ST
 touch -d '7 hours ago' "$NETWATCH_REBOOT_MARK"; netwatch 5900
 check "reboots again after 6 hours" grep -q 'systemctl reboot' "$STUB_CALLS"
 
-unset NETWATCH NETWATCH_STATE NETWATCH_LOG NETWATCH_SYSFS NETWATCH_REBOOT_MARK NETWATCH_SETTLE_S STUB_PING STUB_GATEWAY
+unset NETWATCH NETWATCH_STATE NETWATCH_LOG NETWATCH_SYSFS NETWATCH_REBOOT_MARK NETWATCH_SETTLE_S NETWATCH_WIRED STUB_PING STUB_PING_DOWN STUB_GATEWAY
 
 # Camera check (CAMWATCH=1): reboots when a camera keeps failing (both CM4 cameras, 14:05 UTC 2026-11-19
 # to the reboot at 06:37 UTC 2026-11-20; a reboot cleared it). Times are fixed with CAMWATCH_NOW
@@ -233,5 +251,5 @@ check "install.sh installs the units" grep -q 'sunset-guard.service sunset-guard
 check "install.sh enables the timer (the script does nothing without NETWATCH=1 or CAMWATCH=1)" grep -q 'enable --now sunset-guard.timer' "$SRC/install.sh"
 check "the old watchdog units are gone" test ! -e "$SRC/systemd/sunset-netwatch.timer" -a ! -e "$SRC/systemd/sunset-camwatch.timer"
 check "the CM4's reference env turns the camera check on" grep -qx 'CAMWATCH=1' "$SRC/hosts/cm4.env"
-unset NETWATCH NETWATCH_STATE NETWATCH_LOG NETWATCH_SYSFS NETWATCH_REBOOT_MARK NETWATCH_SETTLE_S STUB_PING STUB_GATEWAY
+unset NETWATCH NETWATCH_STATE NETWATCH_LOG NETWATCH_SYSFS NETWATCH_REBOOT_MARK NETWATCH_SETTLE_S NETWATCH_WIRED STUB_PING STUB_PING_DOWN STUB_GATEWAY
 unset CAMWATCH CAMWATCH_LOG CAMWATCH_CAPTURE_LOG CAMWATCH_REBOOT_MARK CAMWATCH_STATE CAMWATCH_NOW CAMWATCH_UPTIME CAMWATCH_FAILS CAMWATCH_WINDOW_MIN STUB_NTP
