@@ -37,9 +37,9 @@ command_line:
       command_timeout: 30
 
   # ---- Camera health from the newest frame's JSON (issue #22): "ok", or what is wrong ----
-  # Limits (undervoltage and throttle bits 0-3, 75 C, 50 frames waiting on the Pi, 80% disk, 400 kB JPEG)
+  # Limits (undervoltage and throttle bits 0-3, 75 C, 150 files waiting on the Pi, 80% disk, 400 kB JPEG)
   # are defaults at the top of sunset_camera_health.sh. To change one for a camera, put it before
-  # the command, for example: command: "OUTBOX_MAX=100 sh /config/sunset/sunset_camera_health.sh cm4wide"
+  # the command, for example: command: "OUTBOX_MAX=200 sh /config/sunset/sunset_camera_health.sh cm4wide"
   - sensor:
       name: Sunset CM4 camera health
       unique_id: sunset_cm4_camera_health
