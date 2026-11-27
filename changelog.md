@@ -2,6 +2,10 @@
 
 The history of Project Sunset, newest first: every change (code, settings, hardware, including changes made only on a Pi, marked **Pi**) and every event that affects the record (outages and lost frames, power cuts, camera moves, weather that matters, good sunsets, solstices, the moon, milestones). Dates are Vancouver local time; times are given in UTC and Vancouver. Decisions and their reasons are in `CLAUDE.md`.
 
+## 2026-11-26
+
+- **Good sunset: sky score 84 (colourful)** on `cm4wide`, best at 00:12 UTC Nov 27 (4:12 pm), 17.1% warm sky, 60 frames scored. The day's Instagram video was built with `tools/build_video.py` (fused, from 07:30); nothing posted.
+
 ## 2026-11-23
 
 - **Pi: the CM4 is on wired Ethernet for good** (Steven). `eth0` link up at 05:11 UTC Nov 24 (10:11 pm), 1 Gbps full duplex, without a reboot. The default route and the route to the NAS now use `eth0` (metric 100); the Wi-Fi dongle stays up as a fallback route (`wlan0`, metric 600). The board's second port (`eth1`, USB) has no cable. No frames lost: the camera check at 05:38 UTC (10:38 pm) found 144/144 slots on both cameras over 12 hours, 149 syncs with none failed, and every sync after the switch fine. The network watchdog watched `wlan0` only, so a Wi-Fi outage of 10 or 30 minutes would have reset the dongle or rebooted the Pi with Ethernet working. **Changed (Steven):** `sunset-guard.sh` now tries the gateway through `eth0` when `wlan0` gets no answer (`NETWATCH_WIRED`, default `eth0`, empty for none) and acts only when neither answers. **Pi:** deployed at about 06:06 UTC Nov 24 (11:06 pm), old copy in `~/sunset/.bak-20261124-guard/`; no settings change (the default `eth0` applies). Tried live as root with a test state file: with `wlan0` it answered as before, and with the Wi-Fi interface swapped for one that doesn't exist it fell through to `eth0` and counted as online.
