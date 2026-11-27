@@ -1,6 +1,6 @@
 {
  "camera": "cm4wide",
- "generated_utc": "2026-11-23T01:29:24Z",
+ "generated_utc": "2026-11-27T01:27:20Z",
  "days": [
   {
    "date": "2026-11-12",
@@ -426,6 +426,178 @@
     "fetched_utc": "2026-11-22T00:07Z"
    },
    "thumbnail": "thumbs/cm4wide/2026-11-21.jpg",
+   "thumbnail_note": null,
+   "camera": "cm4wide"
+  },
+  {
+   "date": "2026-11-22",
+   "weekday": "Sun",
+   "frames": {
+    "regular": 251,
+    "expected": 288,
+    "missing_slots": 37,
+    "dense": 87,
+    "bracket_pairs": 79,
+    "night": 169,
+    "largest_gap_min": 20.0
+   },
+   "pi": {
+    "cpu_max_c": 39.4,
+    "reboots": 2,
+    "throttled": [],
+    "outbox_max_files": 88,
+    "wifi_dbm_median": -44
+   },
+   "setup_ids": [
+    "cm4-window-4"
+   ],
+   "events": [],
+   "sunset_local": "17:22",
+   "sunset_bearing_deg": 239,
+   "sky": {
+    "score": 3,
+    "label": "grey",
+    "warm_sky_percent": 0.86
+   },
+   "weather": {
+    "cloud_pct": 72,
+    "low_pct": 72,
+    "mid_pct": 0,
+    "high_pct": 0,
+    "visibility_km": 24,
+    "precip_mm": 0.0,
+    "fetched_utc": "2026-11-23T00:07Z"
+   },
+   "thumbnail": "thumbs/cm4wide/2026-11-22.jpg",
+   "thumbnail_note": null,
+   "camera": "cm4wide"
+  },
+  {
+   "date": "2026-11-23",
+   "weekday": "Mon",
+   "frames": {
+    "regular": 288,
+    "expected": 288,
+    "missing_slots": 0,
+    "dense": 93,
+    "bracket_pairs": 90,
+    "night": 162,
+    "largest_gap_min": 5.0
+   },
+   "pi": {
+    "cpu_max_c": 38.0,
+    "reboots": 0,
+    "throttled": [],
+    "outbox_max_files": 76,
+    "wifi_dbm_median": -44
+   },
+   "setup_ids": [
+    "cm4-window-4"
+   ],
+   "events": [],
+   "sunset_local": "17:21",
+   "sunset_bearing_deg": 239,
+   "sky": {
+    "score": 1,
+    "label": "grey",
+    "warm_sky_percent": 0.1
+   },
+   "weather": {
+    "cloud_pct": 100,
+    "low_pct": 28,
+    "mid_pct": 100,
+    "high_pct": 100,
+    "visibility_km": 32,
+    "precip_mm": 0.0,
+    "fetched_utc": "2026-11-24T00:07Z"
+   },
+   "thumbnail": "thumbs/cm4wide/2026-11-23.jpg",
+   "thumbnail_note": null,
+   "camera": "cm4wide"
+  },
+  {
+   "date": "2026-11-24",
+   "weekday": "Tue",
+   "frames": {
+    "regular": 288,
+    "expected": 288,
+    "missing_slots": 0,
+    "dense": 93,
+    "bracket_pairs": 90,
+    "night": 162,
+    "largest_gap_min": 5.0
+   },
+   "pi": {
+    "cpu_max_c": 41.4,
+    "reboots": 0,
+    "throttled": [],
+    "outbox_max_files": 76,
+    "wifi_dbm_median": -46
+   },
+   "setup_ids": [
+    "cm4-window-4"
+   ],
+   "events": [],
+   "sunset_local": "17:20",
+   "sunset_bearing_deg": 238,
+   "sky": {
+    "score": 3,
+    "label": "grey",
+    "warm_sky_percent": 0.95
+   },
+   "weather": {
+    "cloud_pct": 100,
+    "low_pct": 100,
+    "mid_pct": 100,
+    "high_pct": 100,
+    "visibility_km": 31,
+    "precip_mm": 0.0,
+    "fetched_utc": "2026-11-25T00:07Z"
+   },
+   "thumbnail": "thumbs/cm4wide/2026-11-24.jpg",
+   "thumbnail_note": null,
+   "camera": "cm4wide"
+  },
+  {
+   "date": "2026-11-25",
+   "weekday": "Wed",
+   "frames": {
+    "regular": 288,
+    "expected": 288,
+    "missing_slots": 0,
+    "dense": 93,
+    "bracket_pairs": 90,
+    "night": 138,
+    "largest_gap_min": 5.0
+   },
+   "pi": {
+    "cpu_max_c": 41.9,
+    "reboots": 0,
+    "throttled": [],
+    "outbox_max_files": 76,
+    "wifi_dbm_median": -47
+   },
+   "setup_ids": [
+    "cm4-window-4"
+   ],
+   "events": [],
+   "sunset_local": "17:19",
+   "sunset_bearing_deg": 238,
+   "sky": {
+    "score": 1,
+    "label": "grey",
+    "warm_sky_percent": 0.1
+   },
+   "weather": {
+    "cloud_pct": 100,
+    "low_pct": 100,
+    "mid_pct": 100,
+    "high_pct": 100,
+    "visibility_km": 5,
+    "precip_mm": 2.5,
+    "fetched_utc": "2026-11-26T00:07Z"
+   },
+   "thumbnail": "thumbs/cm4wide/2026-11-25.jpg",
    "thumbnail_note": null,
    "camera": "cm4wide"
   }
